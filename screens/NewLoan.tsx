@@ -11,6 +11,9 @@ interface NewLoanProps {
 
 export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelectedClientId }) => {
   const [clientId, setClientId] = useState<string | null>(preSelectedClientId);
+  const [frequency, setFrequency] = useState('Mensal');
+  const [skipSaturday, setSkipSaturday] = useState(false);
+  const [skipSunday, setSkipSunday] = useState(false);
   const [amount, setAmount] = useState('5000');
   const [interestRate, setInterestRate] = useState('5.5');
   const [installments, setInstallments] = useState(12);
@@ -69,10 +72,15 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   // Calculations
   const principal = parseFloat(amount.replace(/\./g, '').replace(',', '.')) || 0;
   const rate = parseFloat(interestRate) || 0;
-  // Simple Interest for estimation: Total = P * (1 + (r/100) * (months/12) ? No, usually monthly rate.
-  // Let's assume Simple Monthly Interest for visual preview: Total = P + (P * r/100 * months)
-  const totalInterest = principal * (rate / 100) * installments;
+  
+  // Nova lógica: Juros simples aplicados uma única vez sobre o principal
+  // juros = valor_principal × (taxa_juros / 100)
+  const totalInterest = principal * (rate / 100);
+  
+  // total = valor_principal + juros
   const totalAmount = principal + totalInterest;
+  
+  // valor_parcela = total / numero_parcelas
   const monthlyPayment = installments > 0 ? totalAmount / installments : 0;
 
   const handleSave = async () => {
@@ -93,6 +101,9 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
             installment_value: monthlyPayment,
             due_date: dueDate,
             status: 'active',
+            frequency: frequency,
+            skip_saturday: skipSaturday,
+            skip_sunday: skipSunday,
             progress: 0
         }]);
 
@@ -215,16 +226,44 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
           <div className="mb-5">
             <label className="block text-xs font-medium text-text-sub-light dark:text-text-sub-dark mb-2">Frequência</label>
             <div className="flex p-1 bg-gray-100 dark:bg-gray-800 rounded-xl">
-              {['Diária', 'Semanal', 'Mensal'].map((freq, idx) => (
-                 <label key={freq} className="flex-1 cursor-pointer">
-                    <input type="radio" name="frequency" className="hidden" defaultChecked={idx === 2} />
+              {['Diária', 'Semanal', 'Mensal'].map((freq) => (
+                 <label key={freq} className="flex-1 cursor-pointer" onClick={() => setFrequency(freq)}>
+                    <input 
+                        type="radio" 
+                        name="frequency" 
+                        className="hidden" 
+                        checked={frequency === freq} 
+                        onChange={() => setFrequency(freq)}
+                    />
                     <div className={`text-center py-2 rounded-lg text-sm font-medium transition-all duration-200 border border-transparent 
-                        ${idx === 2 ? 'bg-primary text-white shadow-sm' : 'text-text-sub-light hover:text-primary'}`}>
+                        ${frequency === freq ? 'bg-primary text-white shadow-sm' : 'text-text-sub-light hover:text-primary'}`}>
                         {freq}
                     </div>
                  </label>
               ))}
             </div>
+            {frequency === 'Diária' && (
+                <div className="mt-4 flex flex-col gap-3">
+                    <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                        <span className="text-sm font-medium text-text-main-light dark:text-text-main-dark">Pular Sábado</span>
+                        <div 
+                            onClick={() => setSkipSaturday(!skipSaturday)}
+                            className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${skipSaturday ? 'bg-secondary' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        >
+                            <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-300 ease-in-out ${skipSaturday ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                        <span className="text-sm font-medium text-text-main-light dark:text-text-main-dark">Pular Domingo</span>
+                        <div 
+                            onClick={() => setSkipSunday(!skipSunday)}
+                            className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${skipSunday ? 'bg-secondary' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        >
+                            <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-300 ease-in-out ${skipSunday ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                        </div>
+                    </div>
+                </div>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-text-sub-light dark:text-text-sub-dark mb-1.5">Primeiro Vencimento</label>

@@ -1,9 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Search, DollarSign, TrendingUp, Users, AlertTriangle, Bell, CheckCircle } from 'lucide-react';
+import { Search, DollarSign, TrendingUp, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan, Client } from '../types';
 
-export const Dashboard: React.FC = () => {
+interface DashboardProps {
+    onClientSelect?: (id: string) => void;
+    onLoanSelect?: (id: string) => void;
+}
+
+export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSelect }) => {
   const [summary, setSummary] = useState({
     totalLent: 0,
     totalReceived: 0,
@@ -14,10 +19,58 @@ export const Dashboard: React.FC = () => {
     userEmail: ''
   });
   const [loading, setLoading] = useState(true);
+  
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<{ clients: Client[], loans: any[] }>({ clients: [], loans: [] });
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+        if (searchQuery.length > 2) {
+            setIsSearching(true);
+            try {
+                // Search Clients
+                const { data: clients } = await supabase
+                    .from('clients')
+                    .select('*')
+                    .or(`name.ilike.%${searchQuery}%,cpf.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%`)
+                    .limit(5);
+
+                // Search Loans by ID
+                let loansData: any[] = [];
+                // Only search loans if query looks like part of an ID (alphanumeric)
+                if (searchQuery.length > 0) {
+                     const { data } = await supabase
+                        .from('loans')
+                        .select('*, client:clients(name)')
+                        .ilike('id', `%${searchQuery}%`)
+                        .limit(5);
+                     loansData = data || [];
+                }
+
+                setSearchResults({
+                    clients: clients || [],
+                    loans: loansData
+                });
+
+            } catch (error) {
+                console.error("Search error", error);
+            } finally {
+                setIsSearching(false);
+            }
+        } else {
+            setSearchResults({ clients: [], loans: [] });
+            setIsSearching(false);
+        }
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
 
   const fetchDashboardData = async () => {
     try {
@@ -47,9 +100,20 @@ export const Dashboard: React.FC = () => {
       loans?.forEach((loan: Loan) => {
         const amount = Number(loan.amount);
         const balance = Number(loan.balance);
+        const installmentValue = Number(loan.installment_value) || 0;
+        const installments = Number(loan.installments) || 1;
         
+        // Total Debt = Total Amount to be paid (Principal + Interest)
+        const totalDebt = installmentValue * installments;
+
         totalLent += amount;
-        totalReceived += (amount - balance);
+        // Total Received = Total Debt - Remaining Balance
+        // If totalDebt is 0 (legacy data), fallback to amount - balance, but ideally use totalDebt
+        if (totalDebt > 0) {
+            totalReceived += (totalDebt - balance);
+        } else {
+            totalReceived += (amount - balance);
+        }
 
         if (loan.status === 'late') {
             lateAmount += balance;
@@ -98,15 +162,92 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="relative mb-6">
+        <div className="relative mb-6 z-50">
+          <input 
+            className="w-full py-3.5 pl-12 pr-10 rounded-xl text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-white/30 transition shadow-sm bg-white/10 backdrop-blur-sm border border-white/20" 
+            placeholder="Buscar clientes ou empréstimos..." 
+            type="text" 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <Search className="text-gray-300 w-5 h-5" />
           </div>
-          <input 
-            className="w-full py-3.5 pl-12 pr-4 rounded-xl text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-white/30 transition shadow-sm bg-white/10 backdrop-blur-sm border border-white/20" 
-            placeholder="Buscar clientes ou empréstimos..." 
-            type="text" 
-          />
+          {searchQuery && (
+            <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-300 hover:text-white"
+            >
+                <X className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Search Results Dropdown */}
+          {(searchQuery.length > 2 && (searchResults.clients.length > 0 || searchResults.loans.length > 0 || isSearching)) && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 overflow-hidden max-h-96 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                {isSearching ? (
+                    <div className="p-4 text-center text-gray-500 text-sm">Buscando...</div>
+                ) : (
+                    <>
+                        {searchResults.clients.length > 0 && (
+                            <div className="p-2">
+                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-3 py-2">Clientes</h3>
+                                {searchResults.clients.map(client => (
+                                    <div 
+                                        key={client.id}
+                                        onClick={() => onClientSelect?.(client.id)}
+                                        className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer transition-colors"
+                                    >
+                                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
+                                            <User className="w-4 h-4" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-sm font-bold text-gray-900 dark:text-white">{client.name}</p>
+                                            <p className="text-xs text-gray-500">{client.cpf || client.email || 'Sem dados adicionais'}</p>
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 text-gray-300" />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {searchResults.loans.length > 0 && (
+                            <div className="p-2 border-t border-gray-100 dark:border-gray-800">
+                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-3 py-2">Empréstimos</h3>
+                                {searchResults.loans.map(loan => (
+                                    <div 
+                                        key={loan.id}
+                                        onClick={() => onLoanSelect?.(loan.id)}
+                                        className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer transition-colors"
+                                    >
+                                        <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-xs">
+                                            <FileText className="w-4 h-4" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-sm font-bold text-gray-900 dark:text-white">Contrato #{loan.id.substring(0,6)}</p>
+                                            <p className="text-xs text-gray-500">{loan.client?.name} • R$ {Number(loan.amount).toLocaleString('pt-BR')}</p>
+                                        </div>
+                                        <div className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                                            loan.status === 'active' ? 'bg-green-100 text-green-700' :
+                                            loan.status === 'late' ? 'bg-red-100 text-red-700' :
+                                            'bg-gray-100 text-gray-600'
+                                        }`}>
+                                            {loan.status === 'active' ? 'Ativo' : loan.status === 'late' ? 'Atrasado' : 'Pago'}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        
+                        {searchResults.clients.length === 0 && searchResults.loans.length === 0 && !isSearching && (
+                            <div className="p-8 text-center text-gray-400 text-sm">
+                                Nenhum resultado encontrado para "{searchQuery}"
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+          )}
         </div>
 
         <div className="flex justify-between items-center bg-white/10 rounded-xl p-4 border border-white/5 backdrop-blur-sm">

@@ -20,6 +20,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
     const [installmentsList, setInstallmentsList] = useState<Installment[]>([]);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
+    const [showAllInstallments, setShowAllInstallments] = useState(false);
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
 
     useEffect(() => {
         if (loanId) {
@@ -49,41 +51,77 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
     const generateInstallments = (loanData: Loan) => {
         const count = loanData.installments || 1;
         const installmentValue = loanData.installment_value || (loanData.amount / count);
-        const startDate = new Date(loanData.created_at || Date.now());
+        const startDate = loanData.due_date ? new Date(loanData.due_date) : new Date(loanData.created_at || Date.now());
+        
         // Simple logic to determine how many paid based on balance
-        const totalPaid = Number(loanData.amount) - Number(loanData.balance);
+        // Total Debt = installment_value * installments
+        const totalDebt = (loanData.installment_value || 0) * (loanData.installments || 1);
+        const totalPaid = totalDebt - Number(loanData.balance);
         const list: Installment[] = [];
 
-        // Note: This is an estimation since we don't have an 'installments' table yet.
-        // In a real app with 'installments' table, we would just fetch them.
+        // ... (rest of generateInstallments remains same, just ensuring totalPaid is correct)
+        
         let paidAccumulator = 0;
+        let dailyDateTracker = new Date(startDate);
 
-        for (let i = 1; i <= count; i++) {
-            const date = new Date(startDate);
-            date.setMonth(startDate.getMonth() + i);
+        for (let i = 0; i < count; i++) {
+            let date: Date;
+
+            if (loanData.frequency === 'Diária') {
+                if (i === 0) {
+                    date = new Date(startDate);
+                } else {
+                    date = new Date(dailyDateTracker);
+                    date.setDate(date.getDate() + 1);
+                    
+                    while (true) {
+                        const day = date.getDay();
+                        if (loanData.skip_saturday && day === 6) {
+                            date.setDate(date.getDate() + 1);
+                            continue;
+                        }
+                        if (loanData.skip_sunday && day === 0) {
+                            date.setDate(date.getDate() + 1);
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                dailyDateTracker = new Date(date);
+            } else {
+                date = new Date(startDate);
+                if (loanData.frequency === 'Semanal') {
+                    date.setDate(startDate.getDate() + (i * 7));
+                } else {
+                    date.setMonth(startDate.getMonth() + i);
+                }
+            }
             
             let status: 'paid' | 'pending' | 'late' | 'future' = 'future';
             
             // Check if this installment is "covered" by the totalPaid amount
+            // Use a small epsilon for float comparison
             if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
                 status = 'paid';
                 paidAccumulator += installmentValue;
             } else if (paidAccumulator < totalPaid + (installmentValue * 0.1)) {
-                 // This is the current active installment roughly
                  const today = new Date();
-                 if (date < today && loanData.status !== 'paid') status = 'late';
+                 // Reset time part for accurate date comparison
+                 const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                 const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+                 
+                 if (dateZero < todayZero && loanData.status !== 'paid') status = 'late';
                  else status = 'pending';
-                 // We only mark one as pending/late, subsequent are future
-                 paidAccumulator += 99999999; // Stop marking others as paid
+                 
+                 paidAccumulator += 99999999; 
             } else {
                 status = 'future';
             }
 
-            // Force override if loan is fully paid
             if (loanData.balance <= 0) status = 'paid';
 
             list.push({
-                number: i,
+                number: i + 1,
                 date: date,
                 value: installmentValue,
                 status: status
@@ -92,19 +130,20 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
         setInstallmentsList(list);
     };
 
-    const handleRegisterPayment = async () => {
+    const handleConfirmPayment = async () => {
         if (!loan || loan.balance <= 0) return;
         
-        const confirm = window.confirm("Confirmar pagamento da próxima parcela?");
-        if (!confirm) return;
-
         setProcessing(true);
         try {
             const installmentValue = loan.installment_value || (loan.amount / (loan.installments || 1));
-            let newBalance = Number(loan.balance) - Number(installmentValue);
-            if (newBalance < 0) newBalance = 0;
+            const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
             
-            const newProgress = Math.round(((Number(loan.amount) - newBalance) / Number(loan.amount)) * 100);
+            let newBalance = Number(loan.balance) - Number(installmentValue);
+            // Avoid negative balance due to floating point errors
+            if (newBalance < 0.01) newBalance = 0;
+            
+            // Calculate progress based on Total Debt, not Principal Amount
+            const newProgress = Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
 
             const { error } = await supabase
@@ -118,7 +157,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
 
             if (error) throw error;
             
-            await fetchLoanData(); // Refresh UI
+            setShowPaymentModal(false);
+            await fetchLoanData(); 
             
         } catch (error) {
             console.error(error);
@@ -132,7 +172,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
         return <div className="h-full flex items-center justify-center bg-background-light dark:bg-background-dark text-primary dark:text-white">Carregando...</div>;
     }
 
-    const totalPaid = Number(loan.amount) - Number(loan.balance);
+    const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+    const totalPaid = totalDebt - Number(loan.balance);
     const percentage = loan.progress || 0;
     const paidCount = installmentsList.filter(i => i.status === 'paid').length;
     const totalCount = installmentsList.length;
@@ -211,7 +252,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Taxa de Juros</p>
-                        <p className="font-bold text-gray-900 dark:text-white">{loan.interest_rate}% a.m.</p>
+                        <p className="font-bold text-gray-900 dark:text-white">
+                            {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : 'a.m.'}
+                        </p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Próximo Venc.</p>
@@ -225,12 +268,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 mb-6">
                     <div className="flex items-center justify-between mb-6">
                         <h3 className="text-sm font-bold text-primary dark:text-white">Histórico de Parcelas</h3>
-                        <span className="text-xs text-accent-blue font-medium cursor-pointer">Ver tudo</span>
+                        <span 
+                            className="text-xs text-accent-blue font-medium cursor-pointer"
+                            onClick={() => setShowAllInstallments(!showAllInstallments)}
+                        >
+                            {showAllInstallments ? 'Ver menos' : 'Ver tudo'}
+                        </span>
                     </div>
                     <div className="relative space-y-6">
                         <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-100 dark:bg-gray-700"></div>
                         
-                        {installmentsList.slice(0, 5).map((inst) => (
+                        {(showAllInstallments ? installmentsList : installmentsList.slice(0, 5)).map((inst) => (
                             <div key={inst.number} className="relative flex items-center gap-4">
                                 <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white dark:ring-card-dark ${
                                     inst.status === 'paid' ? 'bg-secondary' :
@@ -267,11 +315,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                 <div className="space-y-3 mb-8">
                     {loan.status !== 'paid' && (
                         <button 
-                            onClick={handleRegisterPayment}
+                            onClick={() => setShowPaymentModal(true)}
                             disabled={processing}
                             className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
                         >
-                            {processing ? 'Registrando...' : 'Registrar Pagamento'}
+                            Registrar Pagamento
                         </button>
                     )}
                     <button 
@@ -283,6 +331,40 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                 </div>
 
             </main>
+
+            {/* Payment Confirmation Modal */}
+            {showPaymentModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPaymentModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center mb-6">
+                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mb-4">
+                                <Check className="w-8 h-8 text-green-600 dark:text-green-500" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Confirmar Pagamento?</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                Você está prestes a registrar o pagamento de uma parcela no valor de <span className="font-bold text-gray-900 dark:text-white">R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>.
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <button 
+                                onClick={() => setShowPaymentModal(false)}
+                                className="py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={handleConfirmPayment}
+                                disabled={processing}
+                                className="py-3 px-4 rounded-xl font-bold text-white bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 flex items-center justify-center gap-2 disabled:opacity-70 transition-colors"
+                            >
+                                {processing ? 'Processando...' : 'Confirmar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

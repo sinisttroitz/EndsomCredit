@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, MoreVertical, ShieldCheck, CreditCard, Phone, Mail, PlusCircle, Edit, AlertCircle } from 'lucide-react';
+import { ArrowLeft, MoreVertical, ShieldCheck, CreditCard, Phone, Mail, PlusCircle, Edit, AlertCircle, FileText, ExternalLink } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Client, Loan } from '../types';
 
@@ -7,9 +7,11 @@ interface ClientDetailsProps {
     clientId: string | null;
     onBack: () => void;
     onNewLoan: () => void;
+    onEdit: () => void;
+    onLoanSelect: (id: string) => void;
 }
 
-export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, onNewLoan }) => {
+export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, onNewLoan, onEdit, onLoanSelect }) => {
     const [client, setClient] = useState<Client | null>(null);
     const [loans, setLoans] = useState<Loan[]>([]);
     const [loading, setLoading] = useState(true);
@@ -68,18 +70,18 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                     </button>
                 </div>
                 <div className="flex items-center gap-5">
-                    <div className="w-20 h-20 rounded-3xl border-4 border-white/10 overflow-hidden bg-gray-200 flex-shrink-0">
+                    <div className="w-20 h-20 rounded-3xl border-4 border-white/10 overflow-hidden bg-gray-200 flex-shrink-0 relative">
                         {client.avatar_url ? (
                             <img alt="Perfil" className="w-full h-full object-cover" src={client.avatar_url} />
                         ) : (
-                            <div className="w-full h-full flex items-center justify-center text-primary text-xl font-bold">{client.name.substring(0,2).toUpperCase()}</div>
+                            <div className="w-full h-full flex items-center justify-center text-primary text-xl font-bold bg-white">{client.name.substring(0,2).toUpperCase()}</div>
                         )}
                     </div>
                     <div>
                         <h2 className="text-2xl font-bold">{client.name}</h2>
                         <p className="text-white/60 text-sm font-medium">Cliente desde {new Date(client.created_at || Date.now()).toLocaleDateString()}</p>
                         <div className="mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full bg-secondary/20 text-secondary text-[11px] font-bold uppercase tracking-wider border border-secondary/30">
-                            Premium
+                            {client.status === 'active' ? 'Ativo' : client.status}
                         </div>
                     </div>
                 </div>
@@ -147,12 +149,61 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
 
                 <section>
                     <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-bold text-primary dark:text-white uppercase tracking-wider">Documentos Anexados</h3>
+                        {client.documents && client.documents.length > 0 && <span className="text-[10px] bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded text-gray-500">{client.documents.length}</span>}
+                    </div>
+                    {client.documents && client.documents.length > 0 ? (
+                        <div className="grid grid-cols-3 gap-3">
+                            {client.documents.map((docUrl, index) => (
+                                <a 
+                                    key={index} 
+                                    href={docUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="aspect-square bg-white dark:bg-card-dark rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden relative group shadow-sm hover:shadow-md transition-all"
+                                >
+                                    <img 
+                                        src={docUrl} 
+                                        alt={`Doc ${index}`} 
+                                        className="w-full h-full object-cover" 
+                                        onError={(e) => {
+                                            // Fallback simples para arquivos que não são imagens
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                            (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                                        }}
+                                    />
+                                    {/* Fallback Icon for non-images */}
+                                    <div className="hidden w-full h-full flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-800 text-gray-400">
+                                        <FileText className="w-8 h-8 mb-1" />
+                                        <span className="text-[10px]">Arquivo</span>
+                                    </div>
+
+                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <ExternalLink className="text-white w-6 h-6" />
+                                    </div>
+                                </a>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="bg-card-light dark:bg-card-dark rounded-2xl p-6 border border-dashed border-gray-300 dark:border-gray-700 text-center text-gray-400 text-sm flex flex-col items-center gap-2">
+                            <FileText className="w-8 h-8 opacity-20" />
+                            <span>Nenhum documento anexado.</span>
+                        </div>
+                    )}
+                </section>
+
+                <section>
+                    <div className="flex items-center justify-between mb-3">
                         <h3 className="text-sm font-bold text-primary dark:text-white uppercase tracking-wider">Histórico de Empréstimos</h3>
                         <span className="text-[10px] font-bold text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded">{loans.length} CONTRATOS</span>
                     </div>
                     <div className="space-y-3">
                         {loans.map(loan => (
-                            <div key={loan.id} className={`bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm active:scale-[0.98] transition-transform ${loan.status === 'paid' ? 'opacity-80' : ''}`}>
+                            <div 
+                                key={loan.id} 
+                                onClick={() => onLoanSelect(loan.id)}
+                                className={`bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm active:scale-[0.98] transition-transform cursor-pointer hover:shadow-md ${loan.status === 'paid' ? 'opacity-80' : ''}`}
+                            >
                                 <div className="flex justify-between items-start mb-3">
                                     <div>
                                         <p className="text-[10px] font-bold text-text-sub-light dark:text-text-sub-dark uppercase">Contrato #{loan.id.substring(0,6)}</p>
@@ -193,7 +244,10 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                         <PlusCircle className="w-5 h-5" />
                         Novo Empréstimo
                     </button>
-                    <button className="bg-white dark:bg-card-dark text-primary dark:text-white border border-gray-200 dark:border-gray-700 py-3.5 px-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-transform">
+                    <button 
+                        onClick={onEdit}
+                        className="bg-white dark:bg-card-dark text-primary dark:text-white border border-gray-200 dark:border-gray-700 py-3.5 px-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-transform"
+                    >
                         <Edit className="w-5 h-5" />
                         Editar Cadastro
                     </button>

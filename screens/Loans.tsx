@@ -58,9 +58,6 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
           </button>
         </div>
         <div className="relative mb-2">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search className="text-gray-300 w-5 h-5" />
-          </div>
           <input 
             className="w-full py-3.5 pl-12 pr-4 rounded-xl text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-white/30 transition shadow-sm bg-white/10 backdrop-blur-sm border border-white/20" 
             placeholder="Buscar por cliente..." 
@@ -68,6 +65,9 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)} 
           />
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <Search className="text-gray-300 w-5 h-5" />
+          </div>
         </div>
       </header>
 
