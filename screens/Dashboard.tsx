@@ -6,9 +6,10 @@ import { Loan, Client } from '../types';
 interface DashboardProps {
     onClientSelect?: (id: string) => void;
     onLoanSelect?: (id: string) => void;
+    onViewLateLoans?: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSelect }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSelect, onViewLateLoans }) => {
   const [summary, setSummary] = useState({
     totalLent: 0,
     totalReceived: 0,
@@ -16,7 +17,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     lateAmount: 0,
     activeCount: 0,
     lateCount: 0,
-    userEmail: ''
+    totalInterestReceived: 0,
+    userEmail: '',
+    userName: ''
   });
   const [loading, setLoading] = useState(true);
   
@@ -72,6 +75,76 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
 
+  const isLoanLate = (loan: Loan): boolean => {
+    if (loan.status === 'paid') return false;
+    if (loan.status === 'late') return true;
+
+    const count = loan.installments || 1;
+    const installmentValue = loan.installment_value || (loan.amount / count);
+    const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
+    
+    // Total Debt = installment_value * installments
+    const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+    const totalPaid = totalDebt - Number(loan.balance);
+    
+    let paidAccumulator = 0;
+    let dailyDateTracker = new Date(startDate);
+    
+    for (let i = 0; i < count; i++) {
+         let date: Date;
+
+         if (loan.frequency === 'Diária') {
+             if (i === 0) {
+                 date = new Date(startDate);
+             } else {
+                 date = new Date(dailyDateTracker);
+                 date.setDate(date.getDate() + 1);
+                 
+                 while (true) {
+                     const day = date.getDay();
+                     if (loan.skip_saturday && day === 6) {
+                         date.setDate(date.getDate() + 1);
+                         continue;
+                     }
+                     if (loan.skip_sunday && day === 0) {
+                         date.setDate(date.getDate() + 1);
+                         continue;
+                     }
+                     break;
+                 }
+             }
+             dailyDateTracker = new Date(date);
+         } else {
+             date = new Date(startDate);
+             if (loan.frequency === 'Semanal') {
+                 date.setDate(startDate.getDate() + (i * 7));
+             } else {
+                 date.setMonth(startDate.getMonth() + i);
+             }
+         }
+         
+         // Check if this installment is paid
+         // Use small epsilon
+         if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
+             paidAccumulator += installmentValue;
+             continue; // This one is paid
+         }
+         
+         // This is the first unpaid installment
+         const today = new Date();
+         // Reset time part for accurate date comparison
+         const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+         const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+         
+         if (dateZero < todayZero) {
+             return true;
+         }
+         return false; // First unpaid is in future or today
+    }
+    
+    return false;
+  };
+
   const fetchDashboardData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -96,6 +169,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
       let lateAmount = 0;
       let activeCount = 0;
       let lateCount = 0;
+      let totalInterestReceived = 0;
 
       loans?.forEach((loan: Loan) => {
         const amount = Number(loan.amount);
@@ -107,15 +181,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         const totalDebt = installmentValue * installments;
 
         totalLent += amount;
+        
+        let loanReceived = 0;
         // Total Received = Total Debt - Remaining Balance
         // If totalDebt is 0 (legacy data), fallback to amount - balance, but ideally use totalDebt
         if (totalDebt > 0) {
-            totalReceived += (totalDebt - balance);
+            loanReceived = (totalDebt - balance);
         } else {
-            totalReceived += (amount - balance);
+            loanReceived = (amount - balance);
+        }
+        totalReceived += loanReceived;
+
+        // Calculate Interest Received for this loan
+        // Interest Received = Total Interest * (Amount Paid / Total Debt)
+        if (totalDebt > 0 && amount > 0) {
+            const totalExpectedInterest = totalDebt - amount;
+            // Avoid division by zero
+            const progressRatio = loanReceived / totalDebt;
+            // Cap ratio at 1 (in case of overpayment or rounding issues, though balance shouldn't be negative)
+            const effectiveRatio = Math.min(progressRatio, 1);
+            const interestPart = totalExpectedInterest * effectiveRatio;
+            totalInterestReceived += interestPart;
         }
 
-        if (loan.status === 'late') {
+        if (isLoanLate(loan)) {
             lateAmount += balance;
             lateCount++;
         }
@@ -132,7 +221,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         lateAmount,
         activeCount,
         lateCount,
-        userEmail: user?.email || 'Admin'
+        totalInterestReceived,
+        userEmail: user?.email || 'Admin',
+        userName: user?.user_metadata?.full_name || ''
       });
 
     } catch (error) {
@@ -142,8 +233,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     }
   };
 
-  const userName = summary.userEmail.split('@')[0];
-  const userInitial = userName.charAt(0).toUpperCase();
+  const displayName = summary.userName || summary.userEmail.split('@')[0];
+  const userInitial = displayName.charAt(0).toUpperCase();
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
@@ -157,7 +248,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-400 border-2 border-primary rounded-full"></div>
           </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Olá, {userName}!</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Olá, {displayName}!</h1>
             <p className="text-gray-400 text-sm">Bem-vindo de volta</p>
           </div>
         </div>
@@ -214,7 +305,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                         {searchResults.loans.length > 0 && (
                             <div className="p-2 border-t border-gray-100 dark:border-gray-800">
                                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-3 py-2">Empréstimos</h3>
-                                {searchResults.loans.map(loan => (
+                                {searchResults.loans.map(loan => {
+                                    const isLate = isLoanLate(loan);
+                                    const displayStatus = isLate ? 'late' : loan.status;
+                                    return (
                                     <div 
                                         key={loan.id}
                                         onClick={() => onLoanSelect?.(loan.id)}
@@ -225,17 +319,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                                         </div>
                                         <div className="flex-1">
                                             <p className="text-sm font-bold text-gray-900 dark:text-white">Contrato #{loan.id.substring(0,6)}</p>
-                                            <p className="text-xs text-gray-500">{loan.client?.name} • R$ {Number(loan.amount).toLocaleString('pt-BR')}</p>
+                                            <p className="text-xs text-gray-500">{loan.client?.name} • R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                         </div>
                                         <div className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
-                                            loan.status === 'active' ? 'bg-green-100 text-green-700' :
-                                            loan.status === 'late' ? 'bg-red-100 text-red-700' :
+                                            displayStatus === 'active' ? 'bg-green-100 text-green-700' :
+                                            displayStatus === 'late' ? 'bg-red-100 text-red-700' :
                                             'bg-gray-100 text-gray-600'
                                         }`}>
-                                            {loan.status === 'active' ? 'Ativo' : loan.status === 'late' ? 'Atrasado' : 'Pago'}
+                                            {displayStatus === 'active' ? 'Ativo' : displayStatus === 'late' ? 'Atrasado' : 'Pago'}
                                         </div>
                                     </div>
-                                ))}
+                                )})}
                             </div>
                         )}
                         
@@ -257,7 +351,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
           <div className="h-8 w-px bg-white/20 mx-4"></div>
           <div className="flex flex-col items-end">
             <span className="text-xl font-bold tracking-wide">
-                {loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                {loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </span>
           </div>
         </div>
@@ -276,21 +370,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             </div>
             <div>
               <span className="text-xl font-bold block text-gray-900 dark:text-white">
-                 {loading ? '...' : `R$ ${summary.totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                 {loading ? '...' : `R$ ${summary.totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </span>
             </div>
           </div>
 
-           {/* Card 2 */}
+            {/* Card 2 */}
            <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
             <div className="flex justify-between items-start">
-              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Lucro Estimado</span>
+              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Juros Recebidos</span>
               <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
                 <TrendingUp className="w-4 h-4" />
               </div>
             </div>
             <div>
-              <span className="text-xl font-bold block text-blue-600 dark:text-blue-400">R$ 0,00</span>
+              <span className="text-xl font-bold block text-blue-600 dark:text-blue-400">
+                {loading ? '...' : `R$ ${summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              </span>
             </div>
           </div>
 
@@ -311,7 +407,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
           </div>
 
           {/* Card 4 */}
-          <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
+          <div 
+            onClick={onViewLateLoans}
+            className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
+          >
             <div className="flex justify-between items-start">
               <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Em Atraso</span>
               <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-500 dark:text-red-400">
@@ -320,7 +419,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             </div>
             <div>
               <span className="text-xl font-bold block text-red-500 dark:text-red-400">
-                {loading ? '...' : `R$ ${summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                {loading ? '...' : `R$ ${summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </span>
               <span className="text-[10px] text-red-400/80 block mt-1">{summary.lateCount} contratos</span>
             </div>
@@ -328,7 +427,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         </div>
 
         {/* Alerts Section */}
-        <div className="bg-card-light dark:bg-card-dark rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 min-h-[16rem]">
+        <div 
+            onClick={summary.lateAmount > 0 ? onViewLateLoans : undefined}
+            className={`bg-card-light dark:bg-card-dark rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 min-h-[16rem] ${summary.lateAmount > 0 ? 'cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]' : ''}`}
+        >
           <div className="flex items-center gap-3 mb-6">
             <div className="w-8 h-8 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center text-red-500">
               <Bell className="w-4 h-4" />
@@ -358,7 +460,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 {summary.lateAmount > 0 ? `Atenção: ${summary.lateCount} contratos atrasados.` : "Nenhum atraso crítico."}
               </p>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                 {summary.lateAmount > 0 ? "Verifique a lista de empréstimos." : "Tudo em dia! Seus pagamentos estão ótimos."}
+                 {summary.lateAmount > 0 ? "Toque para ver a lista de empréstimos." : "Tudo em dia! Seus pagamentos estão ótimos."}
               </p>
             </div>
           </div>

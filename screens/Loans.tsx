@@ -5,10 +5,12 @@ import { Loan } from '../types';
 
 interface LoansProps {
     onLoanSelect?: (loanId: string) => void;
+    initialFilter?: 'all' | 'pending' | 'late';
+    onFilterChange?: (filter: 'all' | 'pending' | 'late') => void;
 }
 
-export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
-    const [filter, setFilter] = useState<'all' | 'pending' | 'late'>('all');
+export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'all', onFilterChange }) => {
+    const [filter, setFilter] = useState<'all' | 'pending' | 'late'>(initialFilter);
     const [loans, setLoans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -16,6 +18,12 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
     useEffect(() => {
         fetchLoans();
     }, []);
+
+    useEffect(() => {
+        if (onFilterChange) {
+            onFilterChange(filter);
+        }
+    }, [filter, onFilterChange]);
 
     const fetchLoans = async () => {
         setLoading(true);
@@ -38,8 +46,92 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
         }
     };
 
+    const getOldestLateInstallmentDate = (loan: Loan): Date | null => {
+        if (loan.status === 'paid') return null;
+    
+        const count = loan.installments || 1;
+        const installmentValue = loan.installment_value || (loan.amount / count);
+        const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
+        
+        // Total Debt = installment_value * installments
+        const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+        const totalPaid = totalDebt - Number(loan.balance);
+        
+        let paidAccumulator = 0;
+        let dailyDateTracker = new Date(startDate);
+        
+        for (let i = 0; i < count; i++) {
+             let date: Date;
+    
+             if (loan.frequency === 'Diária') {
+                 if (i === 0) {
+                     date = new Date(startDate);
+                 } else {
+                     date = new Date(dailyDateTracker);
+                     date.setDate(date.getDate() + 1);
+                     
+                     while (true) {
+                         const day = date.getDay();
+                         if (loan.skip_saturday && day === 6) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         if (loan.skip_sunday && day === 0) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         break;
+                     }
+                 }
+                 dailyDateTracker = new Date(date);
+             } else {
+                 date = new Date(startDate);
+                 if (loan.frequency === 'Semanal') {
+                     date.setDate(startDate.getDate() + (i * 7));
+                 } else {
+                     date.setMonth(startDate.getMonth() + i);
+                 }
+             }
+             
+             // Check if this installment is paid
+             if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
+                 paidAccumulator += installmentValue;
+                 continue; // This one is paid
+             }
+             
+             // This is the first unpaid installment
+             const today = new Date();
+             const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+             const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+             
+             if (dateZero < todayZero) {
+                 return date;
+             }
+             return null; // First unpaid is in future or today
+        }
+        
+        return null;
+    };
+
+    const isLoanLate = (loan: Loan): boolean => {
+        if (loan.status === 'paid') return false;
+        if (loan.status === 'late') return true;
+        return getOldestLateInstallmentDate(loan) !== null;
+    };
+
     const filteredLoans = loans.filter(loan => {
-        if (filter !== 'all' && loan.status !== filter) return false;
+        if (filter !== 'all') {
+            if (filter === 'late') {
+                if (!isLoanLate(loan)) return false;
+            } else if (filter === 'pending') {
+                // Pending usually means 'active' but not late? Or 'pending' status?
+                // Assuming 'pending' filter means 'active' and NOT late
+                if (loan.status !== 'active' && loan.status !== 'pending') return false;
+                if (isLoanLate(loan)) return false;
+            } else {
+                if (loan.status !== filter) return false;
+            }
+        }
         
         if (searchTerm) {
              const clientName = loan.client?.name?.toLowerCase() || '';
@@ -53,9 +145,6 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
       <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-8 shadow-lg relative z-10">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold tracking-tight">Empréstimos</h1>
-          <button onClick={fetchLoans} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20">
-            {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <SlidersHorizontal className="w-5 h-5" />}
-          </button>
         </div>
         <div className="relative mb-2">
           <input 
@@ -102,7 +191,24 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
              </div>
           )}
 
-          {filteredLoans.map((loan) => (
+          {filteredLoans.map((loan) => {
+            const lateDate = getOldestLateInstallmentDate(loan);
+            const isLate = lateDate !== null || loan.status === 'late';
+            const displayStatus = isLate ? 'late' : loan.status;
+            
+            // Format date for display
+            const formatDate = (dateString: string | Date) => {
+                if (!dateString) return '';
+                const date = new Date(dateString);
+                // Adjust for timezone offset to display correct local date
+                const userTimezoneOffset = date.getTimezoneOffset() * 60000;
+                const adjustedDate = new Date(date.getTime() + userTimezoneOffset);
+                return adjustedDate.toLocaleDateString('pt-BR');
+            };
+
+            const lateDateDisplay = lateDate ? lateDate.toLocaleDateString('pt-BR') : (loan.due_date ? formatDate(loan.due_date) : '');
+
+            return (
             <div 
                 key={loan.id} 
                 onClick={() => onLoanSelect?.(loan.id)}
@@ -125,23 +231,23 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
                 </div>
                 
                 <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                    loan.status === 'active' ? 'bg-green-50 text-green-700 border-green-200' :
-                    loan.status === 'late' ? 'bg-red-50 text-red-700 border-red-200' :
-                    loan.status === 'paid' ? 'bg-gray-50 text-gray-700 border-gray-200' :
+                    displayStatus === 'active' ? 'bg-green-50 text-green-700 border-green-200' :
+                    displayStatus === 'late' ? 'bg-red-50 text-red-700 border-red-200' :
+                    displayStatus === 'paid' ? 'bg-gray-50 text-gray-700 border-gray-200' :
                     'bg-orange-50 text-orange-700 border-orange-200'
                 }`}>
-                    {loan.status === 'active' ? 'Em dia' : loan.status === 'late' ? 'Em atraso' : loan.status === 'paid' ? 'Pago' : 'Pendente'}
+                    {displayStatus === 'active' ? 'Em dia' : displayStatus === 'late' ? 'Em atraso' : displayStatus === 'paid' ? 'Pago' : 'Pendente'}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-3">
                 <div>
                     <p className="text-xs text-gray-500 mb-0.5">Valor Original</p>
-                    <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
                 <div className="text-right">
                     <p className="text-xs text-gray-500 mb-0.5">Saldo Devedor</p>
-                    <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
               </div>
 
@@ -152,27 +258,27 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
                 </div>
                 <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
                     <div 
-                        className={`h-full rounded-full ${loan.status === 'late' ? 'bg-red-500' : loan.status === 'pending' ? 'bg-gray-400' : 'bg-green-500'}`} 
+                        className={`h-full rounded-full ${displayStatus === 'late' ? 'bg-red-500' : displayStatus === 'pending' ? 'bg-gray-400' : 'bg-green-500'}`} 
                         style={{ width: `${loan.progress}%` }}
                     ></div>
                 </div>
               </div>
 
               <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
-                {loan.status === 'pending' ? (
+                {displayStatus === 'pending' ? (
                      <div className="flex items-center gap-1.5 text-xs text-gray-500">
                         <Hourglass className="w-3.5 h-3.5" />
                         <span>Aguardando Aprovação</span>
                      </div>
-                ) : loan.status === 'late' ? (
+                ) : displayStatus === 'late' ? (
                     <div className="flex items-center gap-1.5 text-xs text-red-500 font-medium">
                         <AlertTriangle className="w-3.5 h-3.5" />
-                        <span>Venceu: {loan.due_date}</span>
+                        <span>Venceu: {lateDateDisplay}</span>
                     </div>
                 ) : (
                     <div className="flex items-center gap-1.5 text-xs text-gray-500">
                         <Calendar className="w-3.5 h-3.5" />
-                        <span>Vencimento: {loan.due_date}</span>
+                        <span>Vencimento: {formatDate(loan.due_date)}</span>
                     </div>
                 )}
                 
@@ -180,7 +286,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect }) => {
               </div>
 
             </div>
-          ))}
+          )})}
         </div>
       </main>
     </div>

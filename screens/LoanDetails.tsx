@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Share2, FileText, X } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan } from '../types';
 
@@ -22,6 +22,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
     const [processing, setProcessing] = useState(false);
     const [showAllInstallments, setShowAllInstallments] = useState(false);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [showReceiptModal, setShowReceiptModal] = useState(false);
 
     useEffect(() => {
         if (loanId) {
@@ -104,18 +105,18 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
             if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
                 status = 'paid';
                 paidAccumulator += installmentValue;
-            } else if (paidAccumulator < totalPaid + (installmentValue * 0.1)) {
+            } else {
+                 // Not paid
                  const today = new Date();
                  // Reset time part for accurate date comparison
                  const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
                  const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
                  
-                 if (dateZero < todayZero && loanData.status !== 'paid') status = 'late';
-                 else status = 'pending';
+                 if (dateZero < todayZero) status = 'late';
+                 else if (dateZero.getTime() === todayZero.getTime()) status = 'pending';
+                 else status = 'future';
                  
-                 paidAccumulator += 99999999; 
-            } else {
-                status = 'future';
+                 // Do NOT increase paidAccumulator, so next installments also fall into this block
             }
 
             if (loanData.balance <= 0) status = 'paid';
@@ -168,6 +169,74 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
         }
     };
 
+    const handleGenerateReceipt = async (type: 'last' | 'full') => {
+        if (!loan) return;
+
+        const paidInstallments = installmentsList.filter(i => i.status === 'paid');
+
+        if (paidInstallments.length === 0) {
+            alert("Nenhum pagamento registrado para este empréstimo.");
+            return;
+        }
+
+        let text = "";
+        const now = new Date().toLocaleString('pt-BR');
+
+        if (type === 'last') {
+            const lastPaid = paidInstallments[paidInstallments.length - 1];
+            text = `
+🧾 *COMPROVANTE DE PAGAMENTO*
+--------------------------------
+📅 Data: ${now}
+👤 Cliente: ${loan.client?.name}
+📄 Contrato: #${loan.id.substring(0, 6)}
+--------------------------------
+💰 *Parcela #${lastPaid.number}*
+💲 Valor: R$ ${lastPaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+📆 Vencimento: ${lastPaid.date.toLocaleDateString('pt-BR')}
+✅ Status: PAGO
+--------------------------------
+Autenticação: ${Math.random().toString(36).substring(7).toUpperCase()}
+`.trim();
+        } else {
+            text = `
+📑 *EXTRATO DE PAGAMENTOS*
+--------------------------------
+📅 Emissão: ${now}
+👤 Cliente: ${loan.client?.name}
+📄 Contrato: #${loan.id.substring(0, 6)}
+--------------------------------
+*Histórico de Pagamentos:*
+
+${paidInstallments.map(i => 
+`🔹 Parc. #${i.number} - ${i.date.toLocaleDateString('pt-BR')} - R$ ${i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+).join('\n')}
+
+--------------------------------
+💵 Total Pago: R$ ${paidInstallments.reduce((acc, curr) => acc + curr.value, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+📉 Saldo Devedor: R$ ${Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+--------------------------------
+`.trim();
+        }
+
+        // Share logic
+        if (navigator.share) {
+            try {
+                await navigator.share({
+                    title: type === 'last' ? 'Comprovante de Pagamento' : 'Extrato de Empréstimo',
+                    text: text
+                });
+            } catch (error) {
+                console.log('Error sharing:', error);
+            }
+        } else {
+            navigator.clipboard.writeText(text);
+            alert("Comprovante copiado para a área de transferência!");
+        }
+        
+        setShowReceiptModal(false);
+    };
+
     if (loading || !loan) {
         return <div className="h-full flex items-center justify-center bg-background-light dark:bg-background-dark text-primary dark:text-white">Carregando...</div>;
     }
@@ -177,6 +246,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
     const percentage = loan.progress || 0;
     const paidCount = installmentsList.filter(i => i.status === 'paid').length;
     const totalCount = installmentsList.length;
+    
+    // Determine display status based on installments
+    const isLate = installmentsList.some(i => i.status === 'late');
+    const displayStatus = isLate ? 'late' : loan.status;
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
@@ -186,9 +259,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                         <ChevronLeft className="w-6 h-6" />
                     </button>
                     <h1 className="text-lg font-semibold">Detalhes do Empréstimo</h1>
-                    <button className="w-10 h-10 flex items-center justify-end active:opacity-70">
-                        <MoreHorizontal className="w-6 h-6" />
-                    </button>
+                    <div className="w-10 h-10"></div>
                 </div>
             </header>
             
@@ -202,12 +273,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                         <h2 className="text-4xl font-bold text-primary dark:text-white mb-2 tracking-tight">R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h2>
                         <div className="flex items-center gap-2 mt-2">
                             <span className={`px-3 py-1 rounded-full text-[10px] font-bold border uppercase ${
-                                loan.status === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' :
-                                loan.status === 'late' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' :
-                                loan.status === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' :
+                                displayStatus === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' :
+                                displayStatus === 'late' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' :
+                                displayStatus === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' :
                                 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800'
                             }`}>
-                                {loan.status === 'active' ? 'EM DIA' : loan.status === 'late' ? 'ATRASADO' : loan.status === 'paid' ? 'QUITADO' : 'PENDENTE'}
+                                {displayStatus === 'active' ? 'EM DIA' : displayStatus === 'late' ? 'ATRASADO' : displayStatus === 'paid' ? 'QUITADO' : 'PENDENTE'}
                             </span>
                         </div>
                     </div>
@@ -220,7 +291,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                         <div 
                             className="w-28 h-28 rounded-full flex items-center justify-center relative shadow-inner"
                             style={{
-                                background: `radial-gradient(closest-side, var(--bg-card) 82%, transparent 80% 100%), conic-gradient(${loan.status === 'late' ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)`
+                                background: `radial-gradient(closest-side, var(--bg-card) 82%, transparent 80% 100%), conic-gradient(${displayStatus === 'late' ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)`
                             } as React.CSSProperties}
                         >
                             <div className="absolute inset-0 rounded-full bg-card-light dark:bg-card-dark m-[10%] flex items-center justify-center">
@@ -323,9 +394,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                         </button>
                     )}
                     <button 
-                        onClick={() => alert("Funcionalidade de PDF em desenvolvimento.")}
-                        className="w-full bg-transparent border-2 border-primary dark:border-white text-primary dark:text-white py-4 rounded-2xl font-bold transition active:scale-[0.98]"
+                        onClick={() => setShowReceiptModal(true)}
+                        className="w-full bg-transparent border-2 border-primary dark:border-white text-primary dark:text-white py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2"
                     >
+                        <Share2 className="w-5 h-5" />
                         Gerar Comprovante
                     </button>
                 </div>
@@ -360,6 +432,48 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
                                 className="py-3 px-4 rounded-xl font-bold text-white bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 flex items-center justify-center gap-2 disabled:opacity-70 transition-colors"
                             >
                                 {processing ? 'Processando...' : 'Confirmar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Receipt Modal */}
+            {showReceiptModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowReceiptModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Gerar Comprovante</h3>
+                            <button onClick={() => setShowReceiptModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <button 
+                                onClick={() => handleGenerateReceipt('last')}
+                                className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                            >
+                                <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center text-green-600 dark:text-green-400">
+                                    <Check className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white">Última Parcela Paga</h4>
+                                    <p className="text-xs text-gray-500">Comprovante do pagamento mais recente</p>
+                                </div>
+                            </button>
+
+                            <button 
+                                onClick={() => handleGenerateReceipt('full')}
+                                className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                            >
+                                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400">
+                                    <FileText className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white">Resumo Completo</h4>
+                                    <p className="text-xs text-gray-500">Extrato de todos os pagamentos</p>
+                                </div>
                             </button>
                         </div>
                     </div>

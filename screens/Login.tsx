@@ -124,7 +124,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
       <footer className="relative z-10 py-8 text-center bg-[#F8F9FA]">
         <p className="text-xs text-gray-400">
-            Problemas com o acesso? <a href="#" className="text-primary font-semibold underline decoration-primary/20">Contate o suporte</a>
+            Problemas com o acesso? <a href="wa.me/5599981859218" className="text-primary font-semibold underline decoration-primary/20">Contate o suporte</a>
         </p>
       </footer>
     </div>

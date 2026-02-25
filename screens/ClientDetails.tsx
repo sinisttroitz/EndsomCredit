@@ -53,9 +53,79 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
         }
     };
 
+    const isLoanLate = (loan: Loan): boolean => {
+        if (loan.status === 'paid') return false;
+        if (loan.status === 'late') return true;
+    
+        const count = loan.installments || 1;
+        const installmentValue = loan.installment_value || (loan.amount / count);
+        const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
+        
+        // Total Debt = installment_value * installments
+        const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+        const totalPaid = totalDebt - Number(loan.balance);
+        
+        let paidAccumulator = 0;
+        let dailyDateTracker = new Date(startDate);
+        
+        for (let i = 0; i < count; i++) {
+             let date: Date;
+    
+             if (loan.frequency === 'Diária') {
+                 if (i === 0) {
+                     date = new Date(startDate);
+                 } else {
+                     date = new Date(dailyDateTracker);
+                     date.setDate(date.getDate() + 1);
+                     
+                     while (true) {
+                         const day = date.getDay();
+                         if (loan.skip_saturday && day === 6) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         if (loan.skip_sunday && day === 0) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         break;
+                     }
+                 }
+                 dailyDateTracker = new Date(date);
+             } else {
+                 date = new Date(startDate);
+                 if (loan.frequency === 'Semanal') {
+                     date.setDate(startDate.getDate() + (i * 7));
+                 } else {
+                     date.setMonth(startDate.getMonth() + i);
+                 }
+             }
+             
+             // Check if this installment is paid
+             if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
+                 paidAccumulator += installmentValue;
+                 continue; // This one is paid
+             }
+             
+             // This is the first unpaid installment
+             const today = new Date();
+             const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+             const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+             
+             if (dateZero < todayZero) {
+                 return true;
+             }
+             return false; // First unpaid is in future or today
+        }
+        
+        return false;
+    };
+
     if (loading || !client) {
         return <div className="h-full flex items-center justify-center bg-background-light dark:bg-background-dark">Carregando...</div>;
     }
+
+    const isClientLate = loans.some(loan => isLoanLate(loan));
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
@@ -65,9 +135,7 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                         <ArrowLeft className="w-5 h-5" />
                     </button>
                     <h1 className="text-lg font-semibold">Perfil do Cliente</h1>
-                    <button className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 hover:bg-white/20">
-                        <MoreVertical className="w-5 h-5" />
-                    </button>
+                    <div className="w-10 h-10"></div>
                 </div>
                 <div className="flex items-center gap-5">
                     <div className="w-20 h-20 rounded-3xl border-4 border-white/10 overflow-hidden bg-gray-200 flex-shrink-0 relative">
@@ -80,8 +148,12 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                     <div>
                         <h2 className="text-2xl font-bold">{client.name}</h2>
                         <p className="text-white/60 text-sm font-medium">Cliente desde {new Date(client.created_at || Date.now()).toLocaleDateString()}</p>
-                        <div className="mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full bg-secondary/20 text-secondary text-[11px] font-bold uppercase tracking-wider border border-secondary/30">
-                            {client.status === 'active' ? 'Ativo' : client.status}
+                        <div className={`mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider border ${
+                            isClientLate 
+                            ? 'bg-red-500/20 text-red-200 border-red-500/30' 
+                            : 'bg-secondary/20 text-secondary border-secondary/30'
+                        }`}>
+                            {isClientLate ? 'Irregular' : (client.status === 'active' ? 'Ativo' : client.status)}
                         </div>
                     </div>
                 </div>
@@ -91,12 +163,12 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                 <div className="bg-card-light dark:bg-card-dark rounded-2xl p-5 shadow-xl shadow-black/5 flex justify-between items-center border border-gray-100 dark:border-gray-800">
                     <div className="flex flex-col">
                         <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium mb-1">Total Devido</span>
-                        <span className="text-xl font-bold text-primary dark:text-white">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                        <span className="text-xl font-bold text-primary dark:text-white">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
                     <div className="h-10 w-px bg-gray-100 dark:bg-gray-800"></div>
                     <div className="flex flex-col items-end">
                         <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium mb-1">Status Geral</span>
-                        {client.status === 'active' || client.status === 'paid' ? (
+                        {!isClientLate && (client.status === 'active' || client.status === 'paid') ? (
                             <div className="flex items-center gap-1.5 text-secondary font-bold text-sm">
                                 <ShieldCheck className="w-4 h-4" />
                                 <span>Regular</span>
@@ -198,7 +270,10 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                         <span className="text-[10px] font-bold text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded">{loans.length} CONTRATOS</span>
                     </div>
                     <div className="space-y-3">
-                        {loans.map(loan => (
+                        {loans.map(loan => {
+                            const isLate = isLoanLate(loan);
+                            const displayStatus = isLate ? 'late' : loan.status;
+                            return (
                             <div 
                                 key={loan.id} 
                                 onClick={() => onLoanSelect(loan.id)}
@@ -207,32 +282,32 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                 <div className="flex justify-between items-start mb-3">
                                     <div>
                                         <p className="text-[10px] font-bold text-text-sub-light dark:text-text-sub-dark uppercase">Contrato #{loan.id.substring(0,6)}</p>
-                                        <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                        <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                     </div>
                                     <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border uppercase ${
-                                        loan.status === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' :
-                                        loan.status === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' :
+                                        displayStatus === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' :
+                                        displayStatus === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' :
                                         'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
                                     }`}>
-                                        {loan.status === 'active' ? 'Ativo' : loan.status === 'paid' ? 'Quitado' : 'Atrasado'}
+                                        {displayStatus === 'active' ? 'Ativo' : displayStatus === 'paid' ? 'Quitado' : 'Atrasado'}
                                     </span>
                                 </div>
                                 <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 mb-2">
                                     <div 
                                         className={`h-1.5 rounded-full ${
-                                            loan.status === 'active' ? 'bg-secondary' : 
-                                            loan.status === 'paid' ? 'bg-gray-400' : 
+                                            displayStatus === 'active' ? 'bg-secondary' : 
+                                            displayStatus === 'paid' ? 'bg-gray-400' : 
                                             'bg-danger'
                                         }`} 
                                         style={{ width: `${loan.progress}%` }}
                                     ></div>
                                 </div>
                                 <div className="flex justify-between text-[10px] font-medium text-text-sub-light dark:text-text-sub-dark">
-                                    <span>Pago: R$ {(Number(loan.amount) - Number(loan.balance)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                    <span>Pago: R$ {(Number(loan.amount) - Number(loan.balance)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                     <span>{loan.progress}%</span>
                                 </div>
                             </div>
-                        ))}
+                        )})}
                     </div>
                 </section>
 

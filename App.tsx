@@ -14,19 +14,45 @@ import { BottomNav } from './components/BottomNav';
 import { supabase } from './supabaseClient';
 
 const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<ViewState>('login');
-  const [previousView, setPreviousView] = useState<ViewState | null>(null);
+  // Helper to load state from localStorage
+  const loadState = <T,>(key: string, fallback: T): T => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  };
+
+  const [currentView, setCurrentView] = useState<ViewState>(() => loadState('currentView', 'login'));
+  const [previousView, setPreviousView] = useState<ViewState | null>(() => loadState('previousView', null));
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(() => loadState('selectedClientId', null));
+  const [selectedLoanId, setSelectedLoanId] = useState<string | null>(() => loadState('selectedLoanId', null));
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [initialLoansFilter, setInitialLoansFilter] = useState<'all' | 'pending' | 'late'>(() => loadState('initialLoansFilter', 'all'));
+
+  // Save state to localStorage whenever it changes
+  useEffect(() => {
+    if (currentView !== 'login') {
+        localStorage.setItem('currentView', JSON.stringify(currentView));
+    }
+    localStorage.setItem('previousView', JSON.stringify(previousView));
+    localStorage.setItem('selectedClientId', JSON.stringify(selectedClientId));
+    localStorage.setItem('selectedLoanId', JSON.stringify(selectedLoanId));
+    localStorage.setItem('initialLoansFilter', JSON.stringify(initialLoansFilter));
+  }, [currentView, previousView, selectedClientId, selectedLoanId, initialLoansFilter]);
 
   useEffect(() => {
     // Checar sessão ativa ao iniciar
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) setCurrentView('dashboard');
+      if (!session) {
+          setCurrentView('login');
+      }
+      // If session exists, we keep the initialized currentView (restored from localStorage)
+      // unless it is 'login', which is handled by the redirect effect below.
       setLoading(false);
     });
 
@@ -34,15 +60,26 @@ const App: React.FC = () => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) {
-        setCurrentView('dashboard');
-      } else {
+      if (!session) {
         setCurrentView('login');
+        // Clear storage on logout
+        localStorage.removeItem('currentView');
+        localStorage.removeItem('previousView');
+        localStorage.removeItem('selectedClientId');
+        localStorage.removeItem('selectedLoanId');
+        localStorage.removeItem('initialLoansFilter');
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Redirect to dashboard if logged in but on login screen
+  useEffect(() => {
+      if (session && currentView === 'login') {
+          setCurrentView('dashboard');
+      }
+  }, [session, currentView]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -67,6 +104,17 @@ const App: React.FC = () => {
                 setPreviousView('dashboard');
                 setCurrentView('loan-details');
             }}
+            onViewLateLoans={() => {
+                // We need to pass the filter to Loans component
+                // Since Loans component state is internal, we can force a remount or pass a prop
+                // Ideally we should have a state in App for loans filter, but for now let's just switch view
+                // and rely on Loans component to handle 'late' filter if we passed it.
+                // But we only passed initialFilter prop to Loans.
+                // So if we switch view, Loans will mount with default 'all' unless we change how we render it.
+                // Let's add a state for initialLoansFilter in App.
+                setInitialLoansFilter('late');
+                setCurrentView('loans');
+            }}
         />;
       case 'clients':
         return <Clients onClientSelect={(id) => {
@@ -74,11 +122,15 @@ const App: React.FC = () => {
             setCurrentView('client-details');
         }} />;
       case 'loans':
-        return <Loans onLoanSelect={(id) => {
-            setSelectedLoanId(id);
-            setPreviousView(null);
-            setCurrentView('loan-details');
-        }} />;
+        return <Loans 
+            onLoanSelect={(id) => {
+                setSelectedLoanId(id);
+                setPreviousView(null);
+                setCurrentView('loan-details');
+            }} 
+            initialFilter={initialLoansFilter}
+            onFilterChange={setInitialLoansFilter}
+        />;
       case 'profile':
         return <Profile onLogout={handleLogout} userEmail={session?.user?.email} />;
       case 'new-loan':

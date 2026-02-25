@@ -17,6 +17,74 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
     fetchClients();
   }, []);
 
+    const isLoanLate = (loan: Loan): boolean => {
+        if (loan.status === 'paid') return false;
+        if (loan.status === 'late') return true;
+    
+        const count = loan.installments || 1;
+        const installmentValue = loan.installment_value || (loan.amount / count);
+        const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
+        
+        // Total Debt = installment_value * installments
+        const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+        const totalPaid = totalDebt - Number(loan.balance);
+        
+        let paidAccumulator = 0;
+        let dailyDateTracker = new Date(startDate);
+        
+        for (let i = 0; i < count; i++) {
+             let date: Date;
+    
+             if (loan.frequency === 'Diária') {
+                 if (i === 0) {
+                     date = new Date(startDate);
+                 } else {
+                     date = new Date(dailyDateTracker);
+                     date.setDate(date.getDate() + 1);
+                     
+                     while (true) {
+                         const day = date.getDay();
+                         if (loan.skip_saturday && day === 6) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         if (loan.skip_sunday && day === 0) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         break;
+                     }
+                 }
+                 dailyDateTracker = new Date(date);
+             } else {
+                 date = new Date(startDate);
+                 if (loan.frequency === 'Semanal') {
+                     date.setDate(startDate.getDate() + (i * 7));
+                 } else {
+                     date.setMonth(startDate.getMonth() + i);
+                 }
+             }
+             
+             // Check if this installment is paid
+             if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
+                 paidAccumulator += installmentValue;
+                 continue; // This one is paid
+             }
+             
+             // This is the first unpaid installment
+             const today = new Date();
+             const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+             const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+             
+             if (dateZero < todayZero) {
+                 return true;
+             }
+             return false; // First unpaid is in future or today
+        }
+        
+        return false;
+    };
+
   const fetchClients = async () => {
     setLoading(true);
     try {
@@ -31,7 +99,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
       // Fetch Loans to calculate debt per client
       const { data: loansData, error: loansError } = await supabase
         .from('loans')
-        .select('client_id, balance, status');
+        .select('client_id, balance, status, due_date, created_at, installments, installment_value, frequency, skip_saturday, skip_sunday, amount');
 
       if (loansError) throw loansError;
 
@@ -39,14 +107,13 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
         const clientLoans = loansData.filter((l: any) => l.client_id === client.id);
         const debt = clientLoans.reduce((acc: number, curr: any) => acc + Number(curr.balance), 0);
         
-        // Determine status based on loans. If any loan is late, client is late.
-        // If all loans paid, client is paid (or active if we consider 'customer lifetime')
-        // Defaulting to stored status, but updating locally based on debt logic if needed.
+        const isLate = clientLoans.some((loan: any) => isLoanLate(loan));
         
         return {
             ...client,
             initials: client.name.substring(0, 2).toUpperCase(),
-            debt: debt
+            debt: debt,
+            isLate: isLate
         };
       });
 
@@ -60,7 +127,15 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
   };
 
   const filteredClients = clients.filter(client => {
-    const matchesFilter = filter === 'all' ? true : client.status === filter;
+    let matchesFilter = true;
+    if (filter === 'late') {
+        matchesFilter = (client as any).isLate;
+    } else if (filter === 'active') {
+        matchesFilter = client.status === 'active' && !(client as any).isLate;
+    } else if (filter !== 'all') {
+        matchesFilter = client.status === filter;
+    }
+
     const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesFilter && matchesSearch;
   });
@@ -70,9 +145,6 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
       <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-8 shadow-lg relative z-10">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold tracking-tight">Clientes</h1>
-          <button onClick={fetchClients} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 active:bg-white/20">
-            {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <SlidersHorizontal className="w-5 h-5" />}
-          </button>
         </div>
         <div className="relative mb-2">
           <input 
@@ -142,13 +214,13 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
               </div>
               <div className="flex flex-col items-end">
                 <span className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${
-                  client.status === 'active' 
-                    ? 'bg-green-100 text-green-700 border-green-200' 
-                    : client.status === 'late' 
-                        ? 'bg-red-100 text-red-700 border-red-200'
+                  (client as any).isLate 
+                    ? 'bg-red-100 text-red-700 border-red-200' 
+                    : client.status === 'active' 
+                        ? 'bg-green-100 text-green-700 border-green-200'
                         : 'bg-gray-100 text-gray-700 border-gray-200'
                 }`}>
-                  {client.status === 'active' ? 'Em dia' : client.status === 'late' ? 'Atrasado' : 'Quitado'}
+                  {(client as any).isLate ? 'Irregular' : (client.status === 'active' ? 'Em dia' : 'Quitado')}
                 </span>
                 <ChevronRight className="text-gray-300 w-5 h-5 mt-2" />
               </div>

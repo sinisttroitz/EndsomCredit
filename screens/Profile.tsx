@@ -24,15 +24,21 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
       state: ''
   });
 
+  const [email, setEmail] = useState(userEmail || '');
+  const [name, setName] = useState('');
+
   // Fetch initial data
   useEffect(() => {
     fetchSettings();
-  }, []);
+    if (userEmail) setEmail(userEmail);
+  }, [userEmail]);
 
   const fetchSettings = async () => {
     try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
+            setName(user.user_metadata.full_name || '');
+            
             const { data, error } = await supabase
                 .from('user_settings')
                 .select('*')
@@ -91,6 +97,19 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
+        // Update email if changed
+        if (email !== userEmail) {
+            const { error: emailError } = await supabase.auth.updateUser({ email: email });
+            if (emailError) throw emailError;
+            alert("Email atualizado! Verifique sua caixa de entrada para confirmar a alteração.");
+        }
+
+        // Update name if changed
+        if (name !== user.user_metadata.full_name) {
+            const { error: nameError } = await supabase.auth.updateUser({ data: { full_name: name } });
+            if (nameError) throw nameError;
+        }
+
         const { error } = await supabase
             .from('user_settings')
             .upsert({
@@ -105,9 +124,9 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
         if (error) throw error;
         setIsEditing(false);
         setCep(''); // Limpa o CEP após salvar, pois só armazenamos a cidade/uf
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error saving settings:", error);
-        alert("Erro ao salvar alterações.");
+        alert(`Erro ao salvar alterações: ${error.message || error}`);
     } finally {
         setSaving(false);
     }
@@ -166,12 +185,36 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
         <section>
             <h3 className="text-xs font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-wider mb-3 pl-1">Informações Pessoais</h3>
             <div className="bg-card-light dark:bg-card-dark rounded-2xl p-2 shadow-sm border border-gray-100 dark:border-gray-800">
-                <div className="p-3 flex justify-between items-center">
-                    <div>
-                        <p className="text-xs text-gray-400 mb-0.5">Email (Não editável)</p>
-                        <p className="font-semibold text-gray-800 dark:text-white">{userEmail}</p>
+                <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
+                    <div className="w-full">
+                        <p className="text-xs text-gray-400 mb-0.5">Nome</p>
+                        {isEditing ? (
+                            <input 
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 text-sm font-semibold text-primary dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
+                                placeholder="Seu nome completo"
+                            />
+                        ) : (
+                            <p className="font-semibold text-gray-800 dark:text-white">{name || 'Não informado'}</p>
+                        )}
                     </div>
-                    <Lock className="w-4 h-4 text-gray-300" />
+                    {!isEditing && <Edit2 className="w-4 h-4 text-gray-300" />}
+                </div>
+                <div className="p-3 flex justify-between items-center">
+                    <div className="w-full">
+                        <p className="text-xs text-gray-400 mb-0.5">Email</p>
+                        {isEditing ? (
+                            <input 
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 text-sm font-semibold text-primary dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
+                            />
+                        ) : (
+                            <p className="font-semibold text-gray-800 dark:text-white">{email}</p>
+                        )}
+                    </div>
+                    {!isEditing && <Lock className="w-4 h-4 text-gray-300" />}
                 </div>
             </div>
         </section>
