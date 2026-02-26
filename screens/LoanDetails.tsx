@@ -130,7 +130,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
     const generateInstallments = (loanData: Loan) => {
         const count = loanData.installments || 1;
         const installmentValue = loanData.installment_value || (loanData.amount / count);
-        const startDate = loanData.due_date ? new Date(loanData.due_date) : new Date(loanData.created_at || Date.now());
+        
+        // Fix date parsing to avoid timezone issues
+        let startDate: Date;
+        if (loanData.due_date) {
+            const [year, month, day] = loanData.due_date.split('-').map(Number);
+            startDate = new Date(year, month - 1, day);
+        } else {
+            startDate = new Date(loanData.created_at || Date.now());
+        }
         
         // Simple logic to determine how many paid based on balance
         // Total Debt = installment_value * installments
@@ -434,12 +442,6 @@ ${paidInstallments.map(i =>
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Taxa de Juros</p>
                         <p className="font-bold text-gray-900 dark:text-white">
                             {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : 'a.m.'}
-                        </p>
-                    </div>
-                    <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Próximo Venc.</p>
-                        <p className="font-bold text-accent-blue">
-                            {loan.due_date ? new Date(loan.due_date).toLocaleDateString() : '-'}
                         </p>
                     </div>
                 </div>
