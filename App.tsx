@@ -32,6 +32,7 @@ const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [initialLoansFilter, setInitialLoansFilter] = useState<'all' | 'pending' | 'late'>(() => loadState('initialLoansFilter', 'all'));
+  const [newLoanInitialData, setNewLoanInitialData] = useState<any>(null);
 
   // Save state to localStorage whenever it changes
   useEffect(() => {
@@ -136,8 +137,12 @@ const App: React.FC = () => {
       case 'new-loan':
         return <NewLoan 
             onBack={() => setCurrentView('dashboard')} 
-            onSuccess={() => setCurrentView('loans')}
+            onSuccess={() => {
+                setNewLoanInitialData(null);
+                setCurrentView('loans');
+            }}
             preSelectedClientId={selectedClientId} 
+            initialData={newLoanInitialData}
         />;
       case 'new-client':
         return <NewClient 
@@ -186,6 +191,11 @@ const App: React.FC = () => {
                 } else {
                     setCurrentView('loans');
                 }
+            }}
+            onNewLoan={(data) => {
+                setNewLoanInitialData(data);
+                setSelectedClientId(data.clientId);
+                setCurrentView('new-loan');
             }}
         />;
       default:

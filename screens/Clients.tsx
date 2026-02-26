@@ -85,6 +85,75 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
         return false;
     };
 
+    const calculateOverdueStats = (loan: Loan): { count: number, amount: number } => {
+        if (loan.status === 'paid') return { count: 0, amount: 0 };
+
+        const count = loan.installments || 1;
+        const installmentValue = loan.installment_value || (loan.amount / count);
+        const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
+        
+        const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+        const totalPaid = totalDebt - Number(loan.balance);
+        
+        let paidAccumulator = 0;
+        let overdueSum = 0;
+        let overdueCount = 0;
+        let dailyDateTracker = new Date(startDate);
+        
+        const today = new Date();
+        const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+        for (let i = 0; i < count; i++) {
+             let date: Date;
+
+             if (loan.frequency === 'Diária') {
+                 if (i === 0) {
+                     date = new Date(startDate);
+                 } else {
+                     date = new Date(dailyDateTracker);
+                     date.setDate(date.getDate() + 1);
+                     
+                     while (true) {
+                         const day = date.getDay();
+                         if (loan.skip_saturday && day === 6) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         if (loan.skip_sunday && day === 0) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         break;
+                     }
+                 }
+                 dailyDateTracker = new Date(date);
+             } else {
+                 date = new Date(startDate);
+                 if (loan.frequency === 'Semanal') {
+                     date.setDate(startDate.getDate() + (i * 7));
+                 } else {
+                     date.setMonth(startDate.getMonth() + i);
+                 }
+             }
+             
+             // Check if this installment is paid
+             if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
+                 paidAccumulator += installmentValue;
+                 continue; // This one is paid
+             }
+             
+             // This is an unpaid installment
+             const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+             
+             if (dateZero < todayZero) {
+                 overdueSum += installmentValue;
+                 overdueCount++;
+             }
+        }
+        
+        return { count: overdueCount, amount: overdueSum };
+    };
+
   const fetchClients = async () => {
     setLoading(true);
     try {
@@ -108,12 +177,17 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
         const debt = clientLoans.reduce((acc: number, curr: any) => acc + Number(curr.balance), 0);
         
         const isLate = clientLoans.some((loan: any) => isLoanLate(loan));
+        const overdueStats = clientLoans.reduce((acc: { count: number, amount: number }, curr: any) => {
+            const stats = calculateOverdueStats(curr);
+            return { count: acc.count + stats.count, amount: acc.amount + stats.amount };
+        }, { count: 0, amount: 0 });
         
         return {
             ...client,
             initials: client.name.substring(0, 2).toUpperCase(),
             debt: debt,
-            isLate: isLate
+            isLate: isLate,
+            overdueStats: overdueStats
         };
       });
 
@@ -210,6 +284,11 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                   <p className="text-xs text-text-sub-light dark:text-text-sub-dark mt-0.5">
                     Saldo Devedor: <span className="font-semibold text-gray-800 dark:text-gray-200">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </p>
+                  {(client as any).overdueStats?.count > 0 && (
+                      <p className="text-[10px] text-red-500 font-medium mt-0.5">
+                        Parcelas Atrasadas: {(client as any).overdueStats.count} de R$ {((client as any).overdueStats.amount / (client as any).overdueStats.count).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </p>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col items-end">

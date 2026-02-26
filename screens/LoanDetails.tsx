@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Share2, FileText, X } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Share2, FileText, X, PlusCircle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan } from '../types';
 
 interface LoanDetailsProps {
     loanId: string | null;
     onBack: () => void;
+    onNewLoan?: (data: any) => void;
 }
 
 interface Installment {
@@ -23,12 +24,89 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
     const [showAllInstallments, setShowAllInstallments] = useState(false);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
+    
+    // Batch Payment State
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedInstallments, setSelectedInstallments] = useState<number[]>([]);
 
     useEffect(() => {
         if (loanId) {
             fetchLoanData();
         }
     }, [loanId]);
+
+    // ... (existing fetchLoanData)
+
+    // Helper to count overdue installments
+    const overdueCount = installmentsList.filter(i => i.status === 'late').length;
+
+    const toggleSelectionMode = () => {
+        setIsSelectionMode(!isSelectionMode);
+        setSelectedInstallments([]);
+    };
+
+    const toggleInstallmentSelection = (number: number) => {
+        setSelectedInstallments(prev => {
+            if (prev.includes(number)) {
+                return prev.filter(n => n !== number);
+            } else {
+                return [...prev, number];
+            }
+        });
+    };
+
+    const selectAllOverdue = () => {
+        const overdueNumbers = installmentsList
+            .filter(i => i.status === 'late')
+            .map(i => i.number);
+        setSelectedInstallments(overdueNumbers);
+    };
+
+    const handleBatchPayment = async () => {
+        if (!loan || selectedInstallments.length === 0) return;
+
+        if (selectedInstallments.length > 1) {
+            const confirmed = window.confirm(`Marcar ${selectedInstallments.length} parcelas como pagas?`);
+            if (!confirmed) return;
+        }
+
+        setProcessing(true);
+        try {
+            // Calculate total value of selected installments
+            const selectedValue = installmentsList
+                .filter(i => selectedInstallments.includes(i.number))
+                .reduce((acc, curr) => acc + curr.value, 0);
+
+            const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+            
+            let newBalance = Number(loan.balance) - selectedValue;
+            if (newBalance < 0.01) newBalance = 0;
+            
+            const newProgress = Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100));
+            const newStatus = newBalance === 0 ? 'paid' : 'active';
+
+            const { error } = await supabase
+                .from('loans')
+                .update({ 
+                    balance: newBalance,
+                    progress: newProgress,
+                    status: newStatus
+                })
+                .eq('id', loan.id);
+
+            if (error) throw error;
+            
+            setIsSelectionMode(false);
+            setSelectedInstallments([]);
+            await fetchLoanData(); 
+            
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao registrar pagamento em lote.");
+        } finally {
+            setProcessing(false);
+        }
+    };
 
     const fetchLoanData = async () => {
         setLoading(true);
@@ -237,6 +315,20 @@ ${paidInstallments.map(i =>
         setShowReceiptModal(false);
     };
 
+    const handleNewLoan = () => {
+        if (!loan || !onNewLoan) return;
+        
+        onNewLoan({
+            clientId: loan.client_id,
+            amount: loan.amount,
+            interestRate: loan.interest_rate,
+            installments: loan.installments,
+            frequency: loan.frequency,
+            skipSaturday: loan.skip_saturday,
+            skipSunday: loan.skip_sunday
+        });
+    };
+
     if (loading || !loan) {
         return <div className="h-full flex items-center justify-center bg-background-light dark:bg-background-dark text-primary dark:text-white">Carregando...</div>;
     }
@@ -253,13 +345,30 @@ ${paidInstallments.map(i =>
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-            <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-16 shadow-lg relative z-10">
+            <header className={`bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-16 shadow-lg relative z-10 transition-colors duration-300 ${isSelectionMode ? 'bg-gray-900' : ''}`}>
                 <div className="flex items-center justify-between mb-4">
-                    <button onClick={onBack} className="w-10 h-10 flex items-center justify-start active:opacity-70">
-                        <ChevronLeft className="w-6 h-6" />
-                    </button>
-                    <h1 className="text-lg font-semibold">Detalhes do Empréstimo</h1>
-                    <div className="w-10 h-10"></div>
+                    {isSelectionMode ? (
+                        <>
+                            <button onClick={toggleSelectionMode} className="w-10 h-10 flex items-center justify-start active:opacity-70">
+                                <X className="w-6 h-6" />
+                            </button>
+                            <div className="flex flex-col items-center">
+                                <span className="text-lg font-bold">{selectedInstallments.length} selecionadas</span>
+                                <button onClick={selectAllOverdue} className="text-xs text-accent-blue font-medium mt-0.5 active:opacity-70">
+                                    Selecionar vencidas
+                                </button>
+                            </div>
+                            <div className="w-10 h-10"></div>
+                        </>
+                    ) : (
+                        <>
+                            <button onClick={onBack} className="w-10 h-10 flex items-center justify-start active:opacity-70">
+                                <ChevronLeft className="w-6 h-6" />
+                            </button>
+                            <h1 className="text-lg font-semibold">Detalhes do Empréstimo</h1>
+                            <div className="w-10 h-10"></div>
+                        </>
+                    )}
                 </div>
             </header>
             
@@ -339,28 +448,49 @@ ${paidInstallments.map(i =>
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 mb-6">
                     <div className="flex items-center justify-between mb-6">
                         <h3 className="text-sm font-bold text-primary dark:text-white">Histórico de Parcelas</h3>
-                        <span 
-                            className="text-xs text-accent-blue font-medium cursor-pointer"
-                            onClick={() => setShowAllInstallments(!showAllInstallments)}
-                        >
-                            {showAllInstallments ? 'Ver menos' : 'Ver tudo'}
-                        </span>
+                        {!isSelectionMode && (
+                            <span 
+                                className="text-xs text-accent-blue font-medium cursor-pointer"
+                                onClick={() => setShowAllInstallments(!showAllInstallments)}
+                            >
+                                {showAllInstallments ? 'Ver menos' : 'Ver tudo'}
+                            </span>
+                        )}
                     </div>
                     <div className="relative space-y-6">
                         <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-100 dark:bg-gray-700"></div>
                         
-                        {(showAllInstallments ? installmentsList : installmentsList.slice(0, 5)).map((inst) => (
-                            <div key={inst.number} className="relative flex items-center gap-4">
-                                <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white dark:ring-card-dark ${
-                                    inst.status === 'paid' ? 'bg-secondary' :
-                                    inst.status === 'late' ? 'bg-danger' :
-                                    inst.status === 'pending' ? 'bg-accent-blue' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
-                                }`}>
-                                    {inst.status === 'paid' ? <Check className="w-4 h-4" /> :
-                                     inst.status === 'future' ? <Circle className="w-4 h-4" /> :
-                                     <Clock className="w-4 h-4" />}
-                                </div>
-                                <div className={`flex-1 flex justify-between items-center ${inst.status === 'future' ? 'opacity-60' : ''}`}>
+                        {(showAllInstallments || isSelectionMode ? installmentsList : installmentsList.slice(0, 5)).map((inst) => (
+                            <div 
+                                key={inst.number} 
+                                className={`relative flex items-center gap-4 transition-all duration-200 ${isSelectionMode && inst.status !== 'paid' ? 'cursor-pointer active:scale-[0.99]' : ''}`}
+                                onClick={() => {
+                                    if (isSelectionMode && inst.status !== 'paid') {
+                                        toggleInstallmentSelection(inst.number);
+                                    }
+                                }}
+                            >
+                                {isSelectionMode ? (
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors ${
+                                        inst.status === 'paid' ? 'border-gray-200 bg-gray-100 opacity-50' :
+                                        selectedInstallments.includes(inst.number) ? 'border-primary bg-primary text-white' : 'border-gray-300'
+                                    }`}>
+                                        {inst.status === 'paid' ? <Check className="w-4 h-4 text-gray-400" /> : 
+                                         selectedInstallments.includes(inst.number) && <Check className="w-4 h-4" />}
+                                    </div>
+                                ) : (
+                                    <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white dark:ring-card-dark ${
+                                        inst.status === 'paid' ? 'bg-secondary' :
+                                        inst.status === 'late' ? 'bg-danger' :
+                                        inst.status === 'pending' ? 'bg-accent-blue' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
+                                    }`}>
+                                        {inst.status === 'paid' ? <Check className="w-4 h-4" /> :
+                                         inst.status === 'future' ? <Circle className="w-4 h-4" /> :
+                                         <Clock className="w-4 h-4" />}
+                                    </div>
+                                )}
+                                
+                                <div className={`flex-1 flex justify-between items-center ${inst.status === 'future' && !isSelectionMode ? 'opacity-60' : ''}`}>
                                     <div>
                                         <p className="text-sm font-bold text-primary dark:text-white">Parcela #{String(inst.number).padStart(2, '0')}</p>
                                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark">
@@ -384,22 +514,63 @@ ${paidInstallments.map(i =>
                 </div>
 
                 <div className="space-y-3 mb-8">
-                    {loan.status !== 'paid' && (
-                        <button 
-                            onClick={() => setShowPaymentModal(true)}
-                            disabled={processing}
-                            className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
-                        >
-                            Registrar Pagamento
-                        </button>
+                    {isSelectionMode ? (
+                        <>
+                            <button 
+                                onClick={handleBatchPayment}
+                                disabled={processing || selectedInstallments.length === 0}
+                                className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
+                            >
+                                {processing ? 'Processando...' : `Marcar como pagas (${selectedInstallments.length})`}
+                            </button>
+                            <button 
+                                onClick={toggleSelectionMode}
+                                className="w-full bg-transparent border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-sm"
+                            >
+                                Cancelar
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            {loan.status !== 'paid' && (
+                                <button 
+                                    onClick={() => setShowPaymentModal(true)}
+                                    disabled={processing}
+                                    className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
+                                >
+                                    Registrar Pagamento
+                                </button>
+                            )}
+                            
+                            {/* Batch Payment Button - Always visible if not paid */}
+                            {loan.status !== 'paid' && (
+                                <button 
+                                    onClick={toggleSelectionMode}
+                                    className="w-full bg-white dark:bg-gray-800 text-primary dark:text-white border border-gray-200 dark:border-gray-700 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-sm"
+                                >
+                                    Pagamento em lote
+                                </button>
+                            )}
+
+                            <button 
+                                onClick={() => setShowReceiptModal(true)}
+                                className="w-full bg-transparent border-2 border-primary dark:border-white text-primary dark:text-white py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2"
+                            >
+                                <Share2 className="w-5 h-5" />
+                                Gerar Comprovante
+                            </button>
+
+                            {loan.status === 'paid' && (
+                                <button 
+                                    onClick={handleNewLoan}
+                                    className="w-full bg-secondary/10 border border-secondary text-secondary py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
+                                >
+                                    <PlusCircle className="w-5 h-5" />
+                                    Novo Empréstimo para este Cliente
+                                </button>
+                            )}
+                        </>
                     )}
-                    <button 
-                        onClick={() => setShowReceiptModal(true)}
-                        className="w-full bg-transparent border-2 border-primary dark:border-white text-primary dark:text-white py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2"
-                    >
-                        <Share2 className="w-5 h-5" />
-                        Gerar Comprovante
-                    </button>
                 </div>
 
             </main>

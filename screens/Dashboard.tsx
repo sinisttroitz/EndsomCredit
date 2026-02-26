@@ -145,6 +145,73 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     return false;
   };
 
+  const calculateOverdueAmount = (loan: Loan): number => {
+    if (loan.status === 'paid') return 0;
+
+    const count = loan.installments || 1;
+    const installmentValue = loan.installment_value || (loan.amount / count);
+    const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
+    
+    const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+    const totalPaid = totalDebt - Number(loan.balance);
+    
+    let paidAccumulator = 0;
+    let overdueSum = 0;
+    let dailyDateTracker = new Date(startDate);
+    
+    const today = new Date();
+    const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    for (let i = 0; i < count; i++) {
+         let date: Date;
+
+         if (loan.frequency === 'Diária') {
+             if (i === 0) {
+                 date = new Date(startDate);
+             } else {
+                 date = new Date(dailyDateTracker);
+                 date.setDate(date.getDate() + 1);
+                 
+                 while (true) {
+                     const day = date.getDay();
+                     if (loan.skip_saturday && day === 6) {
+                         date.setDate(date.getDate() + 1);
+                         continue;
+                     }
+                     if (loan.skip_sunday && day === 0) {
+                         date.setDate(date.getDate() + 1);
+                         continue;
+                     }
+                     break;
+                 }
+             }
+             dailyDateTracker = new Date(date);
+         } else {
+             date = new Date(startDate);
+             if (loan.frequency === 'Semanal') {
+                 date.setDate(startDate.getDate() + (i * 7));
+             } else {
+                 date.setMonth(startDate.getMonth() + i);
+             }
+         }
+         
+         // Check if this installment is paid
+         if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
+             paidAccumulator += installmentValue;
+             continue; // This one is paid
+         }
+         
+         // This is an unpaid installment
+         const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+         
+         if (dateZero < todayZero) {
+             overdueSum += installmentValue;
+         }
+    }
+    
+    return overdueSum;
+  };
+
   const fetchDashboardData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -180,7 +247,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         // Total Debt = Total Amount to be paid (Principal + Interest)
         const totalDebt = installmentValue * installments;
 
-        totalLent += amount;
+        // Only sum principal for active/late loans (Active Capital)
+        if (loan.status === 'active' || loan.status === 'late') {
+            totalLent += amount;
+        }
         
         let loanReceived = 0;
         // Total Received = Total Debt - Remaining Balance
@@ -193,19 +263,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         totalReceived += loanReceived;
 
         // Calculate Interest Received for this loan
-        // Interest Received = Total Interest * (Amount Paid / Total Debt)
-        if (totalDebt > 0 && amount > 0) {
-            const totalExpectedInterest = totalDebt - amount;
-            // Avoid division by zero
-            const progressRatio = loanReceived / totalDebt;
-            // Cap ratio at 1 (in case of overpayment or rounding issues, though balance shouldn't be negative)
-            const effectiveRatio = Math.min(progressRatio, 1);
-            const interestPart = totalExpectedInterest * effectiveRatio;
-            totalInterestReceived += interestPart;
+        // Only for PAID loans as requested
+        if (loan.status === 'paid' && totalDebt > 0 && amount > 0) {
+             // For paid loans, the interest received is the total expected interest
+             // (Total Debt - Principal)
+             const interest = totalDebt - amount;
+             totalInterestReceived += interest;
         }
 
         if (isLoanLate(loan)) {
-            lateAmount += balance;
+            lateAmount += calculateOverdueAmount(loan);
             lateCount++;
         }
       });
@@ -346,7 +413,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
 
         <div className="flex justify-between items-center bg-white/10 rounded-xl p-4 border border-white/5 backdrop-blur-sm">
           <div className="flex flex-col">
-            <span className="text-gray-300 text-xs font-medium uppercase tracking-wider mb-1">Total Emprestado</span>
+            <span className="text-gray-300 text-xs font-medium uppercase tracking-wider mb-1">Empréstimos Ativos</span>
           </div>
           <div className="h-8 w-px bg-white/20 mx-4"></div>
           <div className="flex flex-col items-end">

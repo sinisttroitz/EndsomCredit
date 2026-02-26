@@ -5,12 +5,12 @@ import { Loan } from '../types';
 
 interface LoansProps {
     onLoanSelect?: (loanId: string) => void;
-    initialFilter?: 'all' | 'pending' | 'late';
-    onFilterChange?: (filter: 'all' | 'pending' | 'late') => void;
+    initialFilter?: 'active' | 'late' | 'paid';
+    onFilterChange?: (filter: 'active' | 'late' | 'paid') => void;
 }
 
-export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'all', onFilterChange }) => {
-    const [filter, setFilter] = useState<'all' | 'pending' | 'late'>(initialFilter);
+export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'active', onFilterChange }) => {
+    const [filter, setFilter] = useState<'active' | 'late' | 'paid'>(initialFilter);
     const [loans, setLoans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -120,17 +120,13 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'all
     };
 
     const filteredLoans = loans.filter(loan => {
-        if (filter !== 'all') {
-            if (filter === 'late') {
-                if (!isLoanLate(loan)) return false;
-            } else if (filter === 'pending') {
-                // Pending usually means 'active' but not late? Or 'pending' status?
-                // Assuming 'pending' filter means 'active' and NOT late
-                if (loan.status !== 'active' && loan.status !== 'pending') return false;
-                if (isLoanLate(loan)) return false;
-            } else {
-                if (loan.status !== filter) return false;
-            }
+        if (filter === 'active') {
+            // Show active and late (ongoing loans), exclude paid and pending
+            if (loan.status === 'paid' || loan.status === 'pending') return false;
+        } else if (filter === 'paid') {
+            if (loan.status !== 'paid') return false;
+        } else if (filter === 'late') {
+            if (!isLoanLate(loan)) return false;
         }
         
         if (searchTerm) {
@@ -163,22 +159,22 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'all
       <div className="px-6 mt-6 mb-2">
         <div className="flex space-x-3 overflow-x-auto no-scrollbar pb-2">
           <button 
-             onClick={() => setFilter('all')}
-             className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'all' ? 'bg-primary text-white' : 'bg-white text-text-sub-light border border-gray-200'}`}
+             onClick={() => setFilter('active')}
+             className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'active' ? 'bg-primary text-white' : 'bg-white text-text-sub-light border border-gray-200'}`}
            >
-            Todos
-          </button>
-          <button 
-             onClick={() => setFilter('pending')}
-             className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'pending' ? 'bg-primary text-white' : 'bg-white text-text-sub-light border border-gray-200'}`}
-           >
-            Pendentes
+            Ativos
           </button>
           <button 
              onClick={() => setFilter('late')}
              className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'late' ? 'bg-primary text-white' : 'bg-white text-text-sub-light border border-gray-200'}`}
            >
             Atrasados
+          </button>
+          <button 
+             onClick={() => setFilter('paid')}
+             className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'paid' ? 'bg-primary text-white' : 'bg-white text-text-sub-light border border-gray-200'}`}
+           >
+            Quitados
           </button>
         </div>
       </div>

@@ -22,6 +22,75 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
         }
     }, [clientId]);
 
+    const calculateOverdueStats = (loan: Loan): { count: number, amount: number } => {
+        if (loan.status === 'paid') return { count: 0, amount: 0 };
+
+        const count = loan.installments || 1;
+        const installmentValue = loan.installment_value || (loan.amount / count);
+        const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
+        
+        const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+        const totalPaid = totalDebt - Number(loan.balance);
+        
+        let paidAccumulator = 0;
+        let overdueSum = 0;
+        let overdueCount = 0;
+        let dailyDateTracker = new Date(startDate);
+        
+        const today = new Date();
+        const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+        for (let i = 0; i < count; i++) {
+             let date: Date;
+
+             if (loan.frequency === 'Diária') {
+                 if (i === 0) {
+                     date = new Date(startDate);
+                 } else {
+                     date = new Date(dailyDateTracker);
+                     date.setDate(date.getDate() + 1);
+                     
+                     while (true) {
+                         const day = date.getDay();
+                         if (loan.skip_saturday && day === 6) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         if (loan.skip_sunday && day === 0) {
+                             date.setDate(date.getDate() + 1);
+                             continue;
+                         }
+                         break;
+                     }
+                 }
+                 dailyDateTracker = new Date(date);
+             } else {
+                 date = new Date(startDate);
+                 if (loan.frequency === 'Semanal') {
+                     date.setDate(startDate.getDate() + (i * 7));
+                 } else {
+                     date.setMonth(startDate.getMonth() + i);
+                 }
+             }
+             
+             // Check if this installment is paid
+             if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
+                 paidAccumulator += installmentValue;
+                 continue; // This one is paid
+             }
+             
+             // This is an unpaid installment
+             const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+             
+             if (dateZero < todayZero) {
+                 overdueSum += installmentValue;
+                 overdueCount++;
+             }
+        }
+        
+        return { count: overdueCount, amount: overdueSum };
+    };
+
     const fetchClientData = async (id: string) => {
         setLoading(true);
         try {
@@ -43,8 +112,12 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
 
             // Calculate debt
             const debt = loansData.reduce((acc: number, curr: any) => acc + Number(curr.balance), 0);
+            const overdueStats = loansData.reduce((acc: { count: number, amount: number }, curr: any) => {
+                const stats = calculateOverdueStats(curr);
+                return { count: acc.count + stats.count, amount: acc.amount + stats.amount };
+            }, { count: 0, amount: 0 });
 
-            setClient({ ...clientData, debt });
+            setClient({ ...clientData, debt, overdueStats });
             setLoans(loansData || []);
         } catch (error) {
             console.error(error);
@@ -164,6 +237,11 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                     <div className="flex flex-col">
                         <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium mb-1">Total Devido</span>
                         <span className="text-xl font-bold text-primary dark:text-white">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        {(client as any).overdueStats?.count > 0 && (
+                            <span className="text-[10px] text-red-500 font-medium mt-1">
+                                Parcelas Atrasadas: {(client as any).overdueStats.count} de R$ {((client as any).overdueStats.amount / (client as any).overdueStats.count).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                        )}
                     </div>
                     <div className="h-10 w-px bg-gray-100 dark:bg-gray-800"></div>
                     <div className="flex flex-col items-end">
@@ -273,6 +351,24 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                         {loans.map(loan => {
                             const isLate = isLoanLate(loan);
                             const displayStatus = isLate ? 'late' : loan.status;
+                            
+                            // Calculate correct paid amount based on Total Debt
+                            const installmentValue = Number(loan.installment_value) || 0;
+                            const installments = Number(loan.installments) || 1;
+                            const totalDebt = installmentValue * installments;
+                            
+                            let totalPaid = 0;
+                            // If totalDebt is valid (greater than 0), use it. Otherwise fallback to amount (principal)
+                            // This handles cases where installment data might be missing
+                            if (totalDebt > 0) {
+                                totalPaid = totalDebt - Number(loan.balance);
+                            } else {
+                                totalPaid = Number(loan.amount) - Number(loan.balance);
+                            }
+                            
+                            // Ensure we don't show negative paid amount due to data inconsistencies
+                            if (totalPaid < 0) totalPaid = 0;
+
                             return (
                             <div 
                                 key={loan.id} 
@@ -303,7 +399,7 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                     ></div>
                                 </div>
                                 <div className="flex justify-between text-[10px] font-medium text-text-sub-light dark:text-text-sub-dark">
-                                    <span>Pago: R$ {(Number(loan.amount) - Number(loan.balance)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    <span>Pago: R$ {totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                     <span>{loan.progress}%</span>
                                 </div>
                             </div>

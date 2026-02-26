@@ -7,16 +7,24 @@ interface NewLoanProps {
   onBack: () => void;
   onSuccess: () => void;
   preSelectedClientId: string | null;
+  initialData?: {
+    amount?: number;
+    interestRate?: number;
+    installments?: number;
+    frequency?: string;
+    skipSaturday?: boolean;
+    skipSunday?: boolean;
+  };
 }
 
-export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelectedClientId }) => {
+export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelectedClientId, initialData }) => {
   const [clientId, setClientId] = useState<string | null>(preSelectedClientId);
-  const [frequency, setFrequency] = useState('Mensal');
-  const [skipSaturday, setSkipSaturday] = useState(false);
-  const [skipSunday, setSkipSunday] = useState(false);
-  const [amount, setAmount] = useState('5000');
-  const [interestRate, setInterestRate] = useState('5.5');
-  const [installments, setInstallments] = useState(12);
+  const [frequency, setFrequency] = useState(initialData?.frequency || 'Mensal');
+  const [skipSaturday, setSkipSaturday] = useState(initialData?.skipSaturday || false);
+  const [skipSunday, setSkipSunday] = useState(initialData?.skipSunday || false);
+  const [amount, setAmount] = useState(initialData?.amount?.toString() || '5000');
+  const [interestRate, setInterestRate] = useState(initialData?.interestRate?.toString() || '5.5');
+  const [installments, setInstallments] = useState(initialData?.installments || 12);
   const [dueDate, setDueDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Client[]>([]);
