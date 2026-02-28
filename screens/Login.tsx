@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Landmark, Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
 interface LoginProps {
@@ -45,10 +45,8 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       <div className="absolute top-0 left-0 right-0 h-[45vh] bg-gradient-to-b from-[#1E1E24] to-[#111827] rounded-b-[3.5rem] z-0"></div>
       
       <main className="relative z-10 flex-1 flex flex-col items-center px-8 pt-16 overflow-y-auto no-scrollbar">
-        <div className="mb-12 text-center w-full">
-          <div className="w-20 h-20 bg-white/10 backdrop-blur-md rounded-3xl flex items-center justify-center mx-auto mb-6 border border-white/20 shadow-2xl">
-            <Landmark className="text-white w-10 h-10" />
-          </div>
+        <div className="mb-6 text-center w-full">
+          <img src="/empresta logo.webp" alt="Empresta Logo" className="h-16 mx-auto mb-6 object-contain" />
           <h1 className="text-white text-2xl font-bold tracking-tight mb-1">Acesse sua conta</h1>
           <p className="text-white/50 text-sm">Painel Administrativo Restrito</p>
         </div>

@@ -75,6 +75,8 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                  date = new Date(startDate);
                  if (loan.frequency === 'Semanal') {
                      date.setDate(startDate.getDate() + (i * 7));
+                 } else if (loan.frequency === 'Quinzenal') {
+                     date.setDate(startDate.getDate() + (i * 15));
                  } else {
                      date.setMonth(startDate.getMonth() + i);
                  }
@@ -176,6 +178,8 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                  date = new Date(startDate);
                  if (loan.frequency === 'Semanal') {
                      date.setDate(startDate.getDate() + (i * 7));
+                 } else if (loan.frequency === 'Quinzenal') {
+                     date.setDate(startDate.getDate() + (i * 15));
                  } else {
                      date.setMonth(startDate.getMonth() + i);
                  }
@@ -289,7 +293,18 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                             </div>
                             <div>
                                 <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-tight">Telefone</p>
-                                <p className="text-sm font-semibold text-gray-800 dark:text-white">{client.phone || 'Não informado'}</p>
+                                {client.phone ? (
+                                    <a 
+                                        href={`https://wa.me/55${client.phone.replace(/\D/g, '')}`} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                                    >
+                                        {client.phone}
+                                    </a>
+                                ) : (
+                                    <p className="text-sm font-semibold text-gray-800 dark:text-white">Não informado</p>
+                                )}
                             </div>
                         </div>
                         <div className="flex items-center gap-4">

@@ -61,3 +61,6 @@ CREATE POLICY "Enable delete for users based on user_id" ON "public"."loans" FOR
 -- Política para excluir clientes
 DROP POLICY IF EXISTS "Enable delete for users based on user_id" ON "public"."clients";
 CREATE POLICY "Enable delete for users based on user_id" ON "public"."clients" FOR DELETE USING (auth.uid() = user_id);
+
+-- 6. Adicionar coluna para rastrear juros pagos em renovações
+ALTER TABLE loans ADD COLUMN IF NOT EXISTS total_interest_paid numeric DEFAULT 0;

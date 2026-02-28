@@ -23,7 +23,14 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
     
         const count = loan.installments || 1;
         const installmentValue = loan.installment_value || (loan.amount / count);
-        const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
+        
+        let startDate: Date;
+        if (loan.due_date) {
+            const [year, month, day] = loan.due_date.split('-').map(Number);
+            startDate = new Date(year, month - 1, day);
+        } else {
+            startDate = new Date(loan.created_at || Date.now());
+        }
         
         // Total Debt = installment_value * installments
         const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
@@ -60,6 +67,8 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                  date = new Date(startDate);
                  if (loan.frequency === 'Semanal') {
                      date.setDate(startDate.getDate() + (i * 7));
+                 } else if (loan.frequency === 'Quinzenal') {
+                     date.setDate(startDate.getDate() + (i * 15));
                  } else {
                      date.setMonth(startDate.getMonth() + i);
                  }
@@ -138,6 +147,8 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                  date = new Date(startDate);
                  if (loan.frequency === 'Semanal') {
                      date.setDate(startDate.getDate() + (i * 7));
+                 } else if (loan.frequency === 'Quinzenal') {
+                     date.setDate(startDate.getDate() + (i * 15));
                  } else {
                      date.setMonth(startDate.getMonth() + i);
                  }

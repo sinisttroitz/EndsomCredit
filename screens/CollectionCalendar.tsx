@@ -1,0 +1,382 @@
+import React, { useEffect, useState, useRef } from 'react';
+import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Filter, Wallet, Banknote, AlertTriangle, X } from 'lucide-react';
+import { supabase } from '../supabaseClient';
+import { Loan, Installment } from '../types';
+import { generateInstallments } from '../utils/loanUtils';
+
+interface CollectionCalendarProps {
+    onBack: () => void;
+    onLoanSelect: (id: string) => void;
+}
+
+interface CalendarDay {
+    date: Date;
+    isCurrentMonth: boolean;
+    hasCharges: boolean;
+    totalAmount: number;
+    count: number;
+}
+
+interface ChargeItem {
+    loan: Loan;
+    installment: Installment;
+}
+
+export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, onLoanSelect }) => {
+    const [currentDate, setCurrentDate] = useState(new Date());
+    const [selectedDate, setSelectedDate] = useState(new Date());
+    const [charges, setCharges] = useState<ChargeItem[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+    const [selectedDayCharges, setSelectedDayCharges] = useState<ChargeItem[]>([]);
+    const [alertModal, setAlertModal] = useState<{
+        open: boolean;
+        title: string;
+        message: string;
+    }>({ open: false, title: '', message: '' });
+    const scrollRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        fetchAllCharges();
+    }, []);
+
+    useEffect(() => {
+        if (charges.length > 0) {
+            generateCalendar();
+        }
+    }, [currentDate, charges]);
+
+    useEffect(() => {
+        filterChargesForSelectedDate();
+    }, [selectedDate, charges]);
+
+    // Scroll to selected date when calendar days change
+    useEffect(() => {
+        if (scrollRef.current && calendarDays.length > 0) {
+            const selectedIndex = calendarDays.findIndex(day => isSameDay(day.date, selectedDate));
+            if (selectedIndex !== -1) {
+                // item width (60px) + gap (12px) = 72px
+                const itemTotalWidth = 72; 
+                const paddingLeft = 8; // px-2 = 8px
+                const itemCenter = paddingLeft + (selectedIndex * itemTotalWidth) + (60 / 2);
+                const scrollPos = itemCenter - (scrollRef.current.clientWidth / 2);
+                
+                scrollRef.current.scrollTo({ left: scrollPos, behavior: 'smooth' });
+            }
+        }
+    }, [calendarDays, selectedDate]);
+
+    const fetchAllCharges = async () => {
+        setLoading(true);
+        try {
+            const { data: loans, error } = await supabase
+                .from('loans')
+                .select('*, client:clients(name, avatar_url, phone)')
+                .neq('status', 'paid'); // Only active/late loans matter for collection
+
+            if (error) throw error;
+
+            const allCharges: ChargeItem[] = [];
+
+            loans?.forEach((loan: Loan) => {
+                const installments = generateInstallments(loan);
+                installments.forEach(inst => {
+                    // Only include unpaid installments
+                    if (inst.status !== 'paid') {
+                        allCharges.push({
+                            loan,
+                            installment: inst
+                        });
+                    }
+                });
+            });
+
+            setCharges(allCharges);
+        } catch (error) {
+            console.error("Error fetching charges", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleChargeLoan = (e: React.MouseEvent, loan: Loan) => {
+        e.stopPropagation();
+
+        if (!loan.client?.phone) {
+            setAlertModal({
+                open: true,
+                title: "Telefone não cadastrado",
+                message: "Este cliente não possui um número de telefone cadastrado para cobrança."
+            });
+            return;
+        }
+
+        const installments = generateInstallments(loan);
+        const overdueInstallments = installments.filter(i => i.status === 'late');
+        const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
+
+        if (totalOverdue <= 0) {
+            setAlertModal({
+                open: true,
+                title: "Cobrança não vencida",
+                message: "Esta cobrança não está vencida."
+            });
+            return;
+        }
+
+        const message = `Olá ${loan.client.name}, identificamos um atraso de R$ ${totalOverdue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} referente ao seu empréstimo (Contrato #${loan.id.substring(0, 6)}). Por favor, regularize sua situação.`;
+        
+        const encodedMessage = encodeURIComponent(message);
+        const phone = loan.client.phone.replace(/\D/g, '');
+        const whatsappUrl = `https://wa.me/55${phone}?text=${encodedMessage}`;
+        
+        window.open(whatsappUrl, '_blank');
+    };
+
+    const generateCalendar = () => {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+
+        const lastDay = new Date(year, month + 1, 0);
+        
+        const days: CalendarDay[] = [];
+        
+        // Generate only current month days for horizontal view
+        for (let i = 1; i <= lastDay.getDate(); i++) {
+            const date = new Date(year, month, i);
+            days.push(createCalendarDay(date, true));
+        }
+
+        setCalendarDays(days);
+    };
+
+    const createCalendarDay = (date: Date, isCurrentMonth: boolean): CalendarDay => {
+        // Find charges for this day
+        const dayCharges = charges.filter(c => isSameDay(c.installment.date, date));
+        const totalAmount = dayCharges.reduce((acc, curr) => acc + curr.installment.value, 0);
+        
+        return {
+            date,
+            isCurrentMonth,
+            hasCharges: dayCharges.length > 0,
+            totalAmount,
+            count: dayCharges.length
+        };
+    };
+
+    const isSameDay = (d1: Date, d2: Date) => {
+        return d1.getDate() === d2.getDate() &&
+               d1.getMonth() === d2.getMonth() &&
+               d1.getFullYear() === d2.getFullYear();
+    };
+
+    const filterChargesForSelectedDate = () => {
+        const filtered = charges.filter(c => isSameDay(c.installment.date, selectedDate));
+        setSelectedDayCharges(filtered);
+    };
+
+    const handlePrevMonth = () => {
+        const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+        setCurrentDate(newDate);
+        // Select the first day of the new month
+        setSelectedDate(newDate);
+    };
+
+    const handleNextMonth = () => {
+        const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1);
+        setCurrentDate(newDate);
+        // Select the first day of the new month
+        setSelectedDate(newDate);
+    };
+
+    const monthNames = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"];
+    const weekDaysShort = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];
+
+    const totalSelectedAmount = selectedDayCharges.reduce((acc, curr) => acc + curr.installment.value, 0);
+    const pendingCount = selectedDayCharges.filter(c => c.installment.status === 'pending').length;
+    const lateCount = selectedDayCharges.filter(c => c.installment.status === 'late').length;
+
+    return (
+        <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
+            <header className="bg-white dark:bg-gray-900 px-4 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+                <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                    <ChevronLeft className="w-6 h-6 text-gray-600 dark:text-gray-300" />
+                </button>
+                <div className="flex items-center gap-2">
+                     <button onClick={handlePrevMonth} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <ChevronLeft className="w-4 h-4 text-gray-400" />
+                    </button>
+                    <h1 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                        {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
+                    </h1>
+                    <button onClick={handleNextMonth} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                    </button>
+                </div>
+                <div className="w-10"></div> {/* Spacer */}
+            </header>
+
+            <main className="flex-1 overflow-y-auto p-4">
+                {/* Horizontal Calendar Strip */}
+                <div className="mb-6 overflow-x-auto no-scrollbar pb-2" ref={scrollRef}>
+                    <div className="flex gap-3 px-2 min-w-min">
+                        {calendarDays.map((day, index) => {
+                            const isSelected = isSameDay(day.date, selectedDate);
+                            const dayOfWeek = weekDaysShort[day.date.getDay()];
+                            
+                            return (
+                                <button
+                                    key={index}
+                                    onClick={() => setSelectedDate(day.date)}
+                                    className={`
+                                        flex flex-col items-center justify-center min-w-[60px] h-[80px] rounded-2xl transition-all duration-300
+                                        ${isSelected 
+                                            ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg shadow-gray-200 dark:shadow-gray-900/20 transform scale-105' 
+                                            : 'bg-transparent text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                                        }
+                                    `}
+                                >
+                                    <span className={`text-[10px] font-bold mb-1 uppercase ${isSelected ? 'text-gray-300 dark:text-gray-600' : 'text-gray-400'}`}>
+                                        {dayOfWeek}
+                                    </span>
+                                    <span className={`text-xl font-bold ${isSelected ? 'text-white dark:text-black' : 'text-gray-700 dark:text-gray-300'}`}>
+                                        {day.date.getDate().toString().padStart(2, '0')}
+                                    </span>
+                                    {day.hasCharges && !isSelected && (
+                                        <div className="w-1.5 h-1.5 bg-black dark:bg-white rounded-full mt-1"></div>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Summary Card (Blue) */}
+                <div className="bg-blue-600 rounded-[2rem] p-6 mb-8 relative overflow-hidden shadow-xl shadow-blue-200 dark:shadow-blue-900/20 text-white">
+                    {/* Background decoration */}
+                    <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
+                    <div className="absolute right-10 top-10 w-20 h-20 bg-white/5 rounded-full blur-xl"></div>
+                    
+                    <div className="relative z-10 flex justify-between items-end">
+                        <div className="flex-1">
+                            <p className="text-xs font-medium text-blue-100 uppercase tracking-wider mb-2">
+                                Resumo Diário ({isSameDay(selectedDate, new Date()) ? 'Hoje' : selectedDate.toLocaleDateString('pt-BR')})
+                            </p>
+                            <h3 className="text-4xl font-bold mb-4 tracking-tight">
+                                R$ {totalSelectedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </h3>
+                            <div className="flex gap-2">
+                                <span className="bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-lg text-xs font-medium">
+                                    {selectedDayCharges.length} Cobranças
+                                </span>
+                                {lateCount > 0 && (
+                                    <span className="bg-red-500/20 backdrop-blur-sm px-3 py-1.5 rounded-lg text-xs font-medium text-red-100 border border-red-500/30">
+                                        {lateCount} Atrasadas
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                        
+                        <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center shadow-inner border border-white/10">
+                            <Wallet className="w-7 h-7 text-white" />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Charges List */}
+                <div>
+                    <div className="flex items-center justify-between mb-4 px-1">
+                        <h3 className="font-bold text-gray-900 dark:text-white text-lg">Cobranças do Dia</h3>
+                    </div>
+
+                    {loading ? (
+                        <div className="text-center py-8 text-gray-500">Carregando...</div>
+                    ) : selectedDayCharges.length === 0 ? (
+                        <div className="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
+                            <CalendarIcon className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                            <p className="text-gray-500 font-medium">Nenhuma cobrança para este dia.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {selectedDayCharges.map((item, index) => {
+                                const installments = generateInstallments(item.loan);
+                                const overdue = installments.filter(i => i.status === 'late');
+                                const isLate = overdue.length > 0;
+
+                                return (
+                                <div 
+                                    key={`${item.loan.id}-${item.installment.number}`}
+                                    onClick={() => onLoanSelect(item.loan.id)}
+                                    className="bg-white dark:bg-gray-900 p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center gap-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-all active:scale-[0.99]"
+                                >
+                                    <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-700">
+                                        {item.loan.client?.avatar_url ? (
+                                            <img src={item.loan.client.avatar_url} alt={item.loan.client.name} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center text-gray-400 font-bold text-lg">
+                                                {item.loan.client?.name?.charAt(0).toUpperCase()}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <h4 className="font-bold text-gray-900 dark:text-white truncate text-base">{item.loan.client?.name}</h4>
+                                        <p className="text-xs text-gray-500 truncate mt-0.5">Contrato: #{item.loan.id.substring(0, 6)}</p>
+                                    </div>
+                                    
+                                    <button 
+                                        onClick={(e) => handleChargeLoan(e, item.loan)}
+                                        className={`p-2 rounded-full shadow-sm transition-colors flex-shrink-0 ${
+                                            isLate 
+                                                ? 'bg-green-500 hover:bg-green-600 text-white' 
+                                                : 'bg-gray-200 hover:bg-gray-300 text-gray-600 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300'
+                                        }`}
+                                        title="Cobrar via WhatsApp"
+                                    >
+                                        <Banknote className="w-4 h-4" />
+                                    </button>
+
+                                    <div className="text-right">
+                                        <p className="font-bold text-gray-900 dark:text-white text-base">
+                                            R$ {item.installment.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase inline-block mt-1 ${
+                                            item.installment.status === 'late' 
+                                                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                                : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                        }`}>
+                                            {item.installment.status === 'late' ? 'Atrasado' : 'Pendente'}
+                                        </span>
+                                    </div>
+                                </div>
+                            )})}
+                        </div>
+                    )}
+                </div>
+            </main>
+
+            {/* Alert Modal */}
+            {alertModal.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center mb-6">
+                            <div className="w-16 h-16 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mb-4">
+                                <AlertTriangle className="w-8 h-8 text-yellow-600 dark:text-yellow-500" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{alertModal.title}</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {alertModal.message}
+                            </p>
+                        </div>
+                        <button 
+                            onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}
+                            className="w-full py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors"
+                        >
+                            Entendi
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};

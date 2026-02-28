@@ -88,6 +88,8 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                  date = new Date(startDate);
                  if (loan.frequency === 'Semanal') {
                      date.setDate(startDate.getDate() + (i * 7));
+                 } else if (loan.frequency === 'Quinzenal') {
+                     date.setDate(startDate.getDate() + (i * 15));
                  } else {
                      date.setMonth(startDate.getMonth() + i);
                  }

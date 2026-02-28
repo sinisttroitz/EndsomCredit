@@ -18,6 +18,30 @@ interface NewLoanProps {
 }
 
 export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelectedClientId, initialData }) => {
+  const getDueDateByFrequency = (freq: string) => {
+    const date = new Date();
+    switch (freq) {
+        case 'Diária':
+            date.setDate(date.getDate() + 1);
+            break;
+        case 'Semanal':
+            date.setDate(date.getDate() + 7);
+            break;
+        case 'Quinzenal':
+            date.setDate(date.getDate() + 15);
+            break;
+        case 'Mensal':
+            date.setDate(date.getDate() + 30);
+            break;
+        default:
+            date.setDate(date.getDate() + 30);
+    }
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [clientId, setClientId] = useState<string | null>(preSelectedClientId);
   const [frequency, setFrequency] = useState(initialData?.frequency || 'Mensal');
   const [skipSaturday, setSkipSaturday] = useState(initialData?.skipSaturday || false);
@@ -25,7 +49,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   const [amount, setAmount] = useState(initialData?.amount?.toString() || '5000');
   const [interestRate, setInterestRate] = useState(initialData?.interestRate?.toString() || '5.5');
   const [installments, setInstallments] = useState(initialData?.installments || 12);
-  const [dueDate, setDueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dueDate, setDueDate] = useState(getDueDateByFrequency(initialData?.frequency || 'Mensal'));
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Client[]>([]);
   const [selectedClientName, setSelectedClientName] = useState('');
@@ -209,6 +233,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                     onChange={e => setInterestRate(e.target.value)}
                 />
               </div>
+              {frequency !== 'Mensal' && (
               <div>
                 <label className="block text-xs font-medium text-text-sub-light dark:text-text-sub-dark mb-1.5">Nº de Parcelas</label>
                 <div className="relative flex items-center">
@@ -226,6 +251,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                   </button>
                 </div>
               </div>
+              )}
             </div>
           </div>
         </section>
@@ -234,14 +260,22 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
           <div className="mb-5">
             <label className="block text-xs font-medium text-text-sub-light dark:text-text-sub-dark mb-2">Frequência</label>
             <div className="flex p-1 bg-gray-100 dark:bg-gray-800 rounded-xl">
-              {['Diária', 'Semanal', 'Mensal'].map((freq) => (
-                 <label key={freq} className="flex-1 cursor-pointer" onClick={() => setFrequency(freq)}>
+              {['Diária', 'Semanal', 'Quinzenal', 'Mensal'].map((freq) => (
+                 <label key={freq} className="flex-1 cursor-pointer" onClick={() => {
+                     setFrequency(freq);
+                     if (freq === 'Mensal') setInstallments(1);
+                     setDueDate(getDueDateByFrequency(freq));
+                 }}>
                     <input 
                         type="radio" 
                         name="frequency" 
                         className="hidden" 
                         checked={frequency === freq} 
-                        onChange={() => setFrequency(freq)}
+                        onChange={() => {
+                            setFrequency(freq);
+                            if (freq === 'Mensal') setInstallments(1);
+                            setDueDate(getDueDateByFrequency(freq));
+                        }}
                     />
                     <div className={`text-center py-2 rounded-lg text-sm font-medium transition-all duration-200 border border-transparent 
                         ${frequency === freq ? 'bg-primary text-white shadow-sm' : 'text-text-sub-light hover:text-primary'}`}>

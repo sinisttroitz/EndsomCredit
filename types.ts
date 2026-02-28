@@ -17,6 +17,7 @@ export interface Client {
   documents?: string[]; // URLs dos documentos
   created_at?: string;
   initials?: string;
+  credit_balance?: number;
 }
 
 export interface Loan {
@@ -31,13 +32,21 @@ export interface Loan {
   installments?: number;
   installment_value?: number;
   interest_rate?: number;
-  frequency?: 'Diária' | 'Semanal' | 'Mensal';
+  frequency?: 'Diária' | 'Semanal' | 'Quinzenal' | 'Mensal';
   skip_saturday?: boolean;
   skip_sunday?: boolean;
+  total_interest_paid?: number;
   created_at?: string;
 }
 
-export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client';
+export interface Installment {
+    number: number;
+    date: Date;
+    value: number;
+    status: 'paid' | 'pending' | 'late' | 'future';
+}
+
+export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar';
 
 export interface UserProfile {
   id: string;

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Share2, FileText, X, PlusCircle } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { Loan } from '../types';
+import { Loan, Installment } from '../types';
+import { generateInstallments } from '../utils/loanUtils';
 
 interface LoanDetailsProps {
     loanId: string | null;
@@ -9,25 +10,34 @@ interface LoanDetailsProps {
     onNewLoan?: (data: any) => void;
 }
 
-interface Installment {
-    number: number;
-    date: Date;
-    value: number;
-    status: 'paid' | 'pending' | 'late' | 'future';
-}
-
-export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
+export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewLoan }) => {
     const [loan, setLoan] = useState<Loan | null>(null);
     const [installmentsList, setInstallmentsList] = useState<Installment[]>([]);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
     const [showAllInstallments, setShowAllInstallments] = useState(false);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [showMensalPaymentModal, setShowMensalPaymentModal] = useState(false);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
+    const [showAVModal, setShowAVModal] = useState(false);
+    const [avAmount, setAvAmount] = useState('');
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [deletePassword, setDeletePassword] = useState('');
+    const [alertModal, setAlertModal] = useState<{
+        open: boolean;
+        title: string;
+        message: string;
+    }>({ open: false, title: '', message: '' });
     
     // Batch Payment State
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedInstallments, setSelectedInstallments] = useState<number[]>([]);
+    const [confirmationModal, setConfirmationModal] = useState<{
+        open: boolean;
+        title: string;
+        message: string;
+        action: () => void;
+    }>({ open: false, title: '', message: '', action: () => {} });
 
     useEffect(() => {
         if (loanId) {
@@ -62,14 +72,20 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
         setSelectedInstallments(overdueNumbers);
     };
 
-    const handleBatchPayment = async () => {
+    const handleBatchPayment = () => {
         if (!loan || selectedInstallments.length === 0) return;
 
-        if (selectedInstallments.length > 1) {
-            const confirmed = window.confirm(`Marcar ${selectedInstallments.length} parcelas como pagas?`);
-            if (!confirmed) return;
-        }
+        setConfirmationModal({
+            open: true,
+            title: 'Confirmar Pagamento em Lote',
+            message: `Confirma o pagamento de ${selectedInstallments.length} parcela(s)?`,
+            action: executeBatchPayment
+        });
+    };
 
+    const executeBatchPayment = async () => {
+        if (!loan) return;
+        setConfirmationModal(prev => ({ ...prev, open: false }));
         setProcessing(true);
         try {
             // Calculate total value of selected installments
@@ -108,18 +124,180 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
         }
     };
 
+    const handleAVPayment = () => {
+        if (!loan || !avAmount) return;
+        
+        const amount = Number(avAmount.replace(',', '.'));
+        if (isNaN(amount) || amount <= 0) {
+            alert("Valor inválido");
+            return;
+        }
+
+        const currentCredit = Number(loan.client?.credit_balance) || 0;
+        let totalAvailable = amount + currentCredit;
+        
+        // Filter unpaid installments and sort by date (number)
+        const unpaidInstallments = installmentsList
+            .filter(i => i.status !== 'paid')
+            .sort((a, b) => a.number - b.number);
+            
+        let paidAmount = 0;
+        let paidCount = 0;
+        
+        // Calculate how many installments can be paid
+        for (const inst of unpaidInstallments) {
+            // Use a small epsilon for float comparison to avoid issues like 100.00000000001 > 100
+            if (totalAvailable >= inst.value - 0.01) {
+                totalAvailable -= inst.value;
+                paidAmount += inst.value;
+                paidCount++;
+            } else {
+                break;
+            }
+        }
+        
+        const message = paidCount === 0 
+            ? `O valor R$ ${amount.toFixed(2)} será adicionado ao saldo de crédito do cliente. Confirmar?`
+            : `Confirmar pagamento de ${paidCount} parcela(s)? Restará R$ ${totalAvailable.toFixed(2)} de crédito.`;
+
+        setConfirmationModal({
+            open: true,
+            title: 'Confirmar Pagamento AV',
+            message,
+            action: () => executeAVPayment(paidAmount, totalAvailable)
+        });
+    };
+
+    const executeAVPayment = async (paidAmount: number, newCreditBalance: number) => {
+        if (!loan) return;
+        setConfirmationModal(prev => ({ ...prev, open: false }));
+        setProcessing(true);
+        
+        try {
+            // Update Loan
+            const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+            let newBalance = Number(loan.balance) - paidAmount;
+            if (newBalance < 0.01) newBalance = 0;
+            
+            const newProgress = Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100));
+            const newStatus = newBalance === 0 ? 'paid' : 'active';
+            
+            const { error: loanError } = await supabase
+                .from('loans')
+                .update({ 
+                    balance: newBalance,
+                    progress: newProgress,
+                    status: newStatus
+                })
+                .eq('id', loan.id);
+                
+            if (loanError) throw loanError;
+            
+            // Update Client Credit Balance
+            const { error: clientError } = await supabase
+                .from('clients')
+                .update({ credit_balance: newCreditBalance })
+                .eq('id', loan.client_id);
+                
+            if (clientError) throw clientError;
+            
+            setShowAVModal(false);
+            setAvAmount('');
+            await fetchLoanData();
+            
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao processar pagamento AV.");
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleCharge = () => {
+        if (!loan || !loan.client?.phone) {
+            setAlertModal({
+                open: true,
+                title: "Telefone não cadastrado",
+                message: "Este cliente não possui um número de telefone cadastrado para cobrança."
+            });
+            return;
+        }
+
+        const overdueInstallments = installmentsList.filter(i => i.status === 'late');
+        const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
+
+        if (totalOverdue <= 0) {
+            setAlertModal({
+                open: true,
+                title: "Cobrança não vencida",
+                message: "Esta cobrança não está vencida."
+            });
+            return;
+        }
+
+        const message = `Olá ${loan.client.name}, identificamos um atraso de R$ ${totalOverdue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} referente ao seu empréstimo (Contrato #${loan.id.substring(0, 6)}). Por favor, regularize sua situação.`;
+        
+        const encodedMessage = encodeURIComponent(message);
+        const phone = loan.client.phone.replace(/\D/g, '');
+        const whatsappUrl = `https://wa.me/55${phone}?text=${encodedMessage}`;
+        
+        window.open(whatsappUrl, '_blank');
+    };
+
+    const handleDeleteLoan = async () => {
+        if (!deletePassword) {
+            alert("Por favor, informe sua senha.");
+            return;
+        }
+
+        setProcessing(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user || !user.email) throw new Error("Usuário não autenticado");
+
+            const { error: signInError } = await supabase.auth.signInWithPassword({
+                email: user.email,
+                password: deletePassword
+            });
+
+            if (signInError) {
+                alert("Senha incorreta.");
+                setProcessing(false);
+                return;
+            }
+
+            const { error: deleteError } = await supabase
+                .from('loans')
+                .delete()
+                .eq('id', loanId);
+
+            if (deleteError) throw deleteError;
+
+            alert("Empréstimo excluído com sucesso.");
+            onBack(); 
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao excluir empréstimo.");
+        } finally {
+            setProcessing(false);
+            setShowDeleteModal(false);
+            setDeletePassword('');
+        }
+    };
+
     const fetchLoanData = async () => {
         setLoading(true);
         try {
             const { data, error } = await supabase
                 .from('loans')
-                .select('*, client:clients(name)')
+                .select('*, client:clients(name, credit_balance, phone)')
                 .eq('id', loanId)
                 .single();
             
             if (error) throw error;
             setLoan(data);
-            generateInstallments(data);
+            const list = generateInstallments(data);
+            setInstallmentsList(list);
         } catch (error) {
             console.error("Error fetching loan details", error);
         } finally {
@@ -127,95 +305,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
         }
     };
 
-    const generateInstallments = (loanData: Loan) => {
-        const count = loanData.installments || 1;
-        const installmentValue = loanData.installment_value || (loanData.amount / count);
-        
-        // Fix date parsing to avoid timezone issues
-        let startDate: Date;
-        if (loanData.due_date) {
-            const [year, month, day] = loanData.due_date.split('-').map(Number);
-            startDate = new Date(year, month - 1, day);
-        } else {
-            startDate = new Date(loanData.created_at || Date.now());
-        }
-        
-        // Simple logic to determine how many paid based on balance
-        // Total Debt = installment_value * installments
-        const totalDebt = (loanData.installment_value || 0) * (loanData.installments || 1);
-        const totalPaid = totalDebt - Number(loanData.balance);
-        const list: Installment[] = [];
 
-        // ... (rest of generateInstallments remains same, just ensuring totalPaid is correct)
-        
-        let paidAccumulator = 0;
-        let dailyDateTracker = new Date(startDate);
-
-        for (let i = 0; i < count; i++) {
-            let date: Date;
-
-            if (loanData.frequency === 'Diária') {
-                if (i === 0) {
-                    date = new Date(startDate);
-                } else {
-                    date = new Date(dailyDateTracker);
-                    date.setDate(date.getDate() + 1);
-                    
-                    while (true) {
-                        const day = date.getDay();
-                        if (loanData.skip_saturday && day === 6) {
-                            date.setDate(date.getDate() + 1);
-                            continue;
-                        }
-                        if (loanData.skip_sunday && day === 0) {
-                            date.setDate(date.getDate() + 1);
-                            continue;
-                        }
-                        break;
-                    }
-                }
-                dailyDateTracker = new Date(date);
-            } else {
-                date = new Date(startDate);
-                if (loanData.frequency === 'Semanal') {
-                    date.setDate(startDate.getDate() + (i * 7));
-                } else {
-                    date.setMonth(startDate.getMonth() + i);
-                }
-            }
-            
-            let status: 'paid' | 'pending' | 'late' | 'future' = 'future';
-            
-            // Check if this installment is "covered" by the totalPaid amount
-            // Use a small epsilon for float comparison
-            if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
-                status = 'paid';
-                paidAccumulator += installmentValue;
-            } else {
-                 // Not paid
-                 const today = new Date();
-                 // Reset time part for accurate date comparison
-                 const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-                 const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-                 
-                 if (dateZero < todayZero) status = 'late';
-                 else if (dateZero.getTime() === todayZero.getTime()) status = 'pending';
-                 else status = 'future';
-                 
-                 // Do NOT increase paidAccumulator, so next installments also fall into this block
-            }
-
-            if (loanData.balance <= 0) status = 'paid';
-
-            list.push({
-                number: i + 1,
-                date: date,
-                value: installmentValue,
-                status: status
-            });
-        }
-        setInstallmentsList(list);
-    };
 
     const handleConfirmPayment = async () => {
         if (!loan || loan.balance <= 0) return;
@@ -250,6 +340,93 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack }) => {
         } catch (error) {
             console.error(error);
             alert("Erro ao registrar pagamento.");
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleMensalPayment = (type: 'full' | 'renew') => {
+        if (!loan) return;
+
+        const title = type === 'full' ? 'Quitar Empréstimo' : 'Renovar Empréstimo';
+        const message = type === 'full' 
+            ? "Tem certeza que deseja quitar todo o empréstimo?" 
+            : "Tem certeza que deseja pagar os juros e renovar o empréstimo?";
+            
+        setConfirmationModal({
+            open: true,
+            title,
+            message,
+            action: () => executeMensalPayment(type)
+        });
+    };
+
+    const executeMensalPayment = async (type: 'full' | 'renew') => {
+        if (!loan) return;
+        setConfirmationModal(prev => ({ ...prev, open: false }));
+        setProcessing(true);
+        try {
+            let updates: any = {};
+            
+            if (type === 'full') {
+                updates = {
+                    balance: 0,
+                    status: 'paid',
+                    progress: 100
+                };
+            } else {
+                // Renew
+                // Calculate new due date
+                let currentDue: Date;
+                if (loan.due_date) {
+                    const [y, m, d] = loan.due_date.split('-').map(Number);
+                    currentDue = new Date(y, m - 1, d);
+                } else {
+                    currentDue = new Date();
+                }
+                
+                // Add 30 days
+                currentDue.setDate(currentDue.getDate() + 30);
+                const newDueDateStr = currentDue.toISOString().split('T')[0];
+                
+                // Reset balance to Principal + Interest
+                const principal = Number(loan.amount);
+                const interest = principal * (Number(loan.interest_rate) / 100);
+                const newBalance = principal + interest;
+                
+                // Calculate interest paid in this renewal (Current Balance - Principal)
+                // If balance is less than principal (partial payment made?), we assume interest is paid first?
+                // But for monthly loans, usually balance >= principal.
+                // Let's assume the interest part is (current_balance - principal).
+                const interestPaid = Math.max(0, Number(loan.balance) - principal);
+                const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
+
+                updates = {
+                    due_date: newDueDateStr,
+                    balance: newBalance,
+                    status: 'active',
+                    progress: 0,
+                    total_interest_paid: currentTotalInterestPaid + interestPaid
+                };
+            }
+            
+            const { error } = await supabase
+                .from('loans')
+                .update(updates)
+                .eq('id', loan.id);
+                
+            if (error) throw error;
+            
+            setShowMensalPaymentModal(false);
+            await fetchLoanData();
+            
+            if (type === 'renew') {
+                alert("Empréstimo renovado com sucesso! Novo vencimento em 30 dias.");
+            }
+            
+        } catch (error) {
+            console.error(error);
+            alert("Erro ao processar pagamento mensal.");
         } finally {
             setProcessing(false);
         }
@@ -397,6 +574,18 @@ ${paidInstallments.map(i =>
                             }`}>
                                 {displayStatus === 'active' ? 'EM DIA' : displayStatus === 'late' ? 'ATRASADO' : displayStatus === 'paid' ? 'QUITADO' : 'PENDENTE'}
                             </span>
+                            
+                            <button
+                                onClick={handleCharge}
+                                className={`px-3 py-1 rounded-full text-[10px] font-bold border uppercase transition-all flex items-center gap-1 cursor-pointer hover:opacity-80 ${
+                                    isLate 
+                                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800' 
+                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                                }`}
+                            >
+                                <Banknote className="w-3 h-3" />
+                                Cobrar
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -408,10 +597,10 @@ ${paidInstallments.map(i =>
                         <div 
                             className="w-28 h-28 rounded-full flex items-center justify-center relative shadow-inner"
                             style={{
-                                background: `radial-gradient(closest-side, var(--bg-card) 82%, transparent 80% 100%), conic-gradient(${displayStatus === 'late' ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)`
+                                background: `conic-gradient(${displayStatus === 'late' ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)`
                             } as React.CSSProperties}
                         >
-                            <div className="absolute inset-0 rounded-full bg-card-light dark:bg-card-dark m-[10%] flex items-center justify-center">
+                            <div className="absolute inset-3 rounded-full bg-card-light dark:bg-card-dark flex items-center justify-center shadow-sm">
                                 <span className="text-2xl font-bold text-primary dark:text-white">{percentage}%</span>
                             </div>
                         </div>
@@ -441,7 +630,13 @@ ${paidInstallments.map(i =>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Taxa de Juros</p>
                         <p className="font-bold text-gray-900 dark:text-white">
-                            {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : 'a.m.'}
+                            {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : loan.frequency === 'Quinzenal' ? 'a.q.' : 'a.m.'}
+                        </p>
+                    </div>
+                    <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
+                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Crédito Disponível</p>
+                        <p className="font-bold text-blue-600 dark:text-blue-400">
+                            R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
                     </div>
                 </div>
@@ -536,7 +731,13 @@ ${paidInstallments.map(i =>
                         <>
                             {loan.status !== 'paid' && (
                                 <button 
-                                    onClick={() => setShowPaymentModal(true)}
+                                    onClick={() => {
+                                        if (loan.frequency === 'Mensal') {
+                                            setShowMensalPaymentModal(true);
+                                        } else {
+                                            setShowPaymentModal(true);
+                                        }
+                                    }}
                                     disabled={processing}
                                     className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
                                 >
@@ -544,8 +745,8 @@ ${paidInstallments.map(i =>
                                 </button>
                             )}
                             
-                            {/* Batch Payment Button - Always visible if not paid */}
-                            {loan.status !== 'paid' && (
+                            {/* Batch Payment Button - Always visible if not paid AND not Mensal */}
+                            {loan.status !== 'paid' && loan.frequency !== 'Mensal' && (
                                 <button 
                                     onClick={toggleSelectionMode}
                                     className="w-full bg-white dark:bg-gray-800 text-primary dark:text-white border border-gray-200 dark:border-gray-700 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-sm"
@@ -571,6 +772,14 @@ ${paidInstallments.map(i =>
                                     Novo Empréstimo para este Cliente
                                 </button>
                             )}
+
+                            <button 
+                                onClick={() => setShowDeleteModal(true)}
+                                className="w-full bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
+                            >
+                                <Trash2 className="w-5 h-5" />
+                                Excluir Empréstimo
+                            </button>
                         </>
                     )}
                 </div>
@@ -583,33 +792,133 @@ ${paidInstallments.map(i =>
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPaymentModal(false)}></div>
                     <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
                         <div className="flex flex-col items-center text-center mb-6">
-                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mb-4">
-                                <Check className="w-8 h-8 text-green-600 dark:text-green-500" />
-                            </div>
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Confirmar Pagamento?</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Você está prestes a registrar o pagamento de uma parcela no valor de <span className="font-bold text-gray-900 dark:text-white">R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>.
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Registrar Pagamento</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                                Escolha o tipo de pagamento
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-3">
+                            <button 
+                                onClick={() => {
+                                    setShowPaymentModal(false);
+                                    handleConfirmPayment(); // Or show confirmation for single payment
+                                }}
+                                className="w-full py-4 px-4 rounded-xl font-bold text-white bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                            >
+                                <span className="text-base">Pagar 1 Parcela</span>
+                                <span className="text-xs opacity-80 font-normal">R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </button>
+
+                            <button 
+                                onClick={() => {
+                                    setShowPaymentModal(false);
+                                    setShowAVModal(true);
+                                }}
+                                className="w-full py-4 px-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                            >
+                                <span className="text-base">Informar AV</span>
+                                <span className="text-xs opacity-80 font-normal">Usar saldo + valor recebido</span>
+                            </button>
+                            
                             <button 
                                 onClick={() => setShowPaymentModal(false)}
-                                className="py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                                className="w-full py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors mt-2"
                             >
                                 Cancelar
-                            </button>
-                            <button 
-                                onClick={handleConfirmPayment}
-                                disabled={processing}
-                                className="py-3 px-4 rounded-xl font-bold text-white bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 flex items-center justify-center gap-2 disabled:opacity-70 transition-colors"
-                            >
-                                {processing ? 'Processando...' : 'Confirmar'}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
+
+            {/* AV Modal */}
+            {showAVModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAVModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Informar AV</h3>
+                            <button onClick={() => setShowAVModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-2xl border border-blue-100 dark:border-blue-800">
+                            <p className="text-xs text-blue-600 dark:text-blue-400 font-bold uppercase mb-1">Saldo de Crédito Atual</p>
+                            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Valor Recebido (R$)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={avAmount}
+                                    onChange={(e) => setAvAmount(e.target.value)}
+                                    className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-bold text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none"
+                                    placeholder="0,00"
+                                />
+                            </div>
+
+                            <button 
+                                onClick={handleAVPayment}
+                                disabled={!avAmount || processing}
+                                className="w-full bg-primary text-white py-4 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition disabled:opacity-70"
+                            >
+                                {processing ? 'Processando...' : 'Calcular e Pagar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Mensal Payment Modal */}
+            {showMensalPaymentModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMensalPaymentModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Pagamento Mensal</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                Escolha como deseja prosseguir com este empréstimo.
+                            </p>
+                        </div>
+
+                        <div className="space-y-3">
+                            <button 
+                                onClick={() => handleMensalPayment('full')}
+                                disabled={processing}
+                                className="w-full py-4 px-4 rounded-xl font-bold text-white bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 flex flex-col items-center justify-center gap-1 disabled:opacity-70 transition-colors"
+                            >
+                                <span className="text-base">Pagar Tudo (Encerrar)</span>
+                                <span className="text-xs opacity-80 font-normal">R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </button>
+                            
+                            <button 
+                                onClick={() => handleMensalPayment('renew')}
+                                disabled={processing}
+                                className="w-full py-4 px-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 flex flex-col items-center justify-center gap-1 disabled:opacity-70 transition-colors"
+                            >
+                                <span className="text-base">Pagar Juros (Renovar)</span>
+                                <span className="text-xs opacity-80 font-normal">
+                                    R$ {Math.max(0, Number(loan.balance) - Number(loan.amount)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                            </button>
+                            
+                            <button 
+                                onClick={() => setShowMensalPaymentModal(false)}
+                                className="w-full py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors mt-2"
+                            >
+                                Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
             {/* Receipt Modal */}
             {showReceiptModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -649,6 +958,108 @@ ${paidInstallments.map(i =>
                                 </div>
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* General Confirmation Modal */}
+            {confirmationModal.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmationModal(prev => ({ ...prev, open: false }))}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center mb-6">
+                            <div className="w-16 h-16 bg-yellow-100 dark:bg-yellow-900/20 rounded-full flex items-center justify-center mb-4">
+                                <AlertTriangle className="w-8 h-8 text-yellow-600 dark:text-yellow-500" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{confirmationModal.title}</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {confirmationModal.message}
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <button 
+                                onClick={() => setConfirmationModal(prev => ({ ...prev, open: false }))}
+                                className="py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={confirmationModal.action}
+                                className="py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 flex items-center justify-center gap-2 transition-colors"
+                            >
+                                Confirmar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowDeleteModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center mb-6">
+                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mb-4">
+                                <Trash2 className="w-8 h-8 text-red-600 dark:text-red-500" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Excluir Empréstimo</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                                Esta ação é irreversível. Para confirmar, digite sua senha de acesso.
+                            </p>
+                            
+                            <input
+                                type="password"
+                                value={deletePassword}
+                                onChange={(e) => setDeletePassword(e.target.value)}
+                                placeholder="Sua senha"
+                                className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white focus:ring-2 focus:ring-red-500 outline-none transition-all"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <button 
+                                onClick={() => {
+                                    setShowDeleteModal(false);
+                                    setDeletePassword('');
+                                }}
+                                className="py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={handleDeleteLoan}
+                                disabled={!deletePassword || processing}
+                                className="py-3 px-4 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-70"
+                            >
+                                {processing ? 'Excluindo...' : 'Excluir'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Alert Modal */}
+            {alertModal.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center mb-6">
+                            <div className="w-16 h-16 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mb-4">
+                                <AlertTriangle className="w-8 h-8 text-yellow-600 dark:text-yellow-500" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{alertModal.title}</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {alertModal.message}
+                            </p>
+                        </div>
+                        <button 
+                            onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}
+                            className="w-full py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors"
+                        >
+                            Entendi
+                        </button>
                     </div>
                 </div>
             )}

@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { Search, DollarSign, TrendingUp, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText } from 'lucide-react';
+import { Search, DollarSign, TrendingUp, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText, Calendar } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan, Client } from '../types';
+import { generateInstallments } from '../utils/loanUtils';
 
 interface DashboardProps {
     onClientSelect?: (id: string) => void;
     onLoanSelect?: (id: string) => void;
     onViewLateLoans?: () => void;
+    onViewClients?: () => void;
+    onViewInterestDetails?: () => void;
+    onViewCollectionCalendar?: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSelect, onViewLateLoans }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSelect, onViewLateLoans, onViewClients, onViewInterestDetails, onViewCollectionCalendar }) => {
   const [summary, setSummary] = useState({
     totalLent: 0,
     totalReceived: 0,
@@ -18,6 +22,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     activeCount: 0,
     lateCount: 0,
     totalInterestReceived: 0,
+    todayChargesCount: 0,
     userEmail: '',
     userName: ''
   });
@@ -124,6 +129,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
              date = new Date(startDate);
              if (loan.frequency === 'Semanal') {
                  date.setDate(startDate.getDate() + (i * 7));
+             } else if (loan.frequency === 'Quinzenal') {
+                 date.setDate(startDate.getDate() + (i * 15));
              } else {
                  date.setMonth(startDate.getMonth() + i);
              }
@@ -203,6 +210,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
              date = new Date(startDate);
              if (loan.frequency === 'Semanal') {
                  date.setDate(startDate.getDate() + (i * 7));
+             } else if (loan.frequency === 'Quinzenal') {
+                 date.setDate(startDate.getDate() + (i * 15));
              } else {
                  date.setMonth(startDate.getMonth() + i);
              }
@@ -250,6 +259,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
       let activeCount = 0;
       let lateCount = 0;
       let totalInterestReceived = 0;
+      let todayChargesCount = 0;
+
+      const today = new Date();
+      const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
       loans?.forEach((loan: Loan) => {
         const amount = Number(loan.amount);
@@ -276,7 +289,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         totalReceived += loanReceived;
 
         // Calculate Interest Received for this loan
-        // Only for PAID loans as requested
+        
+        // 1. Add historical interest paid (from renewals)
+        totalInterestReceived += (Number(loan.total_interest_paid) || 0);
+
+        // 2. Add interest from the final payment if the loan is fully paid
         if (loan.status === 'paid' && totalDebt > 0 && amount > 0) {
              // For paid loans, the interest received is the total expected interest
              // (Total Debt - Principal)
@@ -287,6 +304,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         if (isLoanLate(loan)) {
             lateAmount += calculateOverdueAmount(loan);
             lateCount++;
+        }
+
+        // Calculate today's charges
+        if (loan.status !== 'paid') {
+            const loanInstallments = generateInstallments(loan);
+            const todayInstallments = loanInstallments.filter(inst => {
+                const instDate = new Date(inst.date);
+                const instDateZero = new Date(instDate.getFullYear(), instDate.getMonth(), instDate.getDate());
+                return instDateZero.getTime() === todayZero.getTime() && inst.status !== 'paid';
+            });
+            todayChargesCount += todayInstallments.length;
         }
       });
 
@@ -302,6 +330,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         activeCount,
         lateCount,
         totalInterestReceived,
+        todayChargesCount,
         userEmail: user?.email || 'Admin',
         userName: user?.user_metadata?.full_name || ''
       });
@@ -456,7 +485,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
           </div>
 
             {/* Card 2 */}
-           <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
+          <div 
+            onClick={onViewInterestDetails}
+            className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
+          >
             <div className="flex justify-between items-start">
               <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Juros Recebidos</span>
               <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
@@ -471,7 +503,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
           </div>
 
           {/* Card 3 */}
-          <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
+          <div 
+            onClick={onViewClients}
+            className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
+          >
             <div className="flex justify-between items-start">
               <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Clientes Ativos</span>
               <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700/50 flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -506,41 +541,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
           </div>
         </div>
 
-        {/* Alerts Section */}
+        {/* Collection Calendar Card */}
         <div 
-            onClick={summary.lateAmount > 0 ? onViewLateLoans : undefined}
-            className={`bg-card-light dark:bg-card-dark rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 min-h-[16rem] ${summary.lateAmount > 0 ? 'cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]' : ''}`}
+            onClick={onViewCollectionCalendar}
+            className="bg-card-light dark:bg-card-dark rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 min-h-[16rem] cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]"
         >
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-8 h-8 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center text-red-500">
-              <Bell className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500">
+              <Calendar className="w-4 h-4" />
             </div>
-            <h2 className="text-lg font-bold text-gray-800 dark:text-white">Alertas de Atraso</h2>
+            <h2 className="text-lg font-bold text-gray-800 dark:text-white">Calendário de Cobranças</h2>
           </div>
-          <div className="flex flex-col items-center justify-center h-48 text-center space-y-4 opacity-60">
+          <div className="flex flex-col items-center justify-center h-48 text-center space-y-4">
             <div className="relative w-24 h-24 mb-2">
-              {summary.lateAmount > 0 ? (
-                 <>
-                    <div className="absolute inset-0 bg-red-50 dark:bg-red-900/20 rounded-full animate-pulse"></div>
-                    <div className="absolute inset-2 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-sm">
-                        <AlertTriangle className="w-10 h-10 text-red-500" />
-                    </div>
-                 </>
-              ) : (
-                <>
-                    <div className="absolute inset-0 bg-blue-50 dark:bg-blue-900/20 rounded-full animate-pulse"></div>
-                    <div className="absolute inset-2 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-sm">
-                        <CheckCircle className="w-10 h-10 text-green-500 dark:text-green-400/80" />
-                    </div>
-                </>
-              )}
+                 <div className="absolute inset-0 bg-blue-50 dark:bg-blue-900/20 rounded-full animate-pulse"></div>
+                 <div className="absolute inset-2 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-sm flex-col">
+                    <span className="text-3xl font-bold text-blue-600 dark:text-blue-400">{summary.todayChargesCount}</span>
+                    <span className="text-[10px] text-gray-400 uppercase font-bold">Hoje</span>
+                 </div>
             </div>
             <div>
               <p className="text-base font-medium text-gray-500 dark:text-gray-400">
-                {summary.lateAmount > 0 ? `Atenção: ${summary.lateCount} contratos atrasados.` : "Nenhum atraso crítico."}
+                {summary.todayChargesCount > 0 ? `${summary.todayChargesCount} cobranças previstas para hoje.` : "Nenhuma cobrança para hoje."}
               </p>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                 {summary.lateAmount > 0 ? "Toque para ver a lista de empréstimos." : "Tudo em dia! Seus pagamentos estão ótimos."}
+                 Toque para ver o calendário completo.
               </p>
             </div>
           </div>

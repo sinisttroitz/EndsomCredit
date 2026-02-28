@@ -8,7 +8,9 @@ import { NewLoan } from './screens/NewLoan';
 import { NewClient } from './screens/NewClient';
 import { EditClient } from './screens/EditClient';
 import { ClientDetails } from './screens/ClientDetails';
+import { InterestDetails } from './screens/InterestDetails';
 import { LoanDetails } from './screens/LoanDetails';
+import { CollectionCalendar } from './screens/CollectionCalendar';
 import { Login } from './screens/Login';
 import { BottomNav } from './components/BottomNav';
 import { supabase } from './supabaseClient';
@@ -106,15 +108,28 @@ const App: React.FC = () => {
                 setCurrentView('loan-details');
             }}
             onViewLateLoans={() => {
-                // We need to pass the filter to Loans component
-                // Since Loans component state is internal, we can force a remount or pass a prop
-                // Ideally we should have a state in App for loans filter, but for now let's just switch view
-                // and rely on Loans component to handle 'late' filter if we passed it.
-                // But we only passed initialFilter prop to Loans.
-                // So if we switch view, Loans will mount with default 'all' unless we change how we render it.
-                // Let's add a state for initialLoansFilter in App.
                 setInitialLoansFilter('late');
                 setCurrentView('loans');
+            }}
+            onViewClients={() => {
+                setCurrentView('clients');
+            }}
+            onViewInterestDetails={() => {
+                setCurrentView('interest-details');
+            }}
+            onViewCollectionCalendar={() => {
+                setCurrentView('collection-calendar');
+            }}
+        />;
+      case 'interest-details':
+        return <InterestDetails onBack={() => setCurrentView('dashboard')} />;
+      case 'collection-calendar':
+        return <CollectionCalendar 
+            onBack={() => setCurrentView('dashboard')} 
+            onLoanSelect={(id) => {
+                setSelectedLoanId(id);
+                setPreviousView('collection-calendar');
+                setCurrentView('loan-details');
             }}
         />;
       case 'clients':
@@ -209,6 +224,9 @@ const App: React.FC = () => {
                 setSelectedLoanId(id);
                 setPreviousView('dashboard');
                 setCurrentView('loan-details');
+            }}
+            onViewClients={() => {
+                setCurrentView('clients');
             }}
         />;
     }
