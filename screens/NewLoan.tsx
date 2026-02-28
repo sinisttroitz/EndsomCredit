@@ -43,13 +43,13 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   };
 
   const [clientId, setClientId] = useState<string | null>(preSelectedClientId);
-  const [frequency, setFrequency] = useState(initialData?.frequency || 'Mensal');
+  const [frequency, setFrequency] = useState(initialData?.frequency || 'Diária');
   const [skipSaturday, setSkipSaturday] = useState(initialData?.skipSaturday || false);
   const [skipSunday, setSkipSunday] = useState(initialData?.skipSunday || false);
   const [amount, setAmount] = useState(initialData?.amount?.toString() || '5000');
-  const [interestRate, setInterestRate] = useState(initialData?.interestRate?.toString() || '5.5');
+  const [interestRate, setInterestRate] = useState(initialData?.interestRate?.toString() || '30');
   const [installments, setInstallments] = useState(initialData?.installments || 12);
-  const [dueDate, setDueDate] = useState(getDueDateByFrequency(initialData?.frequency || 'Mensal'));
+  const [dueDate, setDueDate] = useState(getDueDateByFrequency(initialData?.frequency || 'Diária'));
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Client[]>([]);
   const [selectedClientName, setSelectedClientName] = useState('');

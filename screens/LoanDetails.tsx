@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2 } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy } from 'lucide-react';
+import { generatePixPayload } from '../utils/pixUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
@@ -23,10 +24,16 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [avAmount, setAvAmount] = useState('');
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [deletePassword, setDeletePassword] = useState('');
+    const [showChargeOptionsModal, setShowChargeOptionsModal] = useState(false);
+    const [showPixModal, setShowPixModal] = useState(false);
+    const [pixAmount, setPixAmount] = useState('');
+    const [pixPayload, setPixPayload] = useState('');
     const [alertModal, setAlertModal] = useState<{
         open: boolean;
         title: string;
         message: string;
+        onConfirm?: () => void;
+        confirmText?: string;
     }>({ open: false, title: '', message: '' });
     
     // Batch Payment State
@@ -39,11 +46,32 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         action: () => void;
     }>({ open: false, title: '', message: '', action: () => {} });
 
+    const [userSettings, setUserSettings] = useState<{
+        pix_key: string;
+        pix_beneficiary: string;
+        city: string;
+    } | null>(null);
+
     useEffect(() => {
         if (loanId) {
             fetchLoanData();
+            fetchUserSettings();
         }
     }, [loanId]);
+
+    const fetchUserSettings = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const { data } = await supabase
+                .from('user_settings')
+                .select('*')
+                .eq('user_id', user.id)
+                .single();
+            if (data) {
+                setUserSettings(data);
+            }
+        }
+    };
 
     // ... (existing fetchLoanData)
 
@@ -230,18 +258,80 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             setAlertModal({
                 open: true,
                 title: "Cobrança não vencida",
-                message: "Esta cobrança não está vencida."
+                message: "Esta cobrança não está vencida.",
+                confirmText: "Cobrar mesmo assim",
+                onConfirm: () => {
+                    setAlertModal(prev => ({ ...prev, open: false }));
+                    setShowChargeOptionsModal(true);
+                }
             });
             return;
         }
 
-        const message = `Olá ${loan.client.name}, identificamos um atraso de R$ ${totalOverdue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} referente ao seu empréstimo (Contrato #${loan.id.substring(0, 6)}). Por favor, regularize sua situação.`;
+        setShowChargeOptionsModal(true);
+    };
+
+    const handleWhatsAppCharge = () => {
+        if (!loan || !loan.client?.phone) return;
+
+        const overdueInstallments = installmentsList.filter(i => i.status === 'late');
+        const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
+        
+        // If totalOverdue is 0 (e.g. "Charge anyway"), we might want to ask for an amount or just open chat
+        // For now, let's just use 0 or a generic message if 0
+        
+        let message = '';
+        if (totalOverdue > 0) {
+            message = `Olá ${loan.client.name}, identificamos um atraso de R$ ${totalOverdue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} referente ao seu empréstimo (Contrato #${loan.id.substring(0, 6)}). Por favor, regularize sua situação.`;
+        } else {
+            message = `Olá ${loan.client.name}, estamos entrando em contato referente ao seu empréstimo (Contrato #${loan.id.substring(0, 6)}).`;
+        }
         
         const encodedMessage = encodeURIComponent(message);
         const phone = loan.client.phone.replace(/\D/g, '');
         const whatsappUrl = `https://wa.me/55${phone}?text=${encodedMessage}`;
         
         window.open(whatsappUrl, '_blank');
+        setShowChargeOptionsModal(false);
+    };
+
+    const handlePixCharge = () => {
+        if (!userSettings?.pix_key) {
+            alert("Você precisa configurar sua chave PIX no perfil antes de usar esta função.");
+            return;
+        }
+        setShowChargeOptionsModal(false);
+        setShowPixModal(true);
+        
+        // Pre-fill with overdue amount if any
+        const overdueInstallments = installmentsList.filter(i => i.status === 'late');
+        const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
+        if (totalOverdue > 0) {
+            setPixAmount(totalOverdue.toFixed(2));
+            generatePix(totalOverdue.toFixed(2));
+        } else {
+            setPixAmount('');
+            setPixPayload('');
+        }
+    };
+
+    const generatePix = (amountStr: string) => {
+        if (!userSettings?.pix_key) return;
+        
+        const amount = parseFloat(amountStr.replace(',', '.'));
+        if (isNaN(amount) || amount <= 0) {
+            setPixPayload('');
+            return;
+        }
+
+        const payload = generatePixPayload(
+            userSettings.pix_key,
+            userSettings.pix_beneficiary || 'Recebedor',
+            userSettings.city || 'Cidade',
+            amount,
+            loan?.id.substring(0, 20) // Transaction ID
+        );
+        setPixPayload(payload);
     };
 
     const handleDeleteLoan = async () => {
@@ -1040,6 +1130,124 @@ ${paidInstallments.map(i =>
                 </div>
             )}
 
+            {/* Charge Options Modal */}
+            {showChargeOptionsModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowChargeOptionsModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center mb-6">
+                            <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mb-4">
+                                <Banknote className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Opções de Cobrança</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                Como deseja cobrar este cliente?
+                            </p>
+                        </div>
+
+                        <div className="space-y-3">
+                            <button 
+                                onClick={handleWhatsAppCharge}
+                                className="w-full p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800 flex items-center gap-4 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors text-left group"
+                            >
+                                <div className="w-12 h-12 bg-green-100 dark:bg-green-800/50 rounded-full flex items-center justify-center text-green-600 dark:text-green-400 group-hover:scale-110 transition-transform">
+                                    <Share2 className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white">WhatsApp</h4>
+                                    <p className="text-xs text-gray-500">Enviar mensagem de cobrança</p>
+                                </div>
+                            </button>
+
+                            <button 
+                                onClick={handlePixCharge}
+                                className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center gap-4 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-left group"
+                            >
+                                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-800/50 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform">
+                                    <QrCode className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white">PIX Rápido</h4>
+                                    <p className="text-xs text-gray-500">Gerar QR Code de pagamento</p>
+                                </div>
+                            </button>
+
+                            <button 
+                                onClick={() => setShowChargeOptionsModal(false)}
+                                className="w-full py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors mt-2"
+                            >
+                                Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* PIX Modal */}
+            {showPixModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPixModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Cobrança via PIX</h3>
+                            <button onClick={() => setShowPixModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Valor da Cobrança (R$)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={pixAmount}
+                                    onChange={(e) => {
+                                        setPixAmount(e.target.value);
+                                        generatePix(e.target.value);
+                                    }}
+                                    className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-bold text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none"
+                                    placeholder="0,00"
+                                />
+                            </div>
+
+                            {pixPayload && (
+                                <div className="flex flex-col items-center p-4 bg-white dark:bg-white rounded-xl border border-gray-200 shadow-sm">
+                                    <img 
+                                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixPayload)}`}
+                                        alt="QR Code PIX"
+                                        className="w-48 h-48 mb-4"
+                                    />
+                                    <p className="text-xs text-center text-gray-500 mb-3 break-all px-2">
+                                        {pixPayload.substring(0, 30)}...
+                                    </p>
+                                    <button 
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(pixPayload);
+                                            alert("Código PIX Copia e Cola copiado!");
+                                        }}
+                                        className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-200 transition-colors"
+                                    >
+                                        <Copy className="w-4 h-4" />
+                                        Copiar Código
+                                    </button>
+                                </div>
+                            )}
+
+                            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800">
+                                <p className="text-xs text-blue-700 dark:text-blue-300">
+                                    <span className="font-bold">Chave PIX:</span> {userSettings?.pix_key}
+                                </p>
+                                <p className="text-xs text-blue-700 dark:text-blue-300">
+                                    <span className="font-bold">Beneficiário:</span> {userSettings?.pix_beneficiary || 'Não informado'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Alert Modal */}
             {alertModal.open && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1054,12 +1262,22 @@ ${paidInstallments.map(i =>
                                 {alertModal.message}
                             </p>
                         </div>
-                        <button 
-                            onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}
-                            className="w-full py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors"
-                        >
-                            Entendi
-                        </button>
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}
+                                className={`flex-1 py-3 px-4 rounded-xl font-bold transition-colors ${alertModal.onConfirm ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700' : 'bg-primary text-white hover:bg-primary/90'}`}
+                            >
+                                Entendi
+                            </button>
+                            {alertModal.onConfirm && (
+                                <button 
+                                    onClick={alertModal.onConfirm}
+                                    className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors"
+                                >
+                                    {alertModal.confirmText || 'Confirmar'}
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
