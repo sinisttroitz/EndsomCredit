@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Save, Camera, Loader2, AlertCircle, Trash2, X, AlertTriangle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '@/utils/imageUtils';
 import { Client } from '../types';
 
 interface EditClientProps {
@@ -126,7 +127,8 @@ export const EditClient: React.FC<EditClientProps> = ({ clientId, onBack, onSucc
             let finalAvatarUrl = avatarUrl;
             
             if (photoFile) {
-                const uploaded = await uploadFile(photoFile);
+                const compressedPhoto = await compressImage(photoFile);
+                const uploaded = await uploadFile(compressedPhoto);
                 if (uploaded) finalAvatarUrl = uploaded;
             }
 

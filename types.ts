@@ -44,6 +44,9 @@ export interface Installment {
     date: Date;
     value: number;
     status: 'paid' | 'pending' | 'late' | 'future';
+    originalValue?: number;
+    accumulatedInterest?: number;
+    originalDate?: Date;
 }
 
 export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar';

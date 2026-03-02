@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Edit2, MapPin, CreditCard, ChevronRight, Lock, Save, X, Loader2, Search } from 'lucide-react';
+import { LogOut, Edit2, MapPin, CreditCard, ChevronRight, Lock, Save, X, Loader2, Search, Download, FileText } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { UserSettings } from '../types';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface ProfileProps {
     onLogout: () => void;
@@ -12,6 +14,8 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   
   // Estado local para o CEP e carregamento da busca
   const [cep, setCep] = useState('');
@@ -61,6 +65,83 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
     } finally {
         setLoading(false);
     }
+  };
+
+  const handleDownloadData = async (format: 'pdf' | 'csv') => {
+      setDownloading(true);
+      try {
+          const { data: loans, error } = await supabase
+              .from('loans')
+              .select('*, client:clients(name)')
+              .order('created_at', { ascending: false });
+
+          if (error) throw error;
+
+          if (!loans || loans.length === 0) {
+              alert("Nenhum empréstimo encontrado para gerar relatório.");
+              return;
+          }
+
+          if (format === 'pdf') {
+              generatePDF(loans);
+          } else {
+              generateCSV(loans);
+          }
+          setShowDownloadModal(false);
+      } catch (error) {
+          console.error("Erro ao gerar relatório:", error);
+          alert("Erro ao gerar relatório. Tente novamente.");
+      } finally {
+          setDownloading(false);
+      }
+  };
+
+  const generatePDF = (loans: any[]) => {
+      const doc = new jsPDF();
+      
+      doc.setFontSize(18);
+      doc.text("Relatório de Empréstimos", 14, 22);
+      
+      doc.setFontSize(10);
+      doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 30);
+      doc.text(`Usuário: ${name || email}`, 14, 35);
+
+      const tableData = loans.map(loan => [
+          loan.client?.name || 'Cliente Removido',
+          `R$ ${loan.amount.toFixed(2)}`,
+          new Date(loan.start_date).toLocaleDateString('pt-BR'),
+          loan.status === 'paid' ? 'Pago' : (loan.status === 'late' ? 'Atrasado' : 'Em Aberto')
+      ]);
+
+      autoTable(doc, {
+          head: [['Cliente', 'Valor', 'Data Início', 'Status']],
+          body: tableData,
+          startY: 40,
+          theme: 'grid',
+          headStyles: { fillColor: [41, 128, 185] },
+      });
+
+      doc.save('relatorio_emprestimos.pdf');
+  };
+
+  const generateCSV = (loans: any[]) => {
+      const headers = ['Cliente,Valor,Data Início,Status'];
+      const rows = loans.map(loan => [
+          `"${loan.client?.name || 'Cliente Removido'}"`,
+          `"${loan.amount.toFixed(2).replace('.', ',')}"`,
+          `"${new Date(loan.start_date).toLocaleDateString('pt-BR')}"`,
+          `"${loan.status === 'paid' ? 'Pago' : (loan.status === 'late' ? 'Atrasado' : 'Em Aberto')}"`
+      ]);
+
+      const csvContent = [headers, ...rows].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'relatorio_emprestimos.csv');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
   };
 
   const handleCepChange = async (value: string) => {
@@ -323,12 +404,75 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
                 </div>
                 <ChevronRight className="w-5 h-5 text-gray-300" />
              </button>
+
+             <button 
+                onClick={() => setShowDownloadModal(true)}
+                className="w-full bg-card-light dark:bg-card-dark rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800 flex justify-between items-center group active:scale-[0.99] transition-transform mt-3"
+            >
+                <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-green-50 dark:bg-green-900/20 flex items-center justify-center text-green-500">
+                        <Download className="w-5 h-5" />
+                    </div>
+                    <span className="font-semibold text-gray-800 dark:text-white">Baixar Dados</span>
+                </div>
+                <ChevronRight className="w-5 h-5 text-gray-300" />
+            </button>
         </section>
 
         <div className="text-center pt-4 pb-8">
             <button onClick={onLogout} className="text-red-500 text-sm font-semibold hover:underline">Sair da conta</button>
             <p className="text-[10px] text-gray-400 mt-2">Versão 2.7.0</p>
         </div>
+
+        {showDownloadModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowDownloadModal(false)}></div>
+                <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Baixar Relatório</h3>
+                        <button onClick={() => setShowDownloadModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                            <X className="w-5 h-5 text-gray-500" />
+                        </button>
+                    </div>
+                    
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                        Escolha o formato para baixar o relatório completo de seus empréstimos.
+                    </p>
+
+                    <div className="space-y-3">
+                        <button 
+                            onClick={() => handleDownloadData('pdf')}
+                            disabled={downloading}
+                            className="w-full p-4 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800 flex items-center gap-4 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors text-left group"
+                        >
+                            <div className="w-12 h-12 bg-red-100 dark:bg-red-800/50 rounded-full flex items-center justify-center text-red-600 dark:text-red-400 group-hover:scale-110 transition-transform">
+                                <FileText className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h4 className="font-bold text-gray-900 dark:text-white">PDF</h4>
+                                <p className="text-xs text-gray-500">Documento para impressão</p>
+                            </div>
+                            {downloading && <Loader2 className="w-5 h-5 animate-spin ml-auto text-red-500" />}
+                        </button>
+
+                        <button 
+                            onClick={() => handleDownloadData('csv')}
+                            disabled={downloading}
+                            className="w-full p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800 flex items-center gap-4 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors text-left group"
+                        >
+                            <div className="w-12 h-12 bg-green-100 dark:bg-green-800/50 rounded-full flex items-center justify-center text-green-600 dark:text-green-400 group-hover:scale-110 transition-transform">
+                                <FileText className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h4 className="font-bold text-gray-900 dark:text-white">CSV</h4>
+                                <p className="text-xs text-gray-500">Planilha (Excel)</p>
+                            </div>
+                             {downloading && <Loader2 className="w-5 h-5 animate-spin ml-auto text-green-500" />}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
 
       </main>
     </div>

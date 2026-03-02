@@ -167,13 +167,53 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
 
         const installments = generateInstallments(selectedLoanForCharge);
         const overdueInstallments = installments.filter(i => i.status === 'late');
-        const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
         
         let message = '';
-        if (totalOverdue > 0) {
-            message = `Olá ${selectedLoanForCharge.client.name}, identificamos um atraso de R$ ${totalOverdue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} referente ao seu empréstimo (Contrato #${selectedLoanForCharge.id.substring(0, 6)}). Por favor, regularize sua situação.`;
+        if (overdueInstallments.length > 0) {
+            const nome = selectedLoanForCharge.client.name;
+            const contrato = selectedLoanForCharge.id.substring(0, 6);
+            
+            if (overdueInstallments.length === 1) {
+                const firstUnpaid = overdueInstallments[0];
+                const parcela = firstUnpaid.number;
+                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
+
+                const jurosInfo = firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0 
+                    ? ` (incluindo R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros por atraso)`
+                    : '';
+
+                message = `Olá, ${nome}.\n\nConsta em nosso sistema a parcela nº ${parcela} no valor de R$ ${valor}${jurosInfo}, referente ao contrato ${contrato}, com vencimento em ${data}.\n\nPedimos a regularização para evitar encargos adicionais.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
+            } else {
+                const totalValue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
+                const valorTotalFormatado = totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const parcelasStr = overdueInstallments.map(i => i.number).join(', ');
+                
+                let detalhesParcelas = '';
+                overdueInstallments.forEach(i => {
+                    const data = (i.originalDate || i.date).toLocaleDateString('pt-BR');
+                    const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                    const jurosInfo = i.accumulatedInterest && i.accumulatedInterest > 0 
+                        ? ` (inclui R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros)`
+                        : '';
+                    detalhesParcelas += `- Parcela ${i.number}: R$ ${valor} (Vencimento: ${data})${jurosInfo}\n`;
+                });
+
+                message = `Olá, ${nome}.\n\nConstam em nosso sistema ${overdueInstallments.length} parcelas em atraso (nº ${parcelasStr}), totalizando R$ ${valorTotalFormatado}, referentes ao contrato ${contrato}.\n\nDetalhes:\n${detalhesParcelas}\nPedimos a regularização para evitar encargos adicionais.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
+            }
         } else {
-            message = `Olá ${selectedLoanForCharge.client.name}, estamos entrando em contato referente ao seu empréstimo (Contrato #${selectedLoanForCharge.id.substring(0, 6)}).`;
+            const firstUnpaid = installments.find(i => i.status !== 'paid');
+            if (firstUnpaid) {
+                const nome = selectedLoanForCharge.client.name;
+                const parcela = firstUnpaid.number;
+                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const contrato = selectedLoanForCharge.id.substring(0, 6);
+                const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
+
+                message = `Olá, ${nome}.\n\nLembramos que a parcela nº ${parcela} no valor de R$ ${valor}, referente ao contrato ${contrato}, vence em ${data}.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
+            } else {
+                message = `Olá, ${selectedLoanForCharge.client.name}.\n\nEstamos entrando em contato referente ao seu contrato ${selectedLoanForCharge.id.substring(0, 6)}.`;
+            }
         }
         
         const encodedMessage = encodeURIComponent(message);

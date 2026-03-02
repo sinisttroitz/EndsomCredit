@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
+import { processRecurringInterest } from '../utils/interestUtils';
 
 interface LoanDetailsProps {
     loanId: string | null;
@@ -18,6 +19,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [processing, setProcessing] = useState(false);
     const [showAllInstallments, setShowAllInstallments] = useState(false);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [showSinglePaymentConfirmModal, setShowSinglePaymentConfirmModal] = useState(false);
     const [showMensalPaymentModal, setShowMensalPaymentModal] = useState(false);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
     const [showAVModal, setShowAVModal] = useState(false);
@@ -45,6 +47,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         message: string;
         action: () => void;
     }>({ open: false, title: '', message: '', action: () => {} });
+
+    const [selectedInstallmentForDetail, setSelectedInstallmentForDetail] = useState<Installment | null>(null);
 
     const [userSettings, setUserSettings] = useState<{
         pix_key: string;
@@ -126,7 +130,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             let newBalance = Number(loan.balance) - selectedValue;
             if (newBalance < 0.01) newBalance = 0;
             
-            const newProgress = Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100));
+            const newProgress = Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
 
             const { error } = await supabase
@@ -207,7 +211,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             let newBalance = Number(loan.balance) - paidAmount;
             if (newBalance < 0.01) newBalance = 0;
             
-            const newProgress = Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100));
+            const newProgress = Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
             
             const { error: loanError } = await supabase
@@ -275,16 +279,53 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         if (!loan || !loan.client?.phone) return;
 
         const overdueInstallments = installmentsList.filter(i => i.status === 'late');
-        const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
-        
-        // If totalOverdue is 0 (e.g. "Charge anyway"), we might want to ask for an amount or just open chat
-        // For now, let's just use 0 or a generic message if 0
         
         let message = '';
-        if (totalOverdue > 0) {
-            message = `Olá ${loan.client.name}, identificamos um atraso de R$ ${totalOverdue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} referente ao seu empréstimo (Contrato #${loan.id.substring(0, 6)}). Por favor, regularize sua situação.`;
+        if (overdueInstallments.length > 0) {
+            const nome = loan.client.name;
+            const contrato = loan.id.substring(0, 6);
+            
+            if (overdueInstallments.length === 1) {
+                const firstUnpaid = overdueInstallments[0];
+                const parcela = firstUnpaid.number;
+                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
+
+                const jurosInfo = firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0 
+                    ? ` (incluindo R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros por atraso)`
+                    : '';
+
+                message = `Olá, ${nome}.\n\nConsta em nosso sistema a parcela nº ${parcela} no valor de R$ ${valor}${jurosInfo}, referente ao contrato ${contrato}, com vencimento em ${data}.\n\nPedimos a regularização para evitar encargos adicionais.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
+            } else {
+                const totalValue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
+                const valorTotalFormatado = totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const parcelasStr = overdueInstallments.map(i => i.number).join(', ');
+                
+                let detalhesParcelas = '';
+                overdueInstallments.forEach(i => {
+                    const data = (i.originalDate || i.date).toLocaleDateString('pt-BR');
+                    const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                    const jurosInfo = i.accumulatedInterest && i.accumulatedInterest > 0 
+                        ? ` (inclui R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros)`
+                        : '';
+                    detalhesParcelas += `- Parcela ${i.number}: R$ ${valor} (Vencimento: ${data})${jurosInfo}\n`;
+                });
+
+                message = `Olá, ${nome}.\n\nConstam em nosso sistema ${overdueInstallments.length} parcelas em atraso (nº ${parcelasStr}), totalizando R$ ${valorTotalFormatado}, referentes ao contrato ${contrato}.\n\nDetalhes:\n${detalhesParcelas}\nPedimos a regularização para evitar encargos adicionais.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
+            }
         } else {
-            message = `Olá ${loan.client.name}, estamos entrando em contato referente ao seu empréstimo (Contrato #${loan.id.substring(0, 6)}).`;
+            const firstUnpaid = installmentsList.find(i => i.status !== 'paid');
+            if (firstUnpaid) {
+                const nome = loan.client.name;
+                const parcela = firstUnpaid.number;
+                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const contrato = loan.id.substring(0, 6);
+                const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
+
+                message = `Olá, ${nome}.\n\nLembramos que a parcela nº ${parcela} no valor de R$ ${valor}, referente ao contrato ${contrato}, vence em ${data}.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
+            } else {
+                message = `Olá, ${loan.client.name}.\n\nEstamos entrando em contato referente ao seu contrato ${loan.id.substring(0, 6)}.`;
+            }
         }
         
         const encodedMessage = encodeURIComponent(message);
@@ -385,8 +426,22 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 .single();
             
             if (error) throw error;
-            setLoan(data);
-            const list = generateInstallments(data);
+
+            // Process recurring interest for this loan
+            const updated = await processRecurringInterest([data]);
+            
+            let finalData = data;
+            if (updated) {
+                const { data: freshData } = await supabase
+                    .from('loans')
+                    .select('*, client:clients(name, credit_balance, phone)')
+                    .eq('id', loanId)
+                    .single();
+                finalData = freshData;
+            }
+
+            setLoan(finalData);
+            const list = generateInstallments(finalData);
             setInstallmentsList(list);
         } catch (error) {
             console.error("Error fetching loan details", error);
@@ -410,7 +465,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             if (newBalance < 0.01) newBalance = 0;
             
             // Calculate progress based on Total Debt, not Principal Amount
-            const newProgress = Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100));
+            const newProgress = Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
 
             const { error } = await supabase
@@ -424,7 +479,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
             if (error) throw error;
             
-            setShowPaymentModal(false);
+            setShowSinglePaymentConfirmModal(false);
             await fetchLoanData(); 
             
         } catch (error) {
@@ -439,9 +494,41 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         if (!loan) return;
 
         const title = type === 'full' ? 'Quitar Empréstimo' : 'Renovar Empréstimo';
-        const message = type === 'full' 
-            ? "Tem certeza que deseja quitar todo o empréstimo?" 
-            : "Tem certeza que deseja pagar os juros e renovar o empréstimo?";
+        let message = '';
+
+        if (type === 'full') {
+            message = "Tem certeza que deseja quitar todo o empréstimo?";
+        } else {
+            // Calculate renewal details for the message
+            let currentDue: Date;
+            if (loan.due_date) {
+                const [y, m, d] = loan.due_date.split('-').map(Number);
+                currentDue = new Date(y, m - 1, d);
+            } else {
+                currentDue = new Date();
+            }
+
+            // Add period based on frequency
+            const installments = loan.installments || 1;
+            if (loan.frequency === 'Diária') {
+                currentDue.setDate(currentDue.getDate() + installments);
+            } else if (loan.frequency === 'Semanal') {
+                currentDue.setDate(currentDue.getDate() + (installments * 7));
+            } else if (loan.frequency === 'Quinzenal') {
+                currentDue.setDate(currentDue.getDate() + (installments * 15));
+            } else { // Mensal or default
+                currentDue.setMonth(currentDue.getMonth() + installments);
+            }
+
+            const formattedDate = currentDue.toLocaleDateString('pt-BR');
+            
+            const principal = Number(loan.amount);
+            const interest = principal * (Number(loan.interest_rate) / 100);
+            const newBalance = principal + interest;
+            const formattedBalance = newBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+            message = `Deseja pagar os juros e renovar o empréstimo?\n\nNova Data de Vencimento: ${formattedDate}\nNovo Valor do Empréstimo: R$ ${formattedBalance}`;
+        }
             
         setConfirmationModal({
             open: true,
@@ -475,8 +562,18 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     currentDue = new Date();
                 }
                 
-                // Add 30 days
-                currentDue.setDate(currentDue.getDate() + 30);
+                // Add period based on frequency
+                const installments = loan.installments || 1;
+                if (loan.frequency === 'Diária') {
+                    currentDue.setDate(currentDue.getDate() + installments);
+                } else if (loan.frequency === 'Semanal') {
+                    currentDue.setDate(currentDue.getDate() + (installments * 7));
+                } else if (loan.frequency === 'Quinzenal') {
+                    currentDue.setDate(currentDue.getDate() + (installments * 15));
+                } else { // Mensal or default
+                    currentDue.setMonth(currentDue.getMonth() + installments);
+                }
+
                 const newDueDateStr = currentDue.toISOString().split('T')[0];
                 
                 // Reset balance to Principal + Interest
@@ -485,9 +582,6 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 const newBalance = principal + interest;
                 
                 // Calculate interest paid in this renewal (Current Balance - Principal)
-                // If balance is less than principal (partial payment made?), we assume interest is paid first?
-                // But for monthly loans, usually balance >= principal.
-                // Let's assume the interest part is (current_balance - principal).
                 const interestPaid = Math.max(0, Number(loan.balance) - principal);
                 const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
 
@@ -516,7 +610,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             
         } catch (error) {
             console.error(error);
-            alert("Erro ao processar pagamento mensal.");
+            alert("Erro ao processar pagamento.");
         } finally {
             setProcessing(false);
         }
@@ -609,8 +703,8 @@ ${paidInstallments.map(i =>
     }
 
     const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-    const totalPaid = totalDebt - Number(loan.balance);
-    const percentage = loan.progress || 0;
+    const totalPaid = Math.max(0, totalDebt - Number(loan.balance));
+    const percentage = Math.max(0, loan.progress || 0);
     const paidCount = installmentsList.filter(i => i.status === 'paid').length;
     const totalCount = installmentsList.length;
     
@@ -750,10 +844,12 @@ ${paidInstallments.map(i =>
                         {(showAllInstallments || isSelectionMode ? installmentsList : installmentsList.slice(0, 5)).map((inst) => (
                             <div 
                                 key={inst.number} 
-                                className={`relative flex items-center gap-4 transition-all duration-200 ${isSelectionMode && inst.status !== 'paid' ? 'cursor-pointer active:scale-[0.99]' : ''}`}
+                                className={`relative flex items-center gap-4 transition-all duration-200 ${inst.status !== 'paid' ? 'cursor-pointer active:scale-[0.99]' : 'cursor-pointer active:scale-[0.99]'}`}
                                 onClick={() => {
                                     if (isSelectionMode && inst.status !== 'paid') {
                                         toggleInstallmentSelection(inst.number);
+                                    } else if (!isSelectionMode) {
+                                        setSelectedInstallmentForDetail(inst);
                                     }
                                 }}
                             >
@@ -782,18 +878,25 @@ ${paidInstallments.map(i =>
                                         <p className="text-sm font-bold text-primary dark:text-white">Parcela #{String(inst.number).padStart(2, '0')}</p>
                                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark">
                                             {inst.status === 'paid' ? `Paga` : 
-                                             inst.status === 'late' ? `Venceu em ${inst.date.toLocaleDateString()}` :
+                                             inst.status === 'late' ? `Vencido desde ${(inst.originalDate || inst.date).toLocaleDateString()}` :
                                              inst.status === 'pending' ? `Vence em ${inst.date.toLocaleDateString()}` :
                                              `Prevista para ${inst.date.toLocaleDateString()}`}
                                         </p>
                                     </div>
-                                    <p className={`text-sm font-bold ${
-                                        inst.status === 'paid' ? 'text-secondary' :
-                                        inst.status === 'late' ? 'text-danger' :
-                                        inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
-                                    }`}>
-                                        R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </p>
+                                    <div className="text-right">
+                                        {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0 && inst.originalValue && Math.abs(inst.value - inst.originalValue) > 0.01) && (
+                                            <p className="text-[10px] text-gray-400 line-through leading-none mb-0.5">
+                                                R$ {inst.originalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                        )}
+                                        <p className={`text-sm font-bold ${
+                                            inst.status === 'paid' ? 'text-secondary' :
+                                            inst.status === 'late' ? 'text-danger' :
+                                            inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
+                                        }`}>
+                                            R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -822,7 +925,7 @@ ${paidInstallments.map(i =>
                             {loan.status !== 'paid' && (
                                 <button 
                                     onClick={() => {
-                                        if (loan.frequency === 'Mensal') {
+                                        if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
                                             setShowMensalPaymentModal(true);
                                         } else {
                                             setShowPaymentModal(true);
@@ -835,8 +938,8 @@ ${paidInstallments.map(i =>
                                 </button>
                             )}
                             
-                            {/* Batch Payment Button - Always visible if not paid AND not Mensal */}
-                            {loan.status !== 'paid' && loan.frequency !== 'Mensal' && (
+                            {/* Batch Payment Button - Always visible if not paid AND not Mensal/Quinzenal */}
+                            {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && (
                                 <button 
                                     onClick={toggleSelectionMode}
                                     className="w-full bg-white dark:bg-gray-800 text-primary dark:text-white border border-gray-200 dark:border-gray-700 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-sm"
@@ -892,7 +995,7 @@ ${paidInstallments.map(i =>
                             <button 
                                 onClick={() => {
                                     setShowPaymentModal(false);
-                                    handleConfirmPayment(); // Or show confirmation for single payment
+                                    setShowSinglePaymentConfirmModal(true);
                                 }}
                                 className="w-full py-4 px-4 rounded-xl font-bold text-white bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 flex flex-col items-center justify-center gap-1 transition-colors"
                             >
@@ -916,6 +1019,40 @@ ${paidInstallments.map(i =>
                                 className="w-full py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors mt-2"
                             >
                                 Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Single Payment Confirmation Modal */}
+            {showSinglePaymentConfirmModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSinglePaymentConfirmModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Confirmar Pagamento</h3>
+                            <button onClick={() => setShowSinglePaymentConfirmModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="mb-6 bg-green-50 dark:bg-green-900/20 p-4 rounded-2xl border border-green-100 dark:border-green-800 text-center">
+                            <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase mb-1">Valor da Parcela</p>
+                            <p className="text-3xl font-bold text-green-700 dark:text-green-300">R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        </div>
+
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
+                                Deseja confirmar o pagamento de 1 parcela no valor acima?
+                            </p>
+
+                            <button 
+                                onClick={handleConfirmPayment}
+                                disabled={processing}
+                                className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-bold shadow-lg shadow-green-600/20 transition disabled:opacity-70"
+                            >
+                                {processing ? 'Processando...' : 'Confirmar Pagamento'}
                             </button>
                         </div>
                     </div>
@@ -965,15 +1102,15 @@ ${paidInstallments.map(i =>
                 </div>
             )}
 
-            {/* Mensal Payment Modal */}
+            {/* Mensal/Quinzenal Payment Modal */}
             {showMensalPaymentModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMensalPaymentModal(false)}></div>
                     <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
                         <div className="flex flex-col items-center text-center mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Pagamento Mensal</h3>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Pagamento de Empréstimo</h3>
                             <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Escolha como deseja prosseguir com este empréstimo.
+                                Escolha como deseja prosseguir com este empréstimo {loan.frequency.toLowerCase()}.
                             </p>
                         </div>
 
@@ -1062,7 +1199,7 @@ ${paidInstallments.map(i =>
                                 <AlertTriangle className="w-8 h-8 text-yellow-600 dark:text-yellow-500" />
                             </div>
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{confirmationModal.title}</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                            <p className="text-sm text-gray-500 dark:text-gray-400 whitespace-pre-line">
                                 {confirmationModal.message}
                             </p>
                         </div>
@@ -1278,6 +1415,67 @@ ${paidInstallments.map(i =>
                                 </button>
                             )}
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Installment Detail Modal */}
+            {selectedInstallmentForDetail && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedInstallmentForDetail(null)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200 border border-gray-100 dark:border-gray-800">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Detalhes da Parcela #{String(selectedInstallmentForDetail.number).padStart(2, '0')}</h3>
+                            <button onClick={() => setSelectedInstallmentForDetail(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            {Boolean(selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) && (
+                                <>
+                                    <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
+                                        <span className="text-sm text-gray-500 dark:text-gray-400">Valor Original</span>
+                                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                            R$ {selectedInstallmentForDetail.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
+                                        <span className="text-sm text-danger font-medium">Juros Acumulados</span>
+                                        <span className="text-sm font-bold text-danger">
+                                            + R$ {selectedInstallmentForDetail.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                </>
+                            )}
+
+                            <div className="flex justify-between items-center pt-2">
+                                <span className="text-base font-bold text-gray-900 dark:text-white">
+                                    {Boolean(selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) ? 'Total Atual' : 'Valor da Parcela'}
+                                </span>
+                                <span className="text-xl font-black text-primary dark:text-white">
+                                    R$ {selectedInstallmentForDetail.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                            </div>
+
+                            <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <Calendar className="w-4 h-4 text-gray-400" />
+                                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Vencimento</span>
+                                </div>
+                                <p className="text-sm font-bold text-gray-800 dark:text-gray-200">
+                                    {(selectedInstallmentForDetail.originalDate || selectedInstallmentForDetail.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                </p>
+                            </div>
+                        </div>
+
+                        <button 
+                            onClick={() => setSelectedInstallmentForDetail(null)}
+                            className="w-full mt-8 bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98]"
+                        >
+                            Fechar
+                        </button>
                     </div>
                 </div>
             )}

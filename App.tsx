@@ -13,6 +13,7 @@ import { LoanDetails } from './screens/LoanDetails';
 import { CollectionCalendar } from './screens/CollectionCalendar';
 import { Login } from './screens/Login';
 import { BottomNav } from './components/BottomNav';
+import { Sidebar } from './components/Sidebar';
 import { supabase } from './supabaseClient';
 
 const App: React.FC = () => {
@@ -35,6 +36,8 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [initialLoansFilter, setInitialLoansFilter] = useState<'all' | 'pending' | 'late'>(() => loadState('initialLoansFilter', 'all'));
   const [newLoanInitialData, setNewLoanInitialData] = useState<any>(null);
+  const [systemLogo, setSystemLogo] = useState<string>('');
+  const [sidebarLogo, setSidebarLogo] = useState<string>('');
 
   // Save state to localStorage whenever it changes
   useEffect(() => {
@@ -46,6 +49,45 @@ const App: React.FC = () => {
     localStorage.setItem('selectedLoanId', JSON.stringify(selectedLoanId));
     localStorage.setItem('initialLoansFilter', JSON.stringify(initialLoansFilter));
   }, [currentView, previousView, selectedClientId, selectedLoanId, initialLoansFilter]);
+
+  const fetchSystemLogo = async () => {
+    try {
+        // We assume a bucket named 'system' and a file named 'logo.png'
+        const { data } = supabase.storage
+            .from('system')
+            .getPublicUrl('logo.png');
+        
+        if (data && data.publicUrl) {
+            // Add cache busting timestamp to ensure fresh logo
+            const freshUrl = `${data.publicUrl}?t=${new Date().getTime()}`;
+            setSystemLogo(freshUrl);
+        }
+
+        // Fetch sidebar logo (logo2.png)
+        const { data: sidebarData } = supabase.storage
+            .from('system')
+            .getPublicUrl('logo2.png');
+        
+        if (sidebarData && sidebarData.publicUrl) {
+            const freshSidebarUrl = `${sidebarData.publicUrl}?t=${new Date().getTime()}`;
+            setSidebarLogo(freshSidebarUrl);
+        }
+    } catch (err) {
+        console.error("Error fetching system logo from storage:", err);
+    }
+  };
+
+  // Fetch logo on initial load
+  useEffect(() => {
+    fetchSystemLogo();
+  }, []);
+
+  // Refresh logo whenever we go back to login screen
+  useEffect(() => {
+    if (currentView === 'login') {
+        fetchSystemLogo();
+    }
+  }, [currentView]);
 
   useEffect(() => {
     // Checar sessão ativa ao iniciar
@@ -94,7 +136,7 @@ const App: React.FC = () => {
 
     switch (currentView) {
       case 'login':
-        return <Login onLogin={() => setCurrentView('dashboard')} />;
+        return <Login onLogin={() => setCurrentView('dashboard')} logo={systemLogo} />;
       case 'dashboard':
         return <Dashboard 
             onClientSelect={(id) => {
@@ -233,21 +275,46 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="mx-auto max-w-md h-screen relative bg-background-light dark:bg-background-dark overflow-hidden shadow-2xl">
-      {renderView()}
+    <div className="flex h-screen w-full bg-background-light dark:bg-background-dark overflow-hidden">
+      {session && currentView !== 'login' && (
+        <div className="hidden md:flex">
+            <Sidebar 
+                currentView={currentView} 
+                onNavigate={(view) => {
+                    setCurrentView(view);
+                    setPreviousView(null);
+                    // Clear selection when navigating from menu
+                    if (view !== 'new-loan') setSelectedClientId(null);
+                }}
+                logo={sidebarLogo || systemLogo}
+                userEmail={session.user.email}
+                userName={session.user.user_metadata?.full_name}
+                onLogout={handleLogout}
+            />
+        </div>
+      )}
+      
+      <main className="flex-1 h-full relative overflow-hidden flex flex-col">
+        <div className={`w-full h-full mx-auto md:mx-0 ${currentView === 'login' ? '' : 'max-w-md md:max-w-none'} overflow-y-auto no-scrollbar relative shadow-2xl md:shadow-none`}>
+            {renderView()}
+        </div>
+      </main>
+
       {session && (
-        <BottomNav 
-            currentView={currentView} 
-            onNavigate={(view) => {
-                setCurrentView(view);
-                setPreviousView(null);
-                setIsMenuOpen(false);
-                // Limpar seleção ao navegar pelo menu
-                if (view !== 'new-loan') setSelectedClientId(null);
-            }} 
-            isMenuOpen={isMenuOpen}
-            setIsMenuOpen={setIsMenuOpen}
-        />
+        <div className="md:hidden">
+            <BottomNav 
+                currentView={currentView} 
+                onNavigate={(view) => {
+                    setCurrentView(view);
+                    setPreviousView(null);
+                    setIsMenuOpen(false);
+                    // Limpar seleção ao navegar pelo menu
+                    if (view !== 'new-loan') setSelectedClientId(null);
+                }} 
+                isMenuOpen={isMenuOpen}
+                setIsMenuOpen={setIsMenuOpen}
+            />
+        </div>
       )}
     </div>
   );

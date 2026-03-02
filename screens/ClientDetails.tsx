@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, MoreVertical, ShieldCheck, CreditCard, Phone, Mail, PlusCircle, Edit, AlertCircle, FileText, ExternalLink } from 'lucide-react';
+import { ArrowLeft, MoreVertical, ShieldCheck, CreditCard, Phone, Mail, PlusCircle, Edit, AlertCircle, FileText, ExternalLink, MapPin, Navigation } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Client, Loan } from '../types';
 
@@ -306,6 +306,29 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                     <p className="text-sm font-semibold text-gray-800 dark:text-white">Não informado</p>
                                 )}
                             </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-primary dark:text-white">
+                                <MapPin className="w-5 h-5" />
+                            </div>
+                            <div className="flex-1">
+                                <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-tight">Endereço</p>
+                                <p className="text-sm font-semibold text-gray-800 dark:text-white">
+                                    {client.address ? `${client.address}, ${client.number || 'S/N'}${client.city ? ` - ${client.city}/${client.state}` : ''}` : 'Não informado'}
+                                </p>
+                            </div>
+                            {client.address && (
+                                <button 
+                                    onClick={() => {
+                                        const addressQuery = `${client.address}, ${client.number || ''}, ${client.city || ''}, ${client.state || ''}`;
+                                        window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressQuery)}`, '_blank');
+                                    }}
+                                    className="flex flex-col items-center justify-center gap-1 p-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                                >
+                                    <Navigation className="w-4 h-4" />
+                                    <span className="text-[10px] font-bold">Mapa</span>
+                                </button>
+                            )}
                         </div>
                         <div className="flex items-center gap-4">
                             <div className="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-primary dark:text-white">

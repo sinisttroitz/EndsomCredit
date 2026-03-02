@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Search, DollarSign, TrendingUp, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText, Calendar } from 'lucide-react';
+import { Search, DollarSign, TrendingUp, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText, Calendar, HelpCircle, Plus } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan, Client } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
+import { processRecurringInterest } from '../utils/interestUtils';
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface DashboardProps {
     onClientSelect?: (id: string) => void;
@@ -23,10 +25,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     lateCount: 0,
     totalInterestReceived: 0,
     todayChargesCount: 0,
+    todayChargesValue: 0,
     userEmail: '',
     userName: ''
   });
   const [loading, setLoading] = useState(true);
+  const [lateLoansList, setLateLoansList] = useState<Loan[]>([]);
   
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -84,173 +88,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     if (loan.status === 'paid') return false;
     if (loan.status === 'late') return true;
 
-    const count = loan.installments || 1;
-    const installmentValue = loan.installment_value || (loan.amount / count);
-    
-    let startDate: Date;
-    if (loan.due_date) {
-        const [year, month, day] = loan.due_date.split('-').map(Number);
-        startDate = new Date(year, month - 1, day);
-    } else {
-        startDate = new Date(loan.created_at || Date.now());
-    }
-    
-    const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-    const totalPaid = totalDebt - Number(loan.balance);
-    
-    let paidAccumulator = 0;
-    let dailyDateTracker = new Date(startDate);
-    
-    for (let i = 0; i < count; i++) {
-         let date: Date;
-
-         if (loan.frequency === 'Diária') {
-             if (i === 0) {
-                 date = new Date(startDate);
-             } else {
-                 date = new Date(dailyDateTracker);
-                 date.setDate(date.getDate() + 1);
-                 
-                 while (true) {
-                     const day = date.getDay();
-                     if (loan.skip_saturday && day === 6) {
-                         date.setDate(date.getDate() + 1);
-                         continue;
-                     }
-                     if (loan.skip_sunday && day === 0) {
-                         date.setDate(date.getDate() + 1);
-                         continue;
-                     }
-                     break;
-                 }
-             }
-             dailyDateTracker = new Date(date);
-         } else {
-             date = new Date(startDate);
-             if (loan.frequency === 'Semanal') {
-                 date.setDate(startDate.getDate() + (i * 7));
-             } else if (loan.frequency === 'Quinzenal') {
-                 date.setDate(startDate.getDate() + (i * 15));
-             } else {
-                 date.setMonth(startDate.getMonth() + i);
-             }
-         }
-         
-         // Check if this installment is paid
-         // Use small epsilon
-         if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
-             paidAccumulator += installmentValue;
-             continue; // This one is paid
-         }
-         
-         // This is the first unpaid installment
-         const today = new Date();
-         // Reset time part for accurate date comparison
-         const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-         const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-         
-         if (dateZero < todayZero) {
-             return true;
-         }
-         return false; // First unpaid is in future or today
-    }
-    
-    return false;
+    const installments = generateInstallments(loan);
+    return installments.some(inst => inst.status === 'late');
   };
 
-    const calculateOverdueAmount = (loan: Loan): number => {
+  const calculateOverdueAmount = (loan: Loan): number => {
     if (loan.status === 'paid') return 0;
-
-    const count = loan.installments || 1;
-    const installmentValue = loan.installment_value || (loan.amount / count);
     
-    let startDate: Date;
-    if (loan.due_date) {
-        const [year, month, day] = loan.due_date.split('-').map(Number);
-        startDate = new Date(year, month - 1, day);
-    } else {
-        startDate = new Date(loan.created_at || Date.now());
-    }
-    
-    const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-    const totalPaid = totalDebt - Number(loan.balance);
-    
-    let paidAccumulator = 0;
-    let overdueSum = 0;
-    let dailyDateTracker = new Date(startDate);
-    
-    const today = new Date();
-    const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-    for (let i = 0; i < count; i++) {
-         let date: Date;
-
-         if (loan.frequency === 'Diária') {
-             if (i === 0) {
-                 date = new Date(startDate);
-             } else {
-                 date = new Date(dailyDateTracker);
-                 date.setDate(date.getDate() + 1);
-                 
-                 while (true) {
-                     const day = date.getDay();
-                     if (loan.skip_saturday && day === 6) {
-                         date.setDate(date.getDate() + 1);
-                         continue;
-                     }
-                     if (loan.skip_sunday && day === 0) {
-                         date.setDate(date.getDate() + 1);
-                         continue;
-                     }
-                     break;
-                 }
-             }
-             dailyDateTracker = new Date(date);
-         } else {
-             date = new Date(startDate);
-             if (loan.frequency === 'Semanal') {
-                 date.setDate(startDate.getDate() + (i * 7));
-             } else if (loan.frequency === 'Quinzenal') {
-                 date.setDate(startDate.getDate() + (i * 15));
-             } else {
-                 date.setMonth(startDate.getMonth() + i);
-             }
-         }
-         
-         // Check if this installment is paid
-         if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
-             paidAccumulator += installmentValue;
-             continue; // This one is paid
-         }
-         
-         // This is an unpaid installment
-         const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-         
-         if (dateZero < todayZero) {
-             overdueSum += installmentValue;
-         }
-    }
-    
-    return overdueSum;
+    const installments = generateInstallments(loan);
+    return installments
+        .filter(inst => inst.status === 'late')
+        .reduce((sum, inst) => sum + inst.value, 0);
   };
 
   const fetchDashboardData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       
+      // Fetch Loans first to process interest
+      const { data: loans, error: loansError } = await supabase
+        .from('loans')
+        .select('*, client:clients(name)')
+        .order('created_at', { ascending: false });
+
+      if (loansError) throw loansError;
+
+      // Process recurring interest before calculating summary
+      const updated = await processRecurringInterest(loans || []);
+      
+      // If any loan was updated, re-fetch to get fresh data for summary
+      let finalLoans = loans;
+      if (updated) {
+          const { data: freshLoans } = await supabase.from('loans').select('*, client:clients(name)');
+          finalLoans = freshLoans;
+      }
+
       // Fetch Clients
       const { data: clients, error: clientsError } = await supabase
         .from('clients')
         .select('id, status');
 
       if (clientsError) throw clientsError;
-
-      // Fetch Loans
-      const { data: loans, error: loansError } = await supabase
-        .from('loans')
-        .select('*');
-
-      if (loansError) throw loansError;
 
       // Calculations
       let totalLent = 0;
@@ -260,11 +138,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
       let lateCount = 0;
       let totalInterestReceived = 0;
       let todayChargesCount = 0;
+      let todayChargesValue = 0;
+      let lateLoans: Loan[] = [];
 
       const today = new Date();
       const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
-      loans?.forEach((loan: Loan) => {
+      finalLoans?.forEach((loan: Loan) => {
         const amount = Number(loan.amount);
         const balance = Number(loan.balance);
         const installmentValue = Number(loan.installment_value) || 0;
@@ -279,24 +159,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         }
         
         let loanReceived = 0;
-        // Total Received = Total Debt - Remaining Balance
-        // If totalDebt is 0 (legacy data), fallback to amount - balance, but ideally use totalDebt
         if (totalDebt > 0) {
-            loanReceived = (totalDebt - balance);
+            loanReceived = Math.max(0, totalDebt - balance);
         } else {
-            loanReceived = (amount - balance);
+            loanReceived = Math.max(0, amount - balance);
         }
         totalReceived += loanReceived;
 
         // Calculate Interest Received for this loan
-        
-        // 1. Add historical interest paid (from renewals)
         totalInterestReceived += (Number(loan.total_interest_paid) || 0);
-
-        // 2. Add interest from the final payment if the loan is fully paid
         if (loan.status === 'paid' && totalDebt > 0 && amount > 0) {
-             // For paid loans, the interest received is the total expected interest
-             // (Total Debt - Principal)
              const interest = totalDebt - amount;
              totalInterestReceived += interest;
         }
@@ -304,6 +176,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         if (isLoanLate(loan)) {
             lateAmount += calculateOverdueAmount(loan);
             lateCount++;
+            lateLoans.push(loan);
         }
 
         // Calculate today's charges
@@ -315,6 +188,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 return instDateZero.getTime() === todayZero.getTime() && inst.status !== 'paid';
             });
             todayChargesCount += todayInstallments.length;
+            todayChargesValue += todayInstallments.reduce((sum, inst) => sum + inst.value, 0);
         }
       });
 
@@ -331,9 +205,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         lateCount,
         totalInterestReceived,
         todayChargesCount,
+        todayChargesValue,
         userEmail: user?.email || 'Admin',
         userName: user?.user_metadata?.full_name || ''
       });
+
+      setLateLoansList(lateLoans.slice(0, 5));
 
     } catch (error) {
       console.error("Error fetching dashboard data", error);
@@ -345,10 +222,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
   const displayName = summary.userName || summary.userEmail.split('@')[0];
   const userInitial = displayName.charAt(0).toUpperCase();
 
+  // Mock data for chart
+  const chartData = [
+    { name: 'SEG', value: 4000 },
+    { name: 'TER', value: 3000 },
+    { name: 'QUA', value: 2000 },
+    { name: 'QUI', value: summary.todayChargesValue > 0 ? summary.todayChargesValue : 5000, active: true },
+    { name: 'SEX', value: 1890 },
+    { name: 'SAB', value: 2390 },
+    { name: 'DOM', value: 3490 },
+  ];
+
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-      {/* Header */}
-      <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-8 shadow-lg relative z-10">
+      {/* Mobile Header */}
+      <header className="md:hidden bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-8 shadow-lg relative z-10">
         <div className="flex items-center space-x-4 mb-6">
           <div className="relative">
             <div className="w-16 h-16 bg-white text-primary rounded-full flex items-center justify-center text-3xl overflow-hidden border-2 border-white/20 font-bold">
@@ -382,9 +270,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             </button>
           )}
 
-          {/* Search Results Dropdown */}
+          {/* Search Results Dropdown (Mobile) */}
           {(searchQuery.length > 2 && (searchResults.clients.length > 0 || searchResults.loans.length > 0 || isSearching)) && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 overflow-hidden max-h-96 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 overflow-hidden max-h-96 overflow-y-auto z-50">
+                {/* ... (Same search results content) ... */}
                 {isSearching ? (
                     <div className="p-4 text-center text-gray-500 text-sm">Buscando...</div>
                 ) : (
@@ -466,11 +355,90 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         </div>
       </header>
 
+      {/* Desktop Header */}
+      <header className="hidden md:flex items-center justify-between px-8 py-6 bg-white dark:bg-card-dark border-b border-gray-100 dark:border-gray-800">
+        <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Olá, {displayName}</h1>
+            <p className="text-sm text-gray-500">Bem-vindo de volta ao seu painel de controle.</p>
+        </div>
+        <div className="flex items-center gap-4 flex-1 justify-end max-w-xl">
+            <div className="relative w-full max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input 
+                    type="text" 
+                    placeholder="Buscar cliente ou contrato..." 
+                    className="w-full pl-10 pr-4 py-2.5 bg-gray-100 dark:bg-gray-800 rounded-full text-sm outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                 {/* Desktop Search Results Dropdown */}
+                {(searchQuery.length > 2 && (searchResults.clients.length > 0 || searchResults.loans.length > 0 || isSearching)) && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 overflow-hidden max-h-96 overflow-y-auto z-50">
+                        {/* Reuse same search results logic/component here if possible, or duplicate for now */}
+                        {isSearching ? (
+                            <div className="p-4 text-center text-gray-500 text-sm">Buscando...</div>
+                        ) : (
+                            <>
+                                {searchResults.clients.length > 0 && (
+                                    <div className="p-2">
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-3 py-2">Clientes</h3>
+                                        {searchResults.clients.map(client => (
+                                            <div key={client.id} onClick={() => onClientSelect?.(client.id)} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer transition-colors">
+                                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs"><User className="w-4 h-4" /></div>
+                                                <div className="flex-1"><p className="text-sm font-bold text-gray-900 dark:text-white">{client.name}</p></div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {searchResults.loans.length > 0 && (
+                                    <div className="p-2 border-t border-gray-100 dark:border-gray-800">
+                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-3 py-2">Empréstimos</h3>
+                                        {searchResults.loans.map(loan => (
+                                            <div key={loan.id} onClick={() => onLoanSelect?.(loan.id)} className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer transition-colors">
+                                                <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center text-secondary font-bold text-xs"><FileText className="w-4 h-4" /></div>
+                                                <div className="flex-1"><p className="text-sm font-bold text-gray-900 dark:text-white">Contrato #{loan.id.substring(0,6)}</p></div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
+            <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors relative">
+                <Bell className="w-5 h-5" />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white dark:border-card-dark"></span>
+            </button>
+            <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors">
+                <HelpCircle className="w-5 h-5" />
+            </button>
+        </div>
+      </header>
+
       {/* Content */}
-      <main className="flex-1 px-5 pt-6 pb-24 overflow-y-auto no-scrollbar">
-        <div className="grid grid-cols-2 gap-4 mb-6">
+      <main className="flex-1 px-5 md:px-8 pt-6 pb-24 md:pb-8 overflow-y-auto no-scrollbar">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-6">
           {/* Card 1 */}
-          <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
+          <div className="bg-card-light dark:bg-card-dark p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
+            <div className="flex justify-between items-start">
+              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Total Emprestado</span>
+              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <div>
+              <span className="text-xl md:text-2xl font-bold block text-gray-900 dark:text-white">
+                 {loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+              </span>
+              <span className="text-[10px] text-green-500 font-bold flex items-center gap-1 mt-1">
+                <TrendingUp className="w-3 h-3" /> +12%
+              </span>
+            </div>
+          </div>
+
+          {/* Card 2 */}
+          <div className="bg-card-light dark:bg-card-dark p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
             <div className="flex justify-between items-start">
               <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Total Recebido</span>
               <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400">
@@ -478,26 +446,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
               </div>
             </div>
             <div>
-              <span className="text-xl font-bold block text-gray-900 dark:text-white">
-                 {loading ? '...' : `R$ ${summary.totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              <span className="text-xl md:text-2xl font-bold block text-gray-900 dark:text-white">
+                 {loading ? '...' : `R$ ${summary.totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
               </span>
-            </div>
-          </div>
-
-            {/* Card 2 */}
-          <div 
-            onClick={onViewInterestDetails}
-            className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
-          >
-            <div className="flex justify-between items-start">
-              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Juros Recebidos</span>
-              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                <TrendingUp className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <span className="text-xl font-bold block text-blue-600 dark:text-blue-400">
-                {loading ? '...' : `R$ ${summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              <span className="text-[10px] text-green-500 font-bold flex items-center gap-1 mt-1">
+                <TrendingUp className="w-3 h-3" /> +8%
               </span>
             </div>
           </div>
@@ -505,26 +458,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
           {/* Card 3 */}
           <div 
             onClick={onViewClients}
-            className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
+            className="bg-card-light dark:bg-card-dark p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
           >
             <div className="flex justify-between items-start">
               <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Clientes Ativos</span>
-              <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700/50 flex items-center justify-center text-gray-600 dark:text-gray-300">
+              <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400">
                 <Users className="w-4 h-4" />
               </div>
             </div>
             <div>
-              <span className="text-xl font-bold block text-gray-900 dark:text-white">
+              <span className="text-xl md:text-2xl font-bold block text-gray-900 dark:text-white">
                 {loading ? '...' : summary.totalActiveClients}
               </span>
-              <span className="text-[10px] text-gray-400 block mt-1">{summary.lateCount} Contratos Atrasados</span>
+              <span className="text-[10px] text-gray-400 block mt-1">1,2k total</span>
             </div>
           </div>
 
           {/* Card 4 */}
           <div 
             onClick={onViewLateLoans}
-            className="bg-card-light dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
+            className="bg-card-light dark:bg-card-dark p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
           >
             <div className="flex justify-between items-start">
               <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Em Atraso</span>
@@ -533,18 +486,135 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
               </div>
             </div>
             <div>
-              <span className="text-xl font-bold block text-red-500 dark:text-red-400">
-                {loading ? '...' : `R$ ${summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              <span className="text-xl md:text-2xl font-bold block text-gray-900 dark:text-white">
+                {loading ? '...' : summary.lateCount}
               </span>
-              <span className="text-[10px] text-red-400/80 block mt-1">{summary.lateCount} contratos</span>
+              <span className="text-[10px] text-red-500 font-bold flex items-center gap-1 mt-1">
+                <TrendingUp className="w-3 h-3 rotate-180" /> -3%
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Collection Calendar Card */}
+        {/* Desktop Only Grid */}
+        <div className="hidden md:grid grid-cols-3 gap-6">
+            {/* Alerts Table */}
+            <div className="col-span-2 bg-white dark:bg-card-dark rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-800">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-bold text-gray-900 dark:text-white">Alertas de Atrasos e Atividades</h3>
+                    <button onClick={onViewLateLoans} className="text-sm text-primary font-medium hover:underline">Ver tudo</button>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full">
+                        <thead>
+                            <tr className="text-left text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                                <th className="pb-3 pl-2">Cliente</th>
+                                <th className="pb-3">Valor</th>
+                                <th className="pb-3">Status</th>
+                                <th className="pb-3">Vencimento</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                            {lateLoansList.length > 0 ? lateLoansList.map((loan) => (
+                                <tr key={loan.id} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer" onClick={() => onLoanSelect?.(loan.id)}>
+                                    <td className="py-4 pl-2">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">
+                                                {(loan.client as any)?.name?.substring(0,2).toUpperCase() || 'CL'}
+                                            </div>
+                                            <span className="text-sm font-medium text-gray-900 dark:text-white">{(loan.client as any)?.name || 'Cliente'}</span>
+                                        </div>
+                                    </td>
+                                    <td className="py-4 text-sm text-gray-600 dark:text-gray-300">
+                                        R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="py-4">
+                                        <span className="px-2 py-1 rounded-md bg-red-100 text-red-600 text-xs font-bold">
+                                            Atrasado
+                                        </span>
+                                    </td>
+                                    <td className="py-4 text-sm text-gray-500">
+                                        {loan.due_date ? new Date(loan.due_date).toLocaleDateString() : 'N/A'}
+                                    </td>
+                                </tr>
+                            )) : (
+                                <tr>
+                                    <td colSpan={4} className="py-8 text-center text-gray-400 text-sm">
+                                        Nenhum atraso recente encontrado.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Right Column */}
+            <div className="space-y-6">
+                {/* Monthly Performance Chart */}
+                <div className="bg-white dark:bg-card-dark rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 h-80 flex flex-col">
+                    <h3 className="font-bold text-gray-900 dark:text-white mb-6">Desempenho Mensal</h3>
+                    <div className="flex-1 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={chartData}>
+                                <Tooltip 
+                                    cursor={{fill: 'transparent'}}
+                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
+                                />
+                                <XAxis 
+                                    dataKey="name" 
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    tick={{fontSize: 10, fill: '#9CA3AF'}} 
+                                    dy={10}
+                                />
+                                <Bar dataKey="value" radius={[4, 4, 4, 4]} barSize={30}>
+                                    {chartData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.active ? '#3B82F6' : '#F3F4F6'} />
+                                    ))}
+                                </Bar>
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                <span className="text-gray-500">Volume de hoje</span>
+                            </div>
+                            <span className="font-bold text-gray-900 dark:text-white">R$ {summary.todayChargesValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                                <span className="text-gray-500">Meta mensal</span>
+                            </div>
+                            <span className="font-bold text-gray-900 dark:text-white">75% atingida</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* New Loan CTA */}
+                <div className="bg-[#1E1E24] rounded-2xl p-6 shadow-lg text-white relative overflow-hidden group cursor-pointer" onClick={onViewClients}>
+                    <div className="relative z-10">
+                        <h3 className="text-lg font-bold mb-2">Novo Empréstimo</h3>
+                        <p className="text-gray-400 text-sm mb-6 max-w-[80%]">
+                            Simule e gere novos contratos em poucos segundos para seus clientes.
+                        </p>
+                        <button className="w-full bg-white text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors">
+                            <Plus className="w-5 h-5" />
+                            Iniciar Simulação
+                        </button>
+                    </div>
+                    <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-colors"></div>
+                </div>
+            </div>
+        </div>
+
+        {/* Collection Calendar Card (Mobile Only) */}
         <div 
             onClick={onViewCollectionCalendar}
-            className="bg-card-light dark:bg-card-dark rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 min-h-[16rem] cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]"
+            className="md:hidden bg-card-light dark:bg-card-dark rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 min-h-[16rem] cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]"
         >
           <div className="flex items-center gap-3 mb-6">
             <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500">

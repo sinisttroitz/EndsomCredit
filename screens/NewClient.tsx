@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { ArrowLeft, User, Camera, MapPin, AlertCircle, Loader2, FileText, Upload, X, Trash2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { compressImage } from '@/utils/imageUtils';
 
 interface NewClientProps {
     onBack: () => void;
@@ -172,9 +173,10 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
             // 1. Upload da Foto de Perfil
             let avatarUrl = `https://ui-avatars.com/api/?name=${name}&background=random`;
             if (photoFile) {
+                const compressedPhoto = await compressImage(photoFile);
                 const ext = photoFile.name.split('.').pop();
                 const fileName = `${user.id}/${Date.now()}_avatar.${ext}`;
-                const uploadedUrl = await uploadFileToSupabase(photoFile, fileName);
+                const uploadedUrl = await uploadFileToSupabase(compressedPhoto, fileName);
                 if (uploadedUrl) avatarUrl = uploadedUrl;
             }
 
@@ -183,9 +185,13 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
             if (docFiles.length > 0) {
                 for (let i = 0; i < docFiles.length; i++) {
                     const file = docFiles[i];
+                    // Compress only if it's an image
+                    const isImage = file.type.startsWith('image/');
+                    const fileToUpload = isImage ? await compressImage(file) : file;
+                    
                     const ext = file.name.split('.').pop();
                     const fileName = `${user.id}/${Date.now()}_doc_${i}.${ext}`;
-                    const uploadedUrl = await uploadFileToSupabase(file, fileName);
+                    const uploadedUrl = await uploadFileToSupabase(fileToUpload, fileName);
                     if (uploadedUrl) documentUrls.push(uploadedUrl);
                 }
             }

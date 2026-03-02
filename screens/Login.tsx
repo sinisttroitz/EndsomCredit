@@ -4,9 +4,10 @@ import { supabase } from '../supabaseClient';
 
 interface LoginProps {
   onLogin: () => void;
+  logo?: string;
 }
 
-export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,9 +26,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       });
 
       if (error) {
-        // Se falhar login, tenta cadastro automatico (para facilitar teste, em prod nao faria isso)
-        // O usuario disse que o app deve ficar totalmente funcional, entao vamos garantir acesso.
-        // Porem, login e signup sao endpoints diferentes. Vamos assumir login e mostrar erro.
         throw error;
       }
       
@@ -46,7 +44,13 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       
       <main className="relative z-10 flex-1 flex flex-col items-center px-8 pt-16 overflow-y-auto no-scrollbar">
         <div className="mb-6 text-center w-full">
-          <img src="/empresta logo.webp" alt="Empresta Logo" className="h-16 mx-auto mb-6 object-contain" />
+          {logo ? (
+            <img src={logo} alt="Empresta Logo" className="h-24 mx-auto mb-6 object-contain" />
+          ) : (
+            <div className="h-24 mb-6 flex items-center justify-center">
+              <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+            </div>
+          )}
           <h1 className="text-white text-2xl font-bold tracking-tight mb-1">Acesse sua conta</h1>
           <p className="text-white/50 text-sm">Painel Administrativo Restrito</p>
         </div>

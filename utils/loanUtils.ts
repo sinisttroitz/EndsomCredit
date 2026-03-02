@@ -16,7 +16,8 @@ export const generateInstallments = (loanData: Loan): Installment[] => {
     // Simple logic to determine how many paid based on balance
     // Total Debt = installment_value * installments
     const totalDebt = (loanData.installment_value || 0) * (loanData.installments || 1);
-    const totalPaid = totalDebt - Number(loanData.balance);
+    const accumulatedInterestTotal = Math.max(0, Number(loanData.balance) - totalDebt);
+    const totalPaid = totalDebt - Number(loanData.balance) + accumulatedInterestTotal;
     const list: Installment[] = [];
 
     let paidAccumulator = 0;
@@ -80,11 +81,45 @@ export const generateInstallments = (loanData: Loan): Installment[] => {
 
         if (loanData.balance <= 0) status = 'paid';
 
+        // Check if this is the FIRST unpaid installment
+        const isFirstUnpaid = status !== 'paid' && !list.some(inst => inst.status !== 'paid');
+        let currentInstallmentValue = installmentValue;
+        let accumulatedInterest = 0;
+
+        if (isFirstUnpaid && accumulatedInterestTotal > 0) {
+            currentInstallmentValue = installmentValue + accumulatedInterestTotal;
+            accumulatedInterest = accumulatedInterestTotal;
+        }
+
+        let originalDate = new Date(date);
+        
+        // Calculate original date if interest was added
+        if (accumulatedInterestTotal > 0 && loanData.interest_rate && loanData.amount) {
+            const interestPerPeriod = (loanData.amount * (loanData.interest_rate / 100));
+            if (interestPerPeriod > 0) {
+                const periodsAdded = Math.round(accumulatedInterestTotal / interestPerPeriod);
+                if (periodsAdded > 0) {
+                    if (loanData.frequency === 'Diária') {
+                        originalDate.setDate(originalDate.getDate() - (periodsAdded * (loanData.installments || 1)));
+                    } else if (loanData.frequency === 'Semanal') {
+                        originalDate.setDate(originalDate.getDate() - (periodsAdded * 7 * (loanData.installments || 1)));
+                    } else if (loanData.frequency === 'Quinzenal') {
+                        originalDate.setDate(originalDate.getDate() - (periodsAdded * 15 * (loanData.installments || 1)));
+                    } else if (loanData.frequency === 'Mensal') {
+                        originalDate.setMonth(originalDate.getMonth() - (periodsAdded * (loanData.installments || 1)));
+                    }
+                }
+            }
+        }
+        
         list.push({
             number: i + 1,
             date: date,
-            value: installmentValue,
-            status: status
+            value: currentInstallmentValue,
+            status: status,
+            originalValue: installmentValue,
+            accumulatedInterest: accumulatedInterest,
+            originalDate: originalDate
         });
     }
     return list;

@@ -233,7 +233,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                     onChange={e => setInterestRate(e.target.value)}
                 />
               </div>
-              {frequency !== 'Mensal' && (
+              {(frequency !== 'Mensal' && frequency !== 'Quinzenal') && (
               <div>
                 <label className="block text-xs font-medium text-text-sub-light dark:text-text-sub-dark mb-1.5">Nº de Parcelas</label>
                 <div className="relative flex items-center">
@@ -263,7 +263,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
               {['Diária', 'Semanal', 'Quinzenal', 'Mensal'].map((freq) => (
                  <label key={freq} className="flex-1 cursor-pointer" onClick={() => {
                      setFrequency(freq);
-                     if (freq === 'Mensal') setInstallments(1);
+                     if (freq === 'Mensal' || freq === 'Quinzenal') setInstallments(1);
                      setDueDate(getDueDateByFrequency(freq));
                  }}>
                     <input 
@@ -273,7 +273,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                         checked={frequency === freq} 
                         onChange={() => {
                             setFrequency(freq);
-                            if (freq === 'Mensal') setInstallments(1);
+                            if (freq === 'Mensal' || freq === 'Quinzenal') setInstallments(1);
                             setDueDate(getDueDateByFrequency(freq));
                         }}
                     />
