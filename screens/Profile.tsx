@@ -17,6 +17,13 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [downloading, setDownloading] = useState(false);
   
+  // Password Change State
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [updatingPassword, setUpdatingPassword] = useState(false);
+  
   // Estado local para o CEP e carregamento da busca
   const [cep, setCep] = useState('');
   const [loadingCep, setLoadingCep] = useState(false);
@@ -142,6 +149,51 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+  };
+
+  const handleUpdatePassword = async () => {
+    if (!currentPassword) {
+        alert("Por favor, insira sua senha atual.");
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        alert("As senhas não coincidem.");
+        return;
+    }
+    if (newPassword.length < 6) {
+        alert("A senha deve ter pelo menos 6 caracteres.");
+        return;
+    }
+
+    setUpdatingPassword(true);
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || !user.email) throw new Error("Usuário não identificado.");
+
+        // Verify current password by attempting to sign in
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: user.email,
+            password: currentPassword
+        });
+
+        if (signInError) {
+            throw new Error("A senha atual está incorreta.");
+        }
+
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) throw error;
+        
+        alert("Senha atualizada com sucesso!");
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setShowPasswordModal(false);
+    } catch (error: any) {
+        console.error("Erro ao atualizar senha:", error);
+        alert(`Erro ao atualizar senha: ${error.message || error}`);
+    } finally {
+        setUpdatingPassword(false);
+    }
   };
 
   const handleCepChange = async (value: string) => {
@@ -395,7 +447,10 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
 
         <section>
             <h3 className="text-xs font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-wider mb-3 pl-1">Segurança</h3>
-             <button className="w-full bg-card-light dark:bg-card-dark rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800 flex justify-between items-center group active:scale-[0.99] transition-transform">
+             <button 
+                onClick={() => setShowPasswordModal(true)}
+                className="w-full bg-card-light dark:bg-card-dark rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800 flex justify-between items-center group active:scale-[0.99] transition-transform"
+             >
                 <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500">
                         <Lock className="w-5 h-5" />
@@ -423,6 +478,62 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
             <button onClick={onLogout} className="text-red-500 text-sm font-semibold hover:underline">Sair da conta</button>
             <p className="text-[10px] text-gray-400 mt-2">Versão 2.7.0</p>
         </div>
+
+        {showPasswordModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPasswordModal(false)}></div>
+                <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Trocar Senha</h3>
+                        <button onClick={() => setShowPasswordModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                            <X className="w-5 h-5 text-gray-500" />
+                        </button>
+                    </div>
+                    
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Senha Atual</label>
+                            <input 
+                                type="password"
+                                value={currentPassword}
+                                onChange={(e) => setCurrentPassword(e.target.value)}
+                                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 text-sm font-semibold text-primary dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
+                                placeholder="Sua senha atual"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Nova Senha</label>
+                            <input 
+                                type="password"
+                                value={newPassword}
+                                onChange={(e) => setNewPassword(e.target.value)}
+                                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 text-sm font-semibold text-primary dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
+                                placeholder="Mínimo 6 caracteres"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Confirmar Senha</label>
+                            <input 
+                                type="password"
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-3 text-sm font-semibold text-primary dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
+                                placeholder="Repita a nova senha"
+                            />
+                        </div>
+
+                        <button 
+                            onClick={handleUpdatePassword}
+                            disabled={updatingPassword || !newPassword || !confirmPassword}
+                            className="w-full bg-primary text-white py-3 rounded-xl font-bold shadow-lg shadow-primary/20 active:scale-95 transition-transform disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+                        >
+                            {updatingPassword && <Loader2 className="w-4 h-4 animate-spin" />}
+                            Atualizar Senha
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
 
         {showDownloadModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

@@ -20,6 +20,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     totalLent: 0,
     totalReceived: 0,
     totalActiveClients: 0,
+    totalClients: 0,
     lateAmount: 0,
     activeCount: 0,
     lateCount: 0,
@@ -135,11 +136,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
       let totalReceived = 0;
       let lateAmount = 0;
       let activeCount = 0;
-      let lateCount = 0;
       let totalInterestReceived = 0;
       let todayChargesCount = 0;
       let todayChargesValue = 0;
       let lateLoans: Loan[] = [];
+      let lateClientIds = new Set<string>();
 
       const today = new Date();
       const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -159,10 +160,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         }
         
         let loanReceived = 0;
-        if (totalDebt > 0) {
-            loanReceived = Math.max(0, totalDebt - balance);
+        if (loan.amount_paid !== undefined && loan.amount_paid !== null) {
+            loanReceived = Number(loan.amount_paid);
         } else {
-            loanReceived = Math.max(0, amount - balance);
+            if (totalDebt > 0) {
+                loanReceived = Math.max(0, totalDebt - balance);
+            } else {
+                loanReceived = Math.max(0, amount - balance);
+            }
+            // Fallback logic missed interest paid during renewals
+            loanReceived += (Number(loan.total_interest_paid) || 0);
         }
         totalReceived += loanReceived;
 
@@ -175,7 +182,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
 
         if (isLoanLate(loan)) {
             lateAmount += calculateOverdueAmount(loan);
-            lateCount++;
+            if (loan.client_id) {
+                lateClientIds.add(loan.client_id);
+            }
             lateLoans.push(loan);
         }
 
@@ -200,9 +209,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         totalLent,
         totalReceived,
         totalActiveClients: activeCount,
+        totalClients: clients?.length || 0,
         lateAmount,
         activeCount,
-        lateCount,
+        lateCount: lateClientIds.size,
         totalInterestReceived,
         todayChargesCount,
         todayChargesValue,
@@ -422,35 +432,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
           {/* Card 1 */}
           <div className="bg-card-light dark:bg-card-dark p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
             <div className="flex justify-between items-start">
-              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Total Emprestado</span>
+              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Total Recebido</span>
               <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
                 <DollarSign className="w-4 h-4" />
               </div>
             </div>
             <div>
-              <span className="text-xl md:text-2xl font-bold block text-gray-900 dark:text-white">
-                 {loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-              </span>
-              <span className="text-[10px] text-green-500 font-bold flex items-center gap-1 mt-1">
-                <TrendingUp className="w-3 h-3" /> +12%
+              <span className="text-xl md:text-2xl font-bold block text-green-600 dark:text-green-400">
+                 {loading ? '...' : `R$ ${summary.totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </span>
             </div>
           </div>
 
           {/* Card 2 */}
-          <div className="bg-card-light dark:bg-card-dark p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow">
+          <div 
+            onClick={onViewInterestDetails}
+            className="bg-card-light dark:bg-card-dark p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer"
+          >
             <div className="flex justify-between items-start">
-              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Total Recebido</span>
+              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Juros Recebidos</span>
               <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400">
                 <DollarSign className="w-4 h-4" />
               </div>
             </div>
             <div>
-              <span className="text-xl md:text-2xl font-bold block text-gray-900 dark:text-white">
-                 {loading ? '...' : `R$ ${summary.totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-              </span>
-              <span className="text-[10px] text-green-500 font-bold flex items-center gap-1 mt-1">
-                <TrendingUp className="w-3 h-3" /> +8%
+              <span className="text-xl md:text-2xl font-bold block text-blue-600 dark:text-blue-400">
+                 {loading ? '...' : `R$ ${summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </span>
             </div>
           </div>
@@ -461,16 +468,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             className="bg-card-light dark:bg-card-dark p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex flex-col justify-between h-32 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
           >
             <div className="flex justify-between items-start">
-              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Clientes Ativos</span>
+              <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium">Clientes</span>
               <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400">
                 <Users className="w-4 h-4" />
               </div>
             </div>
             <div>
               <span className="text-xl md:text-2xl font-bold block text-gray-900 dark:text-white">
-                {loading ? '...' : summary.totalActiveClients}
+                {loading ? '...' : summary.totalClients}
               </span>
-              <span className="text-[10px] text-gray-400 block mt-1">1,2k total</span>
+              <span className="text-[10px] text-red-500 block mt-1 font-medium">
+                {summary.lateCount} clientes com atraso
+              </span>
             </div>
           </div>
 
@@ -486,11 +495,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
               </div>
             </div>
             <div>
-              <span className="text-xl md:text-2xl font-bold block text-gray-900 dark:text-white">
-                {loading ? '...' : summary.lateCount}
-              </span>
-              <span className="text-[10px] text-red-500 font-bold flex items-center gap-1 mt-1">
-                <TrendingUp className="w-3 h-3 rotate-180" /> -3%
+              <span className="text-xl md:text-2xl font-bold block text-red-600 dark:text-red-400">
+                {loading ? '...' : `R$ ${summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </span>
             </div>
           </div>

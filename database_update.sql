@@ -64,3 +64,6 @@ CREATE POLICY "Enable delete for users based on user_id" ON "public"."clients" F
 
 -- 6. Adicionar coluna para rastrear juros pagos em renovações
 ALTER TABLE loans ADD COLUMN IF NOT EXISTS total_interest_paid numeric DEFAULT 0;
+
+-- 7. Adicionar coluna para rastrear o total recebido
+ALTER TABLE loans ADD COLUMN IF NOT EXISTS amount_paid numeric DEFAULT 0;

@@ -183,7 +183,7 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                     ? ` (incluindo R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros por atraso)`
                     : '';
 
-                message = `Olá, ${nome}.\n\nConsta em nosso sistema a parcela nº ${parcela} no valor de R$ ${valor}${jurosInfo}, referente ao contrato ${contrato}, com vencimento em ${data}.\n\nPedimos a regularização para evitar encargos adicionais.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
+                message = `Olá, ${nome},\n\nConforme consta em nosso sistema, identificamos a seguinte parcela em aberto:\n\nParcela nº: ${parcela}\n\nValor: R$ ${valor}${jurosInfo}\n\nContrato: ${contrato}\n\nVencimento: ${data}\n\nSolicitamos, por gentileza, a regularização do pagamento para evitar a incidência de encargos adicionais.\n\nCaso o pagamento já tenha sido efetuado, pedimos a gentileza de desconsiderar esta mensagem.`;
             } else {
                 const totalValue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
                 const valorTotalFormatado = totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 });

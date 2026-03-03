@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, SlidersHorizontal, ChevronRight, AlertTriangle, Calendar, Hourglass, RefreshCw } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan } from '../types';
+import { generateInstallments } from '../utils/loanUtils';
 
 interface LoansProps {
     onLoanSelect?: (loanId: string) => void;
@@ -32,7 +33,8 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                 .from('loans')
                 .select(`
                     *,
-                    client:clients (name, avatar_url)
+                    client:clients (name, avatar_url),
+                    installment_fines (*)
                 `)
                 .order('created_at', { ascending: false });
 
@@ -46,79 +48,11 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
         }
     };
 
-    const getOldestLateInstallmentDate = (loan: Loan): Date | null => {
-        if (loan.status === 'paid') return null;
-    
-        const count = loan.installments || 1;
-        const installmentValue = loan.installment_value || (loan.amount / count);
-        const startDate = loan.due_date ? new Date(loan.due_date) : new Date(loan.created_at || Date.now());
-        
-        // Total Debt = installment_value * installments
-        const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-        const totalPaid = totalDebt - Number(loan.balance);
-        
-        let paidAccumulator = 0;
-        let dailyDateTracker = new Date(startDate);
-        
-        for (let i = 0; i < count; i++) {
-             let date: Date;
-    
-             if (loan.frequency === 'Diária') {
-                 if (i === 0) {
-                     date = new Date(startDate);
-                 } else {
-                     date = new Date(dailyDateTracker);
-                     date.setDate(date.getDate() + 1);
-                     
-                     while (true) {
-                         const day = date.getDay();
-                         if (loan.skip_saturday && day === 6) {
-                             date.setDate(date.getDate() + 1);
-                             continue;
-                         }
-                         if (loan.skip_sunday && day === 0) {
-                             date.setDate(date.getDate() + 1);
-                             continue;
-                         }
-                         break;
-                     }
-                 }
-                 dailyDateTracker = new Date(date);
-             } else {
-                 date = new Date(startDate);
-                 if (loan.frequency === 'Semanal') {
-                     date.setDate(startDate.getDate() + (i * 7));
-                 } else if (loan.frequency === 'Quinzenal') {
-                     date.setDate(startDate.getDate() + (i * 15));
-                 } else {
-                     date.setMonth(startDate.getMonth() + i);
-                 }
-             }
-             
-             // Check if this installment is paid
-             if (paidAccumulator + (installmentValue * 0.99) < totalPaid) {
-                 paidAccumulator += installmentValue;
-                 continue; // This one is paid
-             }
-             
-             // This is the first unpaid installment
-             const today = new Date();
-             const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-             const dateZero = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-             
-             if (dateZero < todayZero) {
-                 return date;
-             }
-             return null; // First unpaid is in future or today
-        }
-        
-        return null;
-    };
-
     const isLoanLate = (loan: Loan): boolean => {
         if (loan.status === 'paid') return false;
         if (loan.status === 'late') return true;
-        return getOldestLateInstallmentDate(loan) !== null;
+        const installments = generateInstallments(loan, loan.installment_fines || []);
+        return installments.some(i => i.status === 'late');
     };
 
     const filteredLoans = loans.filter(loan => {
@@ -190,21 +124,46 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
           )}
 
           {filteredLoans.map((loan) => {
-            const lateDate = getOldestLateInstallmentDate(loan);
-            const isLate = lateDate !== null || loan.status === 'late';
+            // Calculate installments and derived data
+            const installments = generateInstallments(loan, loan.installment_fines || []);
+            const outstandingBalance = installments.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0);
+            
+            const overdueInstallments = installments.filter(i => i.status === 'late');
+            const nextInstallment = installments.find(i => i.status !== 'paid');
+            
+            const isLate = overdueInstallments.length > 0 || loan.status === 'late';
             const displayStatus = isLate ? 'late' : loan.status;
             
-            // Format date for display
-            const formatDate = (dateString: string | Date) => {
-                if (!dateString) return '';
-                const date = new Date(dateString);
-                // Adjust for timezone offset to display correct local date
-                const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-                const adjustedDate = new Date(date.getTime() + userTimezoneOffset);
-                return adjustedDate.toLocaleDateString('pt-BR');
+            // Determine date to display
+            let displayDate: Date | string | undefined;
+            if (isLate && overdueInstallments.length > 0) {
+                displayDate = overdueInstallments[0].date; // Oldest overdue
+            } else if (nextInstallment) {
+                displayDate = nextInstallment.date; // Next due
+            } else {
+                displayDate = loan.due_date; // Fallback
+            }
+
+            // Format date for display handling timezone correctly
+            const formatDate = (dateInput: string | Date | undefined) => {
+                if (!dateInput) return '';
+                
+                if (dateInput instanceof Date) {
+                    return dateInput.toLocaleDateString('pt-BR');
+                }
+                
+                // Handle string YYYY-MM-DD
+                if (typeof dateInput === 'string') {
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+                        const [year, month, day] = dateInput.split('-').map(Number);
+                        return new Date(year, month - 1, day).toLocaleDateString('pt-BR');
+                    }
+                    return new Date(dateInput).toLocaleDateString('pt-BR');
+                }
+                return '';
             };
 
-            const lateDateDisplay = lateDate ? lateDate.toLocaleDateString('pt-BR') : (loan.due_date ? formatDate(loan.due_date) : '');
+            const dateDisplayStr = formatDate(displayDate);
 
             return (
             <div 
@@ -245,7 +204,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                 </div>
                 <div className="text-right">
                     <p className="text-xs text-gray-500 mb-0.5">Saldo Devedor</p>
-                    <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                    <p className="font-bold text-gray-900 dark:text-white">R$ {outstandingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
               </div>
 
@@ -271,12 +230,12 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                 ) : displayStatus === 'late' ? (
                     <div className="flex items-center gap-1.5 text-xs text-red-500 font-medium">
                         <AlertTriangle className="w-3.5 h-3.5" />
-                        <span>Venceu: {lateDateDisplay}</span>
+                        <span>Venceu: {dateDisplayStr}</span>
                     </div>
                 ) : (
                     <div className="flex items-center gap-1.5 text-xs text-gray-500">
                         <Calendar className="w-3.5 h-3.5" />
-                        <span>Vencimento: {formatDate(loan.due_date)}</span>
+                        <span>Vencimento: {dateDisplayStr}</span>
                     </div>
                 )}
                 

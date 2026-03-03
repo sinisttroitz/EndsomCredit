@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2 } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { supabase } from '../supabaseClient';
-import { Loan, Installment } from '../types';
+import { Loan, Installment, InstallmentFine } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
 import { processRecurringInterest } from '../utils/interestUtils';
 
@@ -28,6 +28,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [deletePassword, setDeletePassword] = useState('');
     const [showChargeOptionsModal, setShowChargeOptionsModal] = useState(false);
     const [showPixModal, setShowPixModal] = useState(false);
+    const [showPixTypeSelectionModal, setShowPixTypeSelectionModal] = useState(false);
     const [pixAmount, setPixAmount] = useState('');
     const [pixPayload, setPixPayload] = useState('');
     const [alertModal, setAlertModal] = useState<{
@@ -37,6 +38,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         onConfirm?: () => void;
         confirmText?: string;
     }>({ open: false, title: '', message: '' });
+
+    // Fine State
+    const [fines, setFines] = useState<InstallmentFine[]>([]);
+    const [showFineModal, setShowFineModal] = useState(false);
+    const [fineInstallment, setFineInstallment] = useState<Installment | null>(null);
+    const [fineFixed, setFineFixed] = useState('');
     
     // Batch Payment State
     const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -133,12 +140,19 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const newProgress = Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
 
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null 
+                ? Number(loan.amount_paid) 
+                : Math.max(0, totalDebt - Number(loan.balance)) + (Number(loan.total_interest_paid) || 0);
+            
+            const newAmountPaid = currentAmountPaid + selectedValue;
+
             const { error } = await supabase
                 .from('loans')
                 .update({ 
                     balance: newBalance,
                     progress: newProgress,
-                    status: newStatus
+                    status: newStatus,
+                    amount_paid: newAmountPaid
                 })
                 .eq('id', loan.id);
 
@@ -214,12 +228,19 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const newProgress = Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
             
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null 
+                ? Number(loan.amount_paid) 
+                : Math.max(0, totalDebt - Number(loan.balance)) + (Number(loan.total_interest_paid) || 0);
+            
+            const newAmountPaid = currentAmountPaid + paidAmount;
+
             const { error: loanError } = await supabase
                 .from('loans')
                 .update({ 
                     balance: newBalance,
                     progress: newProgress,
-                    status: newStatus
+                    status: newStatus,
+                    amount_paid: newAmountPaid
                 })
                 .eq('id', loan.id);
                 
@@ -291,11 +312,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
                 const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
 
-                const jurosInfo = firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0 
-                    ? ` (incluindo R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros por atraso)`
-                    : '';
+                const extras = [];
+                if (firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0) {
+                    extras.push(`R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros por atraso`);
+                }
+                if (firstUnpaid.fine) {
+                    extras.push(`R$ ${firstUnpaid.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de multa manual`);
+                }
+                
+                const infoAdicional = extras.length > 0 ? ` (incluindo ${extras.join(' e ')})` : '';
 
-                message = `Olá, ${nome}.\n\nConsta em nosso sistema a parcela nº ${parcela} no valor de R$ ${valor}${jurosInfo}, referente ao contrato ${contrato}, com vencimento em ${data}.\n\nPedimos a regularização para evitar encargos adicionais.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
+                message = `Olá, ${nome},\n\nConforme consta em nosso sistema, identificamos a seguinte parcela em aberto:\n\nParcela nº: ${parcela}\n\nValor: R$ ${valor}${infoAdicional}\n\nContrato: ${contrato}\n\nVencimento: ${data}\n\nSolicitamos, por gentileza, a regularização do pagamento para evitar a incidência de encargos adicionais.\n\nCaso o pagamento já tenha sido efetuado, pedimos a gentileza de desconsiderar esta mensagem.`;
             } else {
                 const totalValue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
                 const valorTotalFormatado = totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
@@ -305,10 +332,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 overdueInstallments.forEach(i => {
                     const data = (i.originalDate || i.date).toLocaleDateString('pt-BR');
                     const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-                    const jurosInfo = i.accumulatedInterest && i.accumulatedInterest > 0 
-                        ? ` (inclui R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros)`
-                        : '';
-                    detalhesParcelas += `- Parcela ${i.number}: R$ ${valor} (Vencimento: ${data})${jurosInfo}\n`;
+                    
+                    const extras = [];
+                    if (i.accumulatedInterest && i.accumulatedInterest > 0) {
+                        extras.push(`R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros`);
+                    }
+                    if (i.fine) {
+                        extras.push(`R$ ${i.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de multa`);
+                    }
+                    const infoAdicional = extras.length > 0 ? ` (inclui ${extras.join(' e ')})` : '';
+
+                    detalhesParcelas += `- Parcela ${i.number}: R$ ${valor} (Vencimento: ${data})${infoAdicional}\n`;
                 });
 
                 message = `Olá, ${nome}.\n\nConstam em nosso sistema ${overdueInstallments.length} parcelas em atraso (nº ${parcelasStr}), totalizando R$ ${valorTotalFormatado}, referentes ao contrato ${contrato}.\n\nDetalhes:\n${detalhesParcelas}\nPedimos a regularização para evitar encargos adicionais.\n\nCaso já tenha efetuado o pagamento, favor desconsiderar esta mensagem.`;
@@ -342,18 +376,46 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             return;
         }
         setShowChargeOptionsModal(false);
-        setShowPixModal(true);
-        
-        // Pre-fill with overdue amount if any
-        const overdueInstallments = installmentsList.filter(i => i.status === 'late');
-        const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
-        if (totalOverdue > 0) {
-            setPixAmount(totalOverdue.toFixed(2));
-            generatePix(totalOverdue.toFixed(2));
+
+        if (loan?.frequency === 'Mensal') {
+            setShowPixTypeSelectionModal(true);
         } else {
+            setShowPixModal(true);
+            
+            // Pre-fill with overdue amount if any
+            const overdueInstallments = installmentsList.filter(i => i.status === 'late');
+            const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
+            if (totalOverdue > 0) {
+                setPixAmount(totalOverdue.toFixed(2));
+                generatePix(totalOverdue.toFixed(2));
+            } else {
+                setPixAmount('');
+                setPixPayload('');
+            }
+        }
+    };
+
+    const handleSelectPixType = (type: 'full' | 'renew' | 'manual') => {
+        if (!loan) return;
+        setShowPixTypeSelectionModal(false);
+        setShowPixModal(true);
+
+        if (type === 'manual') {
             setPixAmount('');
             setPixPayload('');
+            return;
         }
+
+        let amount = 0;
+        if (type === 'full') {
+            amount = Number(loan.balance);
+        } else if (type === 'renew') {
+             const principal = Number(loan.amount);
+             amount = principal * (Number(loan.interest_rate) / 100);
+        }
+
+        setPixAmount(amount.toFixed(2));
+        generatePix(amount.toFixed(2));
     };
 
     const generatePix = (amountStr: string) => {
@@ -440,8 +502,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 finalData = freshData;
             }
 
+            // Fetch Fines
+            const { data: finesData } = await supabase
+                .from('installment_fines')
+                .select('*')
+                .eq('loan_id', loanId);
+
+            const finesList = finesData || [];
+            setFines(finesList);
+
             setLoan(finalData);
-            const list = generateInstallments(finalData);
+            const list = generateInstallments(finalData, finesList);
             setInstallmentsList(list);
         } catch (error) {
             console.error("Error fetching loan details", error);
@@ -451,6 +522,52 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     };
 
 
+
+    const handleApplyFine = async () => {
+        if (!loan || !fineInstallment) return;
+
+        setProcessing(true);
+        try {
+            let fineValue = 0;
+            const fineType: 'percent' | 'fixed' = 'fixed';
+
+            if (fineFixed) {
+                const fixed = parseFloat(fineFixed.replace(',', '.'));
+                if (isNaN(fixed) || fixed <= 0) {
+                    alert("Valor da multa inválido");
+                    setProcessing(false);
+                    return;
+                }
+                fineValue = fixed;
+            } else {
+                alert("Informe o valor da multa");
+                setProcessing(false);
+                return;
+            }
+
+            const { error } = await supabase
+                .from('installment_fines')
+                .insert({
+                    loan_id: loan.id,
+                    installment_number: fineInstallment.number,
+                    fine_value: fineValue,
+                    fine_type: fineType
+                });
+
+            if (error) throw error;
+
+            setShowFineModal(false);
+            setFineFixed('');
+            setFineInstallment(null);
+            await fetchLoanData();
+
+        } catch (error) {
+            console.error("Error applying fine", error);
+            alert("Erro ao aplicar multa");
+        } finally {
+            setProcessing(false);
+        }
+    };
 
     const handleConfirmPayment = async () => {
         if (!loan || loan.balance <= 0) return;
@@ -545,11 +662,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         try {
             let updates: any = {};
             
+            const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null 
+                ? Number(loan.amount_paid) 
+                : Math.max(0, totalDebt - Number(loan.balance)) + (Number(loan.total_interest_paid) || 0);
+
             if (type === 'full') {
                 updates = {
                     balance: 0,
                     status: 'paid',
-                    progress: 100
+                    progress: 100,
+                    amount_paid: currentAmountPaid + Number(loan.balance)
                 };
             } else {
                 // Renew
@@ -590,7 +713,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     balance: newBalance,
                     status: 'active',
                     progress: 0,
-                    total_interest_paid: currentTotalInterestPaid + interestPaid
+                    total_interest_paid: currentTotalInterestPaid + interestPaid,
+                    amount_paid: currentAmountPaid + interestPaid
                 };
             }
             
@@ -631,6 +755,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
         if (type === 'last') {
             const lastPaid = paidInstallments[paidInstallments.length - 1];
+            
+            let valueDetails = `💲 Valor: R$ ${lastPaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+            
+            if (lastPaid.fine) {
+                valueDetails = `💲 Valor Original: R$ ${lastPaid.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+⚠️ Multa: ${lastPaid.fine.fine_type === 'percent' ? `${lastPaid.fine.fine_value}%` : `R$ ${lastPaid.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+💲 Total Pago: R$ ${lastPaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+            }
+
             text = `
 🧾 *COMPROVANTE DE PAGAMENTO*
 --------------------------------
@@ -639,7 +772,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 📄 Contrato: #${loan.id.substring(0, 6)}
 --------------------------------
 💰 *Parcela #${lastPaid.number}*
-💲 Valor: R$ ${lastPaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+${valueDetails}
 📆 Vencimento: ${lastPaid.date.toLocaleDateString('pt-BR')}
 ✅ Status: PAGO
 --------------------------------
@@ -748,7 +881,9 @@ ${paidInstallments.map(i =>
                     <div className="flex flex-col items-center text-center">
                         <span className="text-[10px] font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-[0.2em] mb-1">Contrato #{loan.id.substring(0,6)}</span>
                         <p className="text-xs text-text-sub-light dark:text-text-sub-dark mb-1">Saldo Devedor</p>
-                        <h2 className="text-4xl font-bold text-primary dark:text-white mb-2 tracking-tight">R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h2>
+                        <h2 className="text-4xl font-bold text-primary dark:text-white mb-2 tracking-tight">
+                            R$ {installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </h2>
                         <div className="flex items-center gap-2 mt-2">
                             <span className={`px-3 py-1 rounded-full text-[10px] font-bold border uppercase ${
                                 displayStatus === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' :
@@ -804,7 +939,7 @@ ${paidInstallments.map(i =>
                 {/* Grid Stats */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Valor Original</p>
+                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Valor Solicitado</p>
                         <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
@@ -889,13 +1024,37 @@ ${paidInstallments.map(i =>
                                                 R$ {inst.originalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         )}
-                                        <p className={`text-sm font-bold ${
-                                            inst.status === 'paid' ? 'text-secondary' :
-                                            inst.status === 'late' ? 'text-danger' :
-                                            inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
-                                        }`}>
-                                            R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </p>
+                                        {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0) && (
+                                            <p className="text-[10px] text-red-500 font-bold leading-none mb-0.5">
+                                                + Juros R$ {inst.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                        )}
+                                        {inst.fine && (
+                                            <p className="text-[10px] text-red-500 font-bold leading-none mb-0.5">
+                                                + Multa {inst.fine.fine_type === 'percent' ? `${inst.fine.fine_value}%` : `R$ ${inst.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                            </p>
+                                        )}
+                                        <div className="flex items-center justify-end gap-2">
+                                            <p className={`text-sm font-bold ${
+                                                inst.status === 'paid' ? 'text-secondary' :
+                                                inst.status === 'late' ? 'text-danger' :
+                                                inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
+                                            }`}>
+                                                R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                            {inst.status === 'late' && !inst.fine && !isSelectionMode && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setFineInstallment(inst);
+                                                        setShowFineModal(true);
+                                                    }}
+                                                    className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-1 rounded-md font-bold hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                                                >
+                                                    Aplicar Multa
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1320,6 +1479,66 @@ ${paidInstallments.map(i =>
                 </div>
             )}
 
+            {/* PIX Type Selection Modal */}
+            {showPixTypeSelectionModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPixTypeSelectionModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Tipo de Cobrança PIX</h3>
+                            <button onClick={() => setShowPixTypeSelectionModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+                        
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                            Selecione o tipo de cobrança para este empréstimo mensal.
+                        </p>
+
+                        <div className="space-y-3">
+                            <button 
+                                onClick={() => handleSelectPixType('full')}
+                                className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center gap-4 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-left group"
+                            >
+                                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-800/50 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform">
+                                    <Check className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white">Cobrar Quitação</h4>
+                                    <p className="text-xs text-gray-500">Valor Total: R$ {Number(loan?.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                </div>
+                            </button>
+
+                            <button 
+                                onClick={() => handleSelectPixType('renew')}
+                                className="w-full p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800 flex items-center gap-4 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors text-left group"
+                            >
+                                <div className="w-12 h-12 bg-green-100 dark:bg-green-800/50 rounded-full flex items-center justify-center text-green-600 dark:text-green-400 group-hover:scale-110 transition-transform">
+                                    <RefreshCw className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white">Cobrar Renovação</h4>
+                                    <p className="text-xs text-gray-500">Apenas Juros: R$ {(Number(loan?.amount) * (Number(loan?.interest_rate) / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                </div>
+                            </button>
+
+                            <button 
+                                onClick={() => handleSelectPixType('manual')}
+                                className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left group"
+                            >
+                                <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center text-gray-600 dark:text-gray-400 group-hover:scale-110 transition-transform">
+                                    <Edit2 className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white">Outro Valor</h4>
+                                    <p className="text-xs text-gray-500">Digitar valor manualmente</p>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* PIX Modal */}
             {showPixModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1419,6 +1638,55 @@ ${paidInstallments.map(i =>
                 </div>
             )}
 
+            {/* Fine Modal */}
+            {showFineModal && fineInstallment && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowFineModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Aplicar Multa</h3>
+                            <button onClick={() => setShowFineModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-500">
+                                Aplicando multa na parcela #{fineInstallment.number} de R$ {fineInstallment.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || fineInstallment.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Valor da Multa (R$)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={fineFixed}
+                                    onChange={(e) => setFineFixed(e.target.value)}
+                                    className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-bold text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none"
+                                    placeholder="R$ 0,00"
+                                />
+                            </div>
+
+                            <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-xl border border-yellow-100 dark:border-yellow-800">
+                                <p className="text-xs text-yellow-700 dark:text-yellow-400">
+                                    <AlertTriangle className="w-3 h-3 inline mr-1" />
+                                    A multa será somada ao valor total da parcela.
+                                </p>
+                            </div>
+
+                            <button
+                                onClick={handleApplyFine}
+                                disabled={processing}
+                                className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70 mt-4"
+                            >
+                                {processing ? 'Processando...' : 'Confirmar Aplicação'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Installment Detail Modal */}
             {selectedInstallmentForDetail && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1432,27 +1700,40 @@ ${paidInstallments.map(i =>
                         </div>
 
                         <div className="space-y-4">
+                            {/* Show original value if there is interest OR fine */}
+                            {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) || selectedInstallmentForDetail.fine) && (
+                                <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
+                                    <span className="text-sm text-gray-500 dark:text-gray-400">Valor Original</span>
+                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                        R$ {selectedInstallmentForDetail.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            )}
+                            
                             {Boolean(selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) && (
-                                <>
-                                    <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
-                                        <span className="text-sm text-gray-500 dark:text-gray-400">Valor Original</span>
-                                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                            R$ {selectedInstallmentForDetail.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </span>
-                                    </div>
-                                    
-                                    <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
-                                        <span className="text-sm text-danger font-medium">Juros Acumulados</span>
-                                        <span className="text-sm font-bold text-danger">
-                                            + R$ {selectedInstallmentForDetail.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </span>
-                                    </div>
-                                </>
+                                <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
+                                    <span className="text-sm text-danger font-medium">Juros Acumulados</span>
+                                    <span className="text-sm font-bold text-danger">
+                                        + R$ {selectedInstallmentForDetail.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            )}
+
+                            {selectedInstallmentForDetail.fine && (
+                                <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
+                                    <span className="text-sm text-red-500 font-medium">Multa Manual ({selectedInstallmentForDetail.fine.fine_type === 'percent' ? `${selectedInstallmentForDetail.fine.fine_value}%` : 'Fixa'})</span>
+                                    <span className="text-sm font-bold text-red-500">
+                                        + R$ {selectedInstallmentForDetail.fine.fine_type === 'percent' 
+                                            ? ((selectedInstallmentForDetail.originalValue || 0) * (selectedInstallmentForDetail.fine.fine_value / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+                                            : selectedInstallmentForDetail.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+                                        }
+                                    </span>
+                                </div>
                             )}
 
                             <div className="flex justify-between items-center pt-2">
                                 <span className="text-base font-bold text-gray-900 dark:text-white">
-                                    {Boolean(selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) ? 'Total Atual' : 'Valor da Parcela'}
+                                    {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) || selectedInstallmentForDetail.fine) ? 'Total Atual' : 'Valor da Parcela'}
                                 </span>
                                 <span className="text-xl font-black text-primary dark:text-white">
                                     R$ {selectedInstallmentForDetail.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}

@@ -136,7 +136,8 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
             frequency: frequency,
             skip_saturday: skipSaturday,
             skip_sunday: skipSunday,
-            progress: 0
+            progress: 0,
+            amount_paid: 0
         }]);
 
         if (error) throw error;

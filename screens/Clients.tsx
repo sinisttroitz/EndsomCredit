@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, SlidersHorizontal, ChevronRight, RefreshCw, Plus, Filter, MoreVertical, Mail, Phone, MessageSquare, MapPin, X, ChevronLeft, Calendar as CalendarIcon, DollarSign, User, MessageCircle, CreditCard, FileText, ExternalLink } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Client, Loan } from '../types';
+import { generateInstallments } from '../utils/loanUtils';
 
 interface ClientsProps {
     onClientSelect: (clientId: string) => void;
@@ -199,20 +200,38 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
       // Fetch Loans to calculate debt per client
       const { data: loansData, error: loansError } = await supabase
         .from('loans')
-        .select('*, client_id, balance, status, due_date, created_at, installments, installment_value, frequency, skip_saturday, skip_sunday, amount')
+        .select('*, client_id, balance, status, due_date, created_at, installments, installment_value, frequency, skip_saturday, skip_sunday, amount, installment_fines (*)')
         .order('created_at', { ascending: false });
 
       if (loansError) throw loansError;
 
       const clientsWithDebt = clientsData.map((client: any) => {
         const clientLoans = loansData.filter((l: any) => l.client_id === client.id);
-        const debt = clientLoans.reduce((acc: number, curr: any) => acc + Number(curr.balance), 0);
         
-        const isLate = clientLoans.some((loan: any) => isLoanLate(loan));
-        const overdueStats = clientLoans.reduce((acc: { count: number, amount: number }, curr: any) => {
-            const stats = calculateOverdueStats(curr);
-            return { count: acc.count + stats.count, amount: acc.amount + stats.amount };
-        }, { count: 0, amount: 0 });
+        let debt = 0;
+        let isLate = false;
+        let overdueCount = 0;
+        let overdueAmount = 0;
+
+        clientLoans.forEach((loan: any) => {
+            if (loan.status === 'paid') return;
+
+            const installments = generateInstallments(loan, loan.installment_fines || []);
+            
+            // Calculate Loan Debt
+            const loanDebt = installments.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0);
+            debt += loanDebt;
+
+            // Calculate Overdue Stats
+            const overdueInstallments = installments.filter(inst => inst.status === 'late');
+            if (overdueInstallments.length > 0) {
+                isLate = true;
+                overdueCount += overdueInstallments.length;
+                overdueAmount += overdueInstallments.reduce((acc, inst) => acc + inst.value, 0);
+            } else if (loan.status === 'late') {
+                isLate = true;
+            }
+        });
 
         const contractsCount = clientLoans.filter((l: any) => l.status === 'active' || l.status === 'late').length;
         const lastLoan = clientLoans.length > 0 ? clientLoans[0] : undefined;
@@ -222,7 +241,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
             initials: client.name.substring(0, 2).toUpperCase(),
             debt: debt,
             isLate: isLate,
-            overdueStats: overdueStats,
+            overdueStats: { count: overdueCount, amount: overdueAmount },
             contractsCount,
             lastLoan,
             loans: clientLoans
@@ -330,11 +349,6 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                     <p className="text-xs text-text-sub-light dark:text-text-sub-dark mt-0.5">
                         Saldo Devedor: <span className="font-semibold text-gray-800 dark:text-gray-200">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                     </p>
-                    {(client as any).overdueStats?.count > 0 && (
-                        <p className="text-[10px] text-red-500 font-medium mt-0.5">
-                            Parcelas Atrasadas: {(client as any).overdueStats.count} de R$ {((client as any).overdueStats.amount / (client as any).overdueStats.count).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </p>
-                    )}
                     </div>
                 </div>
                 <div className="flex flex-col items-end">

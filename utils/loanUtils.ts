@@ -1,6 +1,6 @@
-import { Loan, Installment } from '../types';
+import { Loan, Installment, InstallmentFine } from '../types';
 
-export const generateInstallments = (loanData: Loan): Installment[] => {
+export const generateInstallments = (loanData: Loan, fines: InstallmentFine[] = []): Installment[] => {
     const count = loanData.installments || 1;
     const installmentValue = loanData.installment_value || (loanData.amount / count);
     
@@ -111,15 +111,28 @@ export const generateInstallments = (loanData: Loan): Installment[] => {
                 }
             }
         }
+
+        // Apply Fine Logic
+        const fine = fines.find(f => f.installment_number === (i + 1));
+        let finalValue = currentInstallmentValue;
+        
+        if (fine && status === 'late') {
+            if (fine.fine_type === 'percent') {
+                finalValue += (installmentValue * (fine.fine_value / 100));
+            } else {
+                finalValue += fine.fine_value;
+            }
+        }
         
         list.push({
             number: i + 1,
             date: date,
-            value: currentInstallmentValue,
+            value: finalValue,
             status: status,
             originalValue: installmentValue,
             accumulatedInterest: accumulatedInterest,
-            originalDate: originalDate
+            originalDate: originalDate,
+            fine: fine
         });
     }
     return list;

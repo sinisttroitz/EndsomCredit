@@ -248,11 +248,6 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                     <div className="flex flex-col">
                         <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium mb-1">Total Devido</span>
                         <span className="text-xl font-bold text-primary dark:text-white">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        {(client as any).overdueStats?.count > 0 && (
-                            <span className="text-[10px] text-red-500 font-medium mt-1">
-                                Parcelas Atrasadas: {(client as any).overdueStats.count} de R$ {((client as any).overdueStats.amount / (client as any).overdueStats.count).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
-                        )}
                     </div>
                     <div className="h-10 w-px bg-gray-100 dark:bg-gray-800"></div>
                     <div className="flex flex-col items-end">

@@ -36,7 +36,17 @@ export interface Loan {
   skip_saturday?: boolean;
   skip_sunday?: boolean;
   total_interest_paid?: number;
+  amount_paid?: number;
   created_at?: string;
+}
+
+export interface InstallmentFine {
+    id: string;
+    loan_id: string;
+    installment_number: number;
+    fine_value: number;
+    fine_type: 'percent' | 'fixed';
+    created_at?: string;
 }
 
 export interface Installment {
@@ -47,6 +57,7 @@ export interface Installment {
     originalValue?: number;
     accumulatedInterest?: number;
     originalDate?: Date;
+    fine?: InstallmentFine;
 }
 
 export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar';
