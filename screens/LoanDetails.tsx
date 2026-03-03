@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2 } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment, InstallmentFine } from '../types';
@@ -44,6 +44,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [showFineModal, setShowFineModal] = useState(false);
     const [fineInstallment, setFineInstallment] = useState<Installment | null>(null);
     const [fineFixed, setFineFixed] = useState('');
+    const [activeActionMenu, setActiveActionMenu] = useState<number | null>(null);
     
     // Batch Payment State
     const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -1043,16 +1044,34 @@ ${paidInstallments.map(i =>
                                                 R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                             {inst.status === 'late' && !inst.fine && !isSelectionMode && (
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setFineInstallment(inst);
-                                                        setShowFineModal(true);
-                                                    }}
-                                                    className="text-[10px] bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-1 rounded-md font-bold hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-                                                >
-                                                    Aplicar Multa
-                                                </button>
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setActiveActionMenu(activeActionMenu === inst.number ? null : inst.number);
+                                                        }}
+                                                        className="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                                                    >
+                                                        <Plus className="w-4 h-4" />
+                                                    </button>
+                                                    
+                                                    {activeActionMenu === inst.number && (
+                                                        <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 p-1 min-w-[140px] animate-in fade-in zoom-in duration-200">
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setFineInstallment(inst);
+                                                                    setShowFineModal(true);
+                                                                    setActiveActionMenu(null);
+                                                                }}
+                                                                className="w-full text-left px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors flex items-center gap-2"
+                                                            >
+                                                                <AlertTriangle className="w-3 h-3" />
+                                                                Aplicar Multa
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     </div>

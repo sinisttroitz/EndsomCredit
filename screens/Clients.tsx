@@ -373,55 +373,63 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
       <div className="hidden md:flex h-full bg-gray-50 dark:bg-gray-900">
         <div className="flex-1 flex flex-col min-w-0">
             {/* Desktop Header */}
-            <header className="px-8 py-6 bg-white dark:bg-card-dark border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
+            <header className="px-8 py-6 bg-primary dark:bg-black text-white shadow-lg relative z-10 flex justify-between items-center">
                 <div className="flex items-center gap-4">
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Gestão de Clientes</h1>
-                    <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 text-xs font-semibold rounded-full">
+                    <h1 className="text-2xl font-bold text-white">Meus Clientes</h1>
+                    <span className="px-3 py-1 bg-white/10 text-white text-xs font-semibold rounded-full border border-white/20">
                         {clients.length} total
                     </span>
                 </div>
-                <button 
-                    onClick={() => onClientSelect('new')} // Assuming 'new' or handling navigation in parent
-                    className="bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
-                >
-                    <Plus className="w-4 h-4" />
-                    Novo Cliente
-                </button>
+                <div className="flex items-center gap-4">
+                    <div className="relative w-64">
+                        <input 
+                            className="w-full py-2 pl-10 pr-4 rounded-xl text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-white/30 transition shadow-sm bg-white/10 backdrop-blur-sm border border-white/20" 
+                            placeholder="Buscar por nome..." 
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)} 
+                        />
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search className="text-gray-300 w-4 h-4" />
+                        </div>
+                    </div>
+                    <button 
+                        onClick={() => onClientSelect('new')} 
+                        className="bg-white text-primary hover:bg-gray-100 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-colors shadow-sm"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Novo Cliente
+                    </button>
+                </div>
             </header>
 
             {/* Filters Bar */}
             <div className="px-8 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-card-dark flex items-center gap-4">
-                <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input 
-                        type="text" 
-                        placeholder="Buscar por nome, CPF ou ID..." 
-                        className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
+                <div className="flex space-x-2">
+                    <button 
+                        onClick={() => setFilter('all')}
+                        className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${filter === 'all' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400'}`}
+                    >
+                        Todos
+                    </button>
+                    <button 
+                        onClick={() => setFilter('active')}
+                        className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${filter === 'active' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400'}`}
+                    >
+                        Ativos
+                    </button>
+                    <button 
+                        onClick={() => setFilter('late')}
+                        className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${filter === 'late' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400'}`}
+                    >
+                        Em Atraso
+                    </button>
                 </div>
                 
-                <div className="h-8 w-px bg-gray-200 dark:bg-gray-700 mx-2"></div>
-
-                <select 
-                    className="px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-300 focus:outline-none"
-                    value={filter}
-                    onChange={(e) => setFilter(e.target.value as any)}
-                >
-                    <option value="all">Status: Todos</option>
-                    <option value="active">Status: Ativos</option>
-                    <option value="late">Status: Em Atraso</option>
-                </select>
-
-                <select className="px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-300 focus:outline-none">
-                    <option>Data: Últimos 30 dias</option>
-                </select>
-
                 <div className="flex-1"></div>
 
-                <button className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-2 text-sm font-medium">
-                    <SlidersHorizontal className="w-4 h-4" />
+                <button className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-2 text-xs font-medium">
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
                     Filtros Avançados
                 </button>
             </div>
@@ -429,13 +437,14 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
             {/* Table */}
             <div className="flex-1 overflow-auto p-8">
                 <div className="bg-white dark:bg-card-dark rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden">
-                    <table className="w-full text-left">
+                    <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800">
                                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Cliente</th>
+                                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Telefone</th>
+                                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Cidade/UF</th>
+                                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Saldo Devedor</th>
                                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Saldo Ativo</th>
-                                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Data de Cadastro</th>
                                 <th className="p-4 w-10"></th>
                             </tr>
                         </thead>
@@ -457,9 +466,18 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                                             </div>
                                             <div>
                                                 <p className="font-bold text-sm text-gray-900 dark:text-white">{client.name}</p>
-                                                <p className="text-xs text-gray-500">ID: #{client.id.substring(0, 6)}</p>
+                                                <p className="text-xs text-gray-500">{client.email || 'Sem e-mail'}</p>
                                             </div>
                                         </div>
+                                    </td>
+                                    <td className="p-4 text-sm text-gray-600 dark:text-gray-400">
+                                        {client.phone || '-'}
+                                    </td>
+                                    <td className="p-4 text-sm text-gray-600 dark:text-gray-400">
+                                        {client.city ? `${client.city}/${client.state || ''}` : '-'}
+                                    </td>
+                                    <td className="p-4">
+                                        <p className="font-bold text-sm text-gray-900 dark:text-white">R$ {client.debt.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                                     </td>
                                     <td className="p-4">
                                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
@@ -472,16 +490,9 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                                             {client.isLate ? 'Inadimplente' : (client.status === 'active' ? 'Ativo' : 'Inativo')}
                                         </span>
                                     </td>
-                                    <td className="p-4">
-                                        <p className="font-bold text-sm text-gray-900 dark:text-white">R$ {client.debt.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                                        <p className="text-xs text-gray-500">{client.contractsCount} contratos</p>
-                                    </td>
-                                    <td className="p-4 text-sm text-gray-600 dark:text-gray-400">
-                                        {formatDate(client.created_at)}
-                                    </td>
                                     <td className="p-4 text-right">
                                         <button className="text-gray-400 hover:text-gray-600">
-                                            <MoreVertical className="w-4 h-4" />
+                                            <ChevronRight className="w-4 h-4" />
                                         </button>
                                     </td>
                                 </tr>
