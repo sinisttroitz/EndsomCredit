@@ -60,6 +60,19 @@ export interface Installment {
     fine?: InstallmentFine;
 }
 
+export interface LoanAmortization {
+    id: string;
+    loan_id: string;
+    payment_date: string;
+    amount_paid: number;
+    interest_paid: number;
+    principal_paid: number;
+    fine_paid: number;
+    previous_balance: number;
+    new_balance: number;
+    created_at: string;
+}
+
 export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar';
 
 export interface UserProfile {

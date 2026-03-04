@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment, InstallmentFine } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
 import { processRecurringInterest } from '../utils/interestUtils';
+import { Amortization } from './Amortization';
+import { ReceiptModal } from '../components/ReceiptModal';
+import { ExtractModal } from '../components/ExtractModal';
 
 interface LoanDetailsProps {
     loanId: string | null;
@@ -22,6 +25,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [showSinglePaymentConfirmModal, setShowSinglePaymentConfirmModal] = useState(false);
     const [showMensalPaymentModal, setShowMensalPaymentModal] = useState(false);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
+    const [receiptData, setReceiptData] = useState<any>(null);
+    const [showReceiptImageModal, setShowReceiptImageModal] = useState(false);
+    const [extractData, setExtractData] = useState<any>(null);
+    const [showExtractImageModal, setShowExtractImageModal] = useState(false);
     const [showAVModal, setShowAVModal] = useState(false);
     const [avAmount, setAvAmount] = useState('');
     const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -49,6 +56,89 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     // Batch Payment State
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedInstallments, setSelectedInstallments] = useState<number[]>([]);
+
+    // Amortization State
+    const [showAmortizationPage, setShowAmortizationPage] = useState(false);
+
+    const handleConfirmAmortization = async (amountPaid: number, preview: any) => {
+        if (!loan) return;
+        
+        setProcessing(true);
+        try {
+            const { breakdown, result } = preview;
+            
+            // 1. Insert Amortization Record
+            const { error: amortError } = await supabase
+                .from('loan_amortizations')
+                .insert({
+                    loan_id: loan.id,
+                    amount_paid: amountPaid,
+                    interest_paid: breakdown.proRata + breakdown.pastInterest,
+                    principal_paid: result.capitalAbated,
+                    fine_paid: breakdown.fines,
+                    previous_balance: loan.balance,
+                    new_balance: result.newBalance
+                });
+                
+            if (amortError) throw amortError;
+            
+            // 2. Update Loan
+            const nextDueStr = new Date(result.newDueDate).toISOString().split('T')[0];
+            // Wait, result.newDueDate is formatted string "DD MMM YYYY". We need ISO.
+            // Let's recalculate ISO date here or pass it from component.
+            // Re-calculating for safety:
+            const today = new Date();
+            const nextDue = new Date(today);
+            if (loan.frequency === 'Quinzenal') {
+                nextDue.setDate(today.getDate() + 15);
+            } else {
+                nextDue.setMonth(today.getMonth() + 1);
+            }
+            const nextDueISO = nextDue.toISOString().split('T')[0];
+
+            // Calculate new totals for Dashboard accuracy
+            const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
+            const currentAmountPaid = Number(loan.amount_paid) || 0;
+            
+            // Interest component includes: Past Interest + Pro-Rata + Fines
+            const interestComponentPaid = breakdown.pastInterest + breakdown.proRata + breakdown.fines;
+            
+            const newTotalInterestPaid = currentTotalInterestPaid + interestComponentPaid;
+            const newAmountPaid = currentAmountPaid + amountPaid;
+
+            const { error: loanError } = await supabase
+                .from('loans')
+                .update({
+                    balance: result.newBalance,
+                    amount: Math.max(0, Number(loan.amount) - result.capitalAbated), // Update principal
+                    due_date: nextDueISO,
+                    status: result.newBalance <= 0.01 ? 'paid' : 'active',
+                    total_interest_paid: newTotalInterestPaid,
+                    amount_paid: newAmountPaid
+                })
+                .eq('id', loan.id);
+                
+            if (loanError) throw loanError;
+            
+            // 3. Clear Fines if paid
+            if (breakdown.fines > 0) {
+                 const installmentsWithFines = installmentsList.filter(i => i.fine);
+                 for (const inst of installmentsWithFines) {
+                     if (inst.fine) {
+                         await supabase.from('installment_fines').delete().eq('id', inst.fine.id);
+                     }
+                 }
+            }
+
+            setShowAmortizationPage(false);
+            onBack(); // Go back to refresh or reload
+        } catch (error) {
+            console.error('Error amortizing:', error);
+            alert('Erro ao realizar abatimento.');
+        } finally {
+            setProcessing(false);
+        }
+    };
     const [confirmationModal, setConfirmationModal] = useState<{
         open: boolean;
         title: string;
@@ -751,71 +841,54 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             return;
         }
 
-        let text = "";
         const now = new Date().toLocaleString('pt-BR');
 
         if (type === 'last') {
             const lastPaid = paidInstallments[paidInstallments.length - 1];
             
-            let valueDetails = `💲 Valor: R$ ${lastPaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-            
-            if (lastPaid.fine) {
-                valueDetails = `💲 Valor Original: R$ ${lastPaid.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-⚠️ Multa: ${lastPaid.fine.fine_type === 'percent' ? `${lastPaid.fine.fine_value}%` : `R$ ${lastPaid.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
-💲 Total Pago: R$ ${lastPaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-            }
+            // Prepare data for Image Receipt
+            const data = {
+                amount: lastPaid.value,
+                date: lastPaid.date.toLocaleDateString('pt-BR'), // Reverted to use installment date as requested
+                clientName: loan.client?.name || 'Cliente',
+                contractId: loan.id.substring(0, 6).toUpperCase(),
+                installmentNumber: lastPaid.number,
+                dueDate: lastPaid.date.toLocaleDateString('pt-BR'),
+                status: 'paid',
+                originalValue: lastPaid.originalValue,
+                interest: lastPaid.accumulatedInterest,
+                fine: lastPaid.fine?.fine_value,
+                fineType: lastPaid.fine?.fine_type,
+                totalPaid: lastPaid.value,
+                creditBalance: loan.client?.credit_balance,
+                authenticationCode: Math.random().toString(36).substring(2, 15).toUpperCase().match(/.{1,4}/g)?.join('-') || 'AUTH-CODE'
+            };
 
-            text = `
-🧾 *COMPROVANTE DE PAGAMENTO*
---------------------------------
-📅 Data: ${now}
-👤 Cliente: ${loan.client?.name}
-📄 Contrato: #${loan.id.substring(0, 6)}
---------------------------------
-💰 *Parcela #${lastPaid.number}*
-${valueDetails}
-📆 Vencimento: ${lastPaid.date.toLocaleDateString('pt-BR')}
-✅ Status: PAGO
---------------------------------
-Autenticação: ${Math.random().toString(36).substring(7).toUpperCase()}
-`.trim();
-        } else {
-            text = `
-📑 *EXTRATO DE PAGAMENTOS*
---------------------------------
-📅 Emissão: ${now}
-👤 Cliente: ${loan.client?.name}
-📄 Contrato: #${loan.id.substring(0, 6)}
---------------------------------
-*Histórico de Pagamentos:*
-
-${paidInstallments.map(i => 
-`🔹 Parc. #${i.number} - ${i.date.toLocaleDateString('pt-BR')} - R$ ${i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-).join('\n')}
-
---------------------------------
-💵 Total Pago: R$ ${paidInstallments.reduce((acc, curr) => acc + curr.value, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-📉 Saldo Devedor: R$ ${Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
---------------------------------
-`.trim();
-        }
-
-        // Share logic
-        if (navigator.share) {
-            try {
-                await navigator.share({
-                    title: type === 'last' ? 'Comprovante de Pagamento' : 'Extrato de Empréstimo',
-                    text: text
-                });
-            } catch (error) {
-                console.log('Error sharing:', error);
-            }
-        } else {
-            navigator.clipboard.writeText(text);
-            alert("Comprovante copiado para a área de transferência!");
-        }
+            setReceiptData(data);
+            setShowReceiptModal(false);
+            setShowReceiptImageModal(true);
+            return;
+        } 
         
+        // Prepare data for Extract Image
+        const data = {
+            emissionDate: now,
+            clientName: loan.client?.name || 'Cliente',
+            contractId: loan.id.substring(0, 6).toUpperCase(),
+            totalPaid: paidInstallments.reduce((acc, curr) => acc + curr.value, 0),
+            balance: Number(loan.balance),
+            creditAvailable: loan.client?.credit_balance,
+            installments: paidInstallments.map(i => ({
+                number: i.number,
+                date: i.date.toLocaleDateString('pt-BR'),
+                value: i.value
+            })),
+            authenticationCode: Math.random().toString(36).substring(2, 15).toUpperCase().match(/.{1,4}/g)?.join('-') || 'AUTH-CODE'
+        };
+
+        setExtractData(data);
         setShowReceiptModal(false);
+        setShowExtractImageModal(true);
     };
 
     const handleNewLoan = () => {
@@ -834,6 +907,18 @@ ${paidInstallments.map(i =>
 
     if (loading || !loan) {
         return <div className="h-full flex items-center justify-center bg-background-light dark:bg-background-dark text-primary dark:text-white">Carregando...</div>;
+    }
+
+    if (showAmortizationPage) {
+        return (
+            <Amortization 
+                loan={loan}
+                installmentsList={installmentsList}
+                onBack={() => setShowAmortizationPage(false)}
+                onConfirm={handleConfirmAmortization}
+                processing={processing}
+            />
+        );
     }
 
     const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
@@ -1170,31 +1255,51 @@ ${paidInstallments.map(i =>
                         </div>
 
                         <div className="space-y-3">
+                            {/* 1. Pagar 1 Parcela (Blue Theme) */}
                             <button 
                                 onClick={() => {
                                     setShowPaymentModal(false);
                                     setShowSinglePaymentConfirmModal(true);
                                 }}
-                                className="w-full py-4 px-4 rounded-xl font-bold text-white bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                                className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800 flex items-center justify-between hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all active:scale-[0.98] group text-left"
                             >
-                                <span className="text-base">Pagar 1 Parcela</span>
-                                <span className="text-xs opacity-80 font-normal">R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-blue-200 dark:bg-blue-800 rounded-xl flex items-center justify-center text-blue-700 dark:text-blue-300 group-hover:scale-110 transition-transform shrink-0">
+                                        <Check className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Pagar 1 Parcela</h4>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Registrar pagamento padrão</p>
+                                    </div>
+                                </div>
+                                <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
+                                    R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
                             </button>
 
+                            {/* 2. Informar AV (White Theme) */}
                             <button 
                                 onClick={() => {
                                     setShowPaymentModal(false);
                                     setShowAVModal(true);
                                 }}
-                                className="w-full py-4 px-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 flex flex-col items-center justify-center gap-1 transition-colors"
+                                className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all active:scale-[0.98] group text-left"
                             >
-                                <span className="text-base">Informar AV</span>
-                                <span className="text-xs opacity-80 font-normal">Usar saldo + valor recebido</span>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-gray-600 dark:text-gray-300 group-hover:scale-110 transition-transform shrink-0">
+                                        <Plus className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Informar AV</h4>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Usar saldo + valor recebido</p>
+                                    </div>
+                                </div>
+                                <ChevronRight className="w-5 h-5 text-gray-400 group-hover:translate-x-1 transition-transform ml-2" />
                             </button>
                             
                             <button 
                                 onClick={() => setShowPaymentModal(false)}
-                                className="w-full py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors mt-2"
+                                className="w-full py-4 text-xs font-bold text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors uppercase tracking-wider mt-2"
                             >
                                 Cancelar
                             </button>
@@ -1293,29 +1398,70 @@ ${paidInstallments.map(i =>
                         </div>
 
                         <div className="space-y-3">
+                            {/* 1. Pagar Tudo (Blue Theme) */}
                             <button 
                                 onClick={() => handleMensalPayment('full')}
                                 disabled={processing}
-                                className="w-full py-4 px-4 rounded-xl font-bold text-white bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 flex flex-col items-center justify-center gap-1 disabled:opacity-70 transition-colors"
+                                className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800 flex items-center justify-between hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all active:scale-[0.98] disabled:opacity-70 group text-left"
                             >
-                                <span className="text-base">Pagar Tudo (Encerrar)</span>
-                                <span className="text-xs opacity-80 font-normal">R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-blue-200 dark:bg-blue-800 rounded-xl flex items-center justify-center text-blue-700 dark:text-blue-300 group-hover:scale-110 transition-transform shrink-0">
+                                        <Wallet className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Pagar Tudo (Encerrar)</h4>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Liquidação total do contrato</p>
+                                    </div>
+                                </div>
+                                <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
+                                    R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
                             </button>
                             
+                            {/* 2. Pagar Juros (White Theme) */}
                             <button 
                                 onClick={() => handleMensalPayment('renew')}
                                 disabled={processing}
-                                className="w-full py-4 px-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 flex flex-col items-center justify-center gap-1 disabled:opacity-70 transition-colors"
+                                className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all active:scale-[0.98] disabled:opacity-70 group text-left"
                             >
-                                <span className="text-base">Pagar Juros (Renovar)</span>
-                                <span className="text-xs opacity-80 font-normal">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-gray-600 dark:text-gray-300 group-hover:rotate-180 transition-transform duration-500 shrink-0">
+                                        <RefreshCw className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Pagar Juros (Renovar)</h4>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Manter contrato ativo</p>
+                                    </div>
+                                </div>
+                                <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
                                     R$ {Math.max(0, Number(loan.balance) - Number(loan.amount)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </span>
+                            </button>
+
+                            {/* 3. Abater Capital (White Theme) */}
+                            <button 
+                                onClick={() => {
+                                    setShowMensalPaymentModal(false);
+                                    setShowAmortizationPage(true);
+                                }}
+                                disabled={processing}
+                                className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all active:scale-[0.98] disabled:opacity-70 group text-left"
+                            >
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-gray-600 dark:text-gray-300 group-hover:scale-110 transition-transform shrink-0">
+                                        <TrendingDown className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Abater Capital (Parcial)</h4>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Reduzir dívida e recalcular juros</p>
+                                    </div>
+                                </div>
+                                <ChevronRight className="w-5 h-5 text-gray-400 group-hover:translate-x-1 transition-transform ml-2" />
                             </button>
                             
                             <button 
                                 onClick={() => setShowMensalPaymentModal(false)}
-                                className="w-full py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors mt-2"
+                                className="w-full py-4 text-xs font-bold text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors uppercase tracking-wider mt-2"
                             >
                                 Cancelar
                             </button>
@@ -1323,7 +1469,7 @@ ${paidInstallments.map(i =>
                     </div>
                 </div>
             )}
-            
+
             {/* Receipt Modal */}
             {showReceiptModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1778,6 +1924,24 @@ ${paidInstallments.map(i =>
                         </button>
                     </div>
                 </div>
+            )}
+
+            {/* Receipt Image Modal */}
+            {showReceiptImageModal && receiptData && (
+                <ReceiptModal 
+                    isOpen={showReceiptImageModal}
+                    onClose={() => setShowReceiptImageModal(false)}
+                    data={receiptData}
+                />
+            )}
+
+            {/* Extract Image Modal */}
+            {showExtractImageModal && extractData && (
+                <ExtractModal 
+                    isOpen={showExtractImageModal}
+                    onClose={() => setShowExtractImageModal(false)}
+                    data={extractData}
+                />
             )}
         </div>
     );
