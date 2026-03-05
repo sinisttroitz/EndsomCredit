@@ -79,7 +79,7 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
       try {
           const { data: loans, error } = await supabase
               .from('loans')
-              .select('*, client:clients(name)')
+              .select('*, client:clients(name, credit_balance), installment_fines(*)')
               .order('created_at', { ascending: false });
 
           if (error) throw error;
@@ -104,48 +104,93 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
   };
 
   const generatePDF = (loans: any[]) => {
-      const doc = new jsPDF();
+      const doc = new jsPDF({ orientation: 'landscape' });
       
       doc.setFontSize(18);
-      doc.text("Relatório de Empréstimos", 14, 22);
+      doc.text("Relatório Detalhado de Empréstimos", 14, 22);
       
       doc.setFontSize(10);
       doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 30);
       doc.text(`Usuário: ${name || email}`, 14, 35);
 
-      const tableData = loans.map(loan => [
-          loan.client?.name || 'Cliente Removido',
-          `R$ ${loan.amount.toFixed(2)}`,
-          new Date(loan.start_date).toLocaleDateString('pt-BR'),
-          loan.status === 'paid' ? 'Pago' : (loan.status === 'late' ? 'Atrasado' : 'Em Aberto')
-      ]);
+      const tableData = loans.map(loan => {
+          const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+          const contractInterest = Math.max(0, totalDebt - loan.amount);
+          const lateInterest = Math.max(0, Number(loan.balance) - totalDebt);
+          const totalFines = loan.installment_fines?.reduce((acc: number, curr: any) => acc + curr.fine_value, 0) || 0;
+
+          return [
+              loan.client?.name || 'Cliente Removido',
+              `R$ ${loan.amount.toFixed(2)}`,
+              `R$ ${contractInterest.toFixed(2)}`,
+              `R$ ${lateInterest.toFixed(2)}`,
+              `R$ ${totalFines.toFixed(2)}`,
+              loan.frequency || '-',
+              loan.installments || 1,
+              new Date(loan.created_at).toLocaleDateString('pt-BR'),
+              loan.due_date ? new Date(loan.due_date).toLocaleDateString('pt-BR') : '-',
+              `R$ ${(loan.client?.credit_balance || 0).toFixed(2)}`,
+              `R$ ${(loan.amount_paid || 0).toFixed(2)}`,
+              loan.status === 'paid' ? 'Pago' : (loan.status === 'late' ? 'Atrasado' : 'Em Aberto')
+          ];
+      });
 
       autoTable(doc, {
-          head: [['Cliente', 'Valor', 'Data Início', 'Status']],
+          head: [['Cliente', 'Valor Inicial', 'Juros Contrato', 'Juros Atraso', 'Multas', 'Freq.', 'Parc.', 'Data Sol.', 'Venc.', 'Créditos', 'Total Rec.', 'Status']],
           body: tableData,
           startY: 40,
           theme: 'grid',
-          headStyles: { fillColor: [41, 128, 185] },
+          headStyles: { fillColor: [41, 128, 185], fontSize: 8 },
+          styles: { fontSize: 8, cellPadding: 2 },
+          columnStyles: {
+              0: { cellWidth: 35 }, // Cliente
+              1: { cellWidth: 20 }, // Valor Inicial
+              2: { cellWidth: 20 }, // Juros Contrato
+              3: { cellWidth: 20 }, // Juros Atraso
+              4: { cellWidth: 15 }, // Multas
+              5: { cellWidth: 20 }, // Frequência
+              6: { cellWidth: 10 }, // Parcelas
+              7: { cellWidth: 20 }, // Data Sol.
+              8: { cellWidth: 20 }, // Vencimento
+              9: { cellWidth: 20 }, // Créditos
+              10: { cellWidth: 20 }, // Total Rec.
+              11: { cellWidth: 20 }  // Status
+          }
       });
 
-      doc.save('relatorio_emprestimos.pdf');
+      doc.save('relatorio_emprestimos_detalhado.pdf');
   };
 
   const generateCSV = (loans: any[]) => {
-      const headers = ['Cliente,Valor,Data Início,Status'];
-      const rows = loans.map(loan => [
-          `"${loan.client?.name || 'Cliente Removido'}"`,
-          `"${loan.amount.toFixed(2).replace('.', ',')}"`,
-          `"${new Date(loan.start_date).toLocaleDateString('pt-BR')}"`,
-          `"${loan.status === 'paid' ? 'Pago' : (loan.status === 'late' ? 'Atrasado' : 'Em Aberto')}"`
-      ]);
+      const headers = ['Cliente,Valor Inicial,Juros Contrato,Juros Atraso,Multas,Frequência,Parcelas,Data Solicitação,Vencimento,Créditos,Total Recebido,Status'];
+      const rows = loans.map(loan => {
+          const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+          const contractInterest = Math.max(0, totalDebt - loan.amount);
+          const lateInterest = Math.max(0, Number(loan.balance) - totalDebt);
+          const totalFines = loan.installment_fines?.reduce((acc: number, curr: any) => acc + curr.fine_value, 0) || 0;
+
+          return [
+              `"${loan.client?.name || 'Cliente Removido'}"`,
+              `"${loan.amount.toFixed(2).replace('.', ',')}"`,
+              `"${contractInterest.toFixed(2).replace('.', ',')}"`,
+              `"${lateInterest.toFixed(2).replace('.', ',')}"`,
+              `"${totalFines.toFixed(2).replace('.', ',')}"`,
+              `"${loan.frequency || '-'}"`,
+              `"${loan.installments || 1}"`,
+              `"${new Date(loan.created_at).toLocaleDateString('pt-BR')}"`,
+              `"${loan.due_date ? new Date(loan.due_date).toLocaleDateString('pt-BR') : '-'}"`,
+              `"${(loan.client?.credit_balance || 0).toFixed(2).replace('.', ',')}"`,
+              `"${(loan.amount_paid || 0).toFixed(2).replace('.', ',')}"`,
+              `"${loan.status === 'paid' ? 'Pago' : (loan.status === 'late' ? 'Atrasado' : 'Em Aberto')}"`
+          ];
+      });
 
       const csvContent = [headers, ...rows].join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.setAttribute('href', url);
-      link.setAttribute('download', 'relatorio_emprestimos.csv');
+      link.setAttribute('download', 'relatorio_emprestimos_detalhado.csv');
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

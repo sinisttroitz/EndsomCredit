@@ -46,6 +46,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         confirmText?: string;
     }>({ open: false, title: '', message: '' });
 
+    const [showInterestBreakdownModal, setShowInterestBreakdownModal] = useState(false);
+
     // Fine State
     const [fines, setFines] = useState<InstallmentFine[]>([]);
     const [showFineModal, setShowFineModal] = useState(false);
@@ -83,10 +85,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             if (amortError) throw amortError;
             
             // 2. Update Loan
-            const nextDueStr = new Date(result.newDueDate).toISOString().split('T')[0];
-            // Wait, result.newDueDate is formatted string "DD MMM YYYY". We need ISO.
-            // Let's recalculate ISO date here or pass it from component.
-            // Re-calculating for safety:
+            // result.newDueDate is a formatted string "DD MMM YYYY" which causes Invalid Date if passed to Date constructor directly in some environments.
+            // We will rely on the recalculated nextDueISO below.
+            
             const today = new Date();
             const nextDue = new Date(today);
             if (loan.frequency === 'Quinzenal') {
@@ -106,13 +107,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const newTotalInterestPaid = currentTotalInterestPaid + interestComponentPaid;
             const newAmountPaid = currentAmountPaid + amountPaid;
 
+            const isPaidOff = result.newBalance <= 0.01;
+
             const { error: loanError } = await supabase
                 .from('loans')
                 .update({
                     balance: result.newBalance,
                     amount: Math.max(0, Number(loan.amount) - result.capitalAbated), // Update principal
-                    due_date: nextDueISO,
-                    status: result.newBalance <= 0.01 ? 'paid' : 'active',
+                    due_date: isPaidOff ? loan.due_date : nextDueISO,
+                    status: isPaidOff ? 'paid' : 'active',
                     total_interest_paid: newTotalInterestPaid,
                     amount_paid: newAmountPaid
                 })
@@ -614,7 +617,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
 
 
-    const handleApplyFine = async () => {
+    const handleSaveFine = async () => {
         if (!loan || !fineInstallment) return;
 
         setProcessing(true);
@@ -636,14 +639,67 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 return;
             }
 
+            if (fineInstallment.fine) {
+                // Update existing fine
+                const { error } = await supabase
+                    .from('installment_fines')
+                    .update({
+                        fine_value: fineValue
+                    })
+                    .eq('loan_id', loan.id)
+                    .eq('installment_number', fineInstallment.number);
+
+                if (error) throw error;
+            } else {
+                // Insert new fine
+                const { error } = await supabase
+                    .from('installment_fines')
+                    .insert({
+                        loan_id: loan.id,
+                        installment_number: fineInstallment.number,
+                        fine_value: fineValue,
+                        fine_type: fineType
+                    });
+
+                if (error) throw error;
+            }
+
+            setShowFineModal(false);
+            setFineFixed('');
+            setFineInstallment(null);
+            await fetchLoanData();
+            
+        } catch (error) {
+            console.error("Error saving fine", error);
+            alert("Erro ao salvar multa.");
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleRemoveFine = () => {
+        if (!loan || !fineInstallment) return;
+        
+        setAlertModal({
+            open: true,
+            title: 'Remover Multa',
+            message: 'Tem certeza que deseja remover a multa desta parcela?',
+            confirmText: 'Sim, remover',
+            onConfirm: executeRemoveFine
+        });
+    };
+
+    const executeRemoveFine = async () => {
+        setAlertModal(prev => ({ ...prev, open: false }));
+        if (!loan || !fineInstallment) return;
+
+        setProcessing(true);
+        try {
             const { error } = await supabase
                 .from('installment_fines')
-                .insert({
-                    loan_id: loan.id,
-                    installment_number: fineInstallment.number,
-                    fine_value: fineValue,
-                    fine_type: fineType
-                });
+                .delete()
+                .eq('loan_id', loan.id)
+                .eq('installment_number', fineInstallment.number);
 
             if (error) throw error;
 
@@ -651,10 +707,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             setFineFixed('');
             setFineInstallment(null);
             await fetchLoanData();
-
         } catch (error) {
-            console.error("Error applying fine", error);
-            alert("Erro ao aplicar multa");
+            console.error("Error removing fine:", error);
+            alert("Erro ao remover multa.");
         } finally {
             setProcessing(false);
         }
@@ -701,11 +756,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const handleMensalPayment = (type: 'full' | 'renew') => {
         if (!loan) return;
 
+        const totalFines = fines.reduce((acc, curr) => acc + curr.fine_value, 0);
         const title = type === 'full' ? 'Quitar Empréstimo' : 'Renovar Empréstimo';
         let message = '';
 
         if (type === 'full') {
-            message = "Tem certeza que deseja quitar todo o empréstimo?";
+            const totalToPay = Number(loan.balance) + totalFines;
+            message = `Tem certeza que deseja quitar todo o empréstimo?\n\nValor Total: R$ ${totalToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${totalFines > 0 ? `\n(Incluindo R$ ${totalFines.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de multas)` : ''}`;
         } else {
             // Calculate renewal details for the message
             let currentDue: Date;
@@ -734,8 +791,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const interest = principal * (Number(loan.interest_rate) / 100);
             const newBalance = principal + interest;
             const formattedBalance = newBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            
+            const interestToPay = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
 
-            message = `Deseja pagar os juros e renovar o empréstimo?\n\nNova Data de Vencimento: ${formattedDate}\nNovo Valor do Empréstimo: R$ ${formattedBalance}`;
+            message = `Deseja pagar os juros${totalFines > 0 ? ' e multas' : ''} e renovar o empréstimo?\n\nValor a Pagar: R$ ${interestToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\nNova Data de Vencimento: ${formattedDate}\nNovo Valor do Empréstimo: R$ ${formattedBalance}`;
         }
             
         setConfirmationModal({
@@ -752,6 +811,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         setProcessing(true);
         try {
             let updates: any = {};
+            const totalFines = fines.reduce((acc, curr) => acc + curr.fine_value, 0);
             
             const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
             const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null 
@@ -759,11 +819,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 : Math.max(0, totalDebt - Number(loan.balance)) + (Number(loan.total_interest_paid) || 0);
 
             if (type === 'full') {
+                const interestPaid = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
                 updates = {
                     balance: 0,
                     status: 'paid',
                     progress: 100,
-                    amount_paid: currentAmountPaid + Number(loan.balance)
+                    amount_paid: currentAmountPaid + Number(loan.balance) + totalFines,
+                    total_interest_paid: (Number(loan.total_interest_paid) || 0) + interestPaid
                 };
             } else {
                 // Renew
@@ -795,8 +857,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 const interest = principal * (Number(loan.interest_rate) / 100);
                 const newBalance = principal + interest;
                 
-                // Calculate interest paid in this renewal (Current Balance - Principal)
-                const interestPaid = Math.max(0, Number(loan.balance) - principal);
+                // Calculate interest paid in this renewal (Current Balance - Principal) + Fines
+                const interestPaid = Math.max(0, Number(loan.balance) - principal) + totalFines;
                 const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
 
                 updates = {
@@ -815,6 +877,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 .eq('id', loan.id);
                 
             if (error) throw error;
+
+            // Delete fines if paid
+            if (totalFines > 0) {
+                 const { error: finesError } = await supabase
+                     .from('installment_fines')
+                     .delete()
+                     .eq('loan_id', loan.id);
+                 if (finesError) console.error("Error deleting fines", finesError);
+            }
             
             setShowMensalPaymentModal(false);
             await fetchLoanData();
@@ -923,13 +994,23 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
     const totalPaid = Math.max(0, totalDebt - Number(loan.balance));
-    const percentage = Math.max(0, loan.progress || 0);
+    const percentage = loan.status === 'paid' ? 100 : Math.max(0, loan.progress || 0);
     const paidCount = installmentsList.filter(i => i.status === 'paid').length;
     const totalCount = installmentsList.length;
     
     // Determine display status based on installments
     const isLate = installmentsList.some(i => i.status === 'late');
-    const displayStatus = isLate ? 'late' : loan.status;
+    const displayStatus = isLate && loan.status !== 'paid' ? 'late' : loan.status;
+
+    // Calculate original amount fallback if it's 0 (due to amortization)
+    const originalAmount = Number(loan.amount) > 0 
+        ? Number(loan.amount) 
+        : totalDebt / (1 + (Number(loan.interest_rate) / 100));
+
+    // For paid loans, use the actual amount paid stored in DB if available, otherwise fallback to calculation
+    const displayTotalPaid = loan.status === 'paid' && loan.amount_paid
+        ? Number(loan.amount_paid)
+        : totalPaid;
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
@@ -982,10 +1063,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             
                             <button
                                 onClick={handleCharge}
-                                className={`px-3 py-1 rounded-full text-[10px] font-bold border uppercase transition-all flex items-center gap-1 cursor-pointer hover:opacity-80 ${
-                                    isLate 
-                                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800' 
-                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                                disabled={loan.status === 'paid'}
+                                className={`px-3 py-1 rounded-full text-[10px] font-bold border uppercase transition-all flex items-center gap-1 ${
+                                    loan.status === 'paid' 
+                                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-50'
+                                        : isLate 
+                                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 cursor-pointer hover:opacity-80' 
+                                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-80'
                                 }`}
                             >
                                 <Banknote className="w-3 h-3" />
@@ -1012,7 +1096,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         <div className="flex-1 space-y-3">
                             <div>
                                 <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-semibold">Total Amortizado</p>
-                                <p className="text-lg font-bold text-primary dark:text-white">R$ {totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                <p className="text-lg font-bold text-primary dark:text-white">R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                             </div>
                             <div>
                                 <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-semibold">Parcelas Pagas</p>
@@ -1026,11 +1110,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Valor Solicitado</p>
-                        <p className="font-bold text-gray-900 dark:text-white">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="font-bold text-gray-900 dark:text-white">R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Total Pago</p>
-                        <p className="font-bold text-secondary">R$ {totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="font-bold text-secondary">R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Taxa de Juros</p>
@@ -1038,11 +1122,32 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : loan.frequency === 'Quinzenal' ? 'a.q.' : 'a.m.'}
                         </p>
                     </div>
-                    <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Crédito Disponível</p>
-                        <p className="font-bold text-blue-600 dark:text-blue-400">
-                            R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </p>
+                    <div 
+                        className={`bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm ${loan.status === 'paid' ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors' : ''}`}
+                        onClick={() => {
+                            if (loan.status === 'paid') {
+                                setShowInterestBreakdownModal(true);
+                            }
+                        }}
+                    >
+                        {loan.status === 'paid' ? (
+                            <>
+                                <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1 flex items-center gap-1">
+                                    Juros Pagos
+                                    <ChevronRight className="w-3 h-3 opacity-50" />
+                                </p>
+                                <p className="font-bold text-green-600 dark:text-green-400">
+                                    R$ {(Number(loan.total_interest_paid) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Crédito Disponível</p>
+                                <p className="font-bold text-blue-600 dark:text-blue-400">
+                                    R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </p>
+                            </>
+                        )}
                     </div>
                 </div>
 
@@ -1105,30 +1210,35 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                         </p>
                                     </div>
                                     <div className="text-right">
-                                        {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0 && inst.originalValue && Math.abs(inst.value - inst.originalValue) > 0.01) && (
-                                            <p className="text-[10px] text-gray-400 line-through leading-none mb-0.5">
-                                                R$ {inst.originalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </p>
-                                        )}
-                                        {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0) && (
-                                            <p className="text-[10px] text-red-500 font-bold leading-none mb-0.5">
-                                                + Juros R$ {inst.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </p>
-                                        )}
-                                        {inst.fine && (
-                                            <p className="text-[10px] text-red-500 font-bold leading-none mb-0.5">
-                                                + Multa {inst.fine.fine_type === 'percent' ? `${inst.fine.fine_value}%` : `R$ ${inst.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
-                                            </p>
-                                        )}
+                                        <div className="flex flex-col items-end gap-0.5 mb-1">
+                                            {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0 && inst.originalValue && Math.abs(inst.value - inst.originalValue) > 0.01) && (
+                                                <span className="text-[10px] text-gray-400 line-through">
+                                                    R$ {inst.originalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            )}
+                                            {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0) && (
+                                                <span className="text-[10px] text-red-500/80 font-medium">
+                                                    + Juros R$ {inst.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            )}
+                                            {inst.fine && (
+                                                <span className="text-[10px] text-red-500/80 font-medium">
+                                                    + Multa {inst.fine.fine_type === 'percent' ? `${inst.fine.fine_value}%` : `R$ ${inst.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                                </span>
+                                            )}
+                                        </div>
                                         <div className="flex items-center justify-end gap-2">
-                                            <p className={`text-sm font-bold ${
+                                            <div className={`flex items-baseline gap-1 ${
                                                 inst.status === 'paid' ? 'text-secondary' :
                                                 inst.status === 'late' ? 'text-danger' :
                                                 inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
                                             }`}>
-                                                R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </p>
-                                            {inst.status === 'late' && !inst.fine && !isSelectionMode && (
+                                                <span className="text-xs font-medium opacity-70">R$</span>
+                                                <span className="text-lg font-bold">
+                                                    {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                            {inst.status === 'late' && !isSelectionMode && (
                                                 <div className="relative">
                                                     <button
                                                         onClick={(e) => {
@@ -1146,13 +1256,14 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     setFineInstallment(inst);
+                                                                    setFineFixed(inst.fine ? String(inst.fine.fine_value) : '');
                                                                     setShowFineModal(true);
                                                                     setActiveActionMenu(null);
                                                                 }}
                                                                 className="w-full text-left px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors flex items-center gap-2"
                                                             >
                                                                 <AlertTriangle className="w-3 h-3" />
-                                                                Aplicar Multa
+                                                                {inst.fine ? 'Gerenciar Multa' : 'Aplicar Multa'}
                                                             </button>
                                                         </div>
                                                     )}
@@ -1414,7 +1525,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     </div>
                                 </div>
                                 <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
-                                    R$ {Number(loan.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {(Number(loan.balance) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </span>
                             </button>
                             
@@ -1434,7 +1545,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     </div>
                                 </div>
                                 <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
-                                    R$ {Math.max(0, Number(loan.balance) - Number(loan.amount)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {(Math.max(0, Number(loan.balance) - Number(loan.amount)) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </span>
                             </button>
 
@@ -1771,7 +1882,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
             {/* Alert Modal */}
             {alertModal.open && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}></div>
                     <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
                         <div className="flex flex-col items-center text-center mb-6">
@@ -1803,13 +1914,76 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 </div>
             )}
 
+            {/* Interest Breakdown Modal */}
+            {showInterestBreakdownModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowInterestBreakdownModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Detalhamento de Juros</h3>
+                            <button onClick={() => setShowInterestBreakdownModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-2xl border border-green-100 dark:border-green-800 mb-4">
+                                <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase mb-1">Total Recebido</p>
+                                <p className="text-3xl font-bold text-green-700 dark:text-green-300">
+                                    R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </p>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
+                                    <span className="text-sm text-gray-600 dark:text-gray-400">Principal (Valor Emprestado)</span>
+                                    <span className="text-sm font-bold text-gray-900 dark:text-white">
+                                        R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                                
+                                <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
+                                    <span className="text-sm text-gray-600 dark:text-gray-400">Juros do Contrato</span>
+                                    <span className="text-sm font-bold text-gray-900 dark:text-white">
+                                        R$ {Math.max(0, ((loan.installment_value || 0) * (loan.installments || 1)) - originalAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+
+                                <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
+                                    <span className="text-sm text-gray-600 dark:text-gray-400">Juros Adicionais / Multas</span>
+                                    <span className="text-sm font-bold text-gray-900 dark:text-white">
+                                        R$ {Math.max(0, displayTotalPaid - ((loan.installment_value || 0) * (loan.installments || 1))).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+
+                                <div className="flex justify-between items-center pt-2">
+                                    <span className="text-base font-bold text-gray-900 dark:text-white">Lucro Total (Juros)</span>
+                                    <span className="text-xl font-bold text-green-600 dark:text-green-400">
+                                        R$ {Math.max(0, displayTotalPaid - originalAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={() => setShowInterestBreakdownModal(false)}
+                                className="w-full mt-6 bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98]"
+                            >
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Fine Modal */}
             {showFineModal && fineInstallment && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowFineModal(false)}></div>
                     <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
                         <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Aplicar Multa</h3>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                                {fineInstallment.fine ? 'Gerenciar Multa' : 'Aplicar Multa'}
+                            </h3>
                             <button onClick={() => setShowFineModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
                                 <X className="w-5 h-5 text-gray-500" />
                             </button>
@@ -1817,7 +1991,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                         <div className="space-y-4">
                             <p className="text-sm text-gray-500">
-                                Aplicando multa na parcela #{fineInstallment.number} de R$ {fineInstallment.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || fineInstallment.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                {fineInstallment.fine ? 'Editando' : 'Aplicando'} multa na parcela #{fineInstallment.number} de R$ {fineInstallment.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || fineInstallment.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
 
                             <div>
@@ -1840,13 +2014,25 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </p>
                             </div>
 
-                            <button
-                                onClick={handleApplyFine}
-                                disabled={processing}
-                                className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70 mt-4"
-                            >
-                                {processing ? 'Processando...' : 'Confirmar Aplicação'}
-                            </button>
+                            <div className="flex flex-col gap-3 mt-4">
+                                <button
+                                    onClick={handleSaveFine}
+                                    disabled={processing}
+                                    className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
+                                >
+                                    {processing ? 'Processando...' : (fineInstallment.fine ? 'Atualizar Multa' : 'Confirmar Aplicação')}
+                                </button>
+                                
+                                {fineInstallment.fine && (
+                                    <button
+                                        onClick={handleRemoveFine}
+                                        disabled={processing}
+                                        className="w-full bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 py-4 rounded-2xl font-bold border border-red-100 dark:border-red-800 transition active:scale-[0.98] disabled:opacity-70"
+                                    >
+                                        Remover Multa
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
