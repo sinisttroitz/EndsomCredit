@@ -164,7 +164,14 @@ const App: React.FC = () => {
             }}
         />;
       case 'interest-details':
-        return <InterestDetails onBack={() => setCurrentView('dashboard')} />;
+        return <InterestDetails 
+            onBack={() => setCurrentView('dashboard')} 
+            onLoanSelect={(id) => {
+                setSelectedLoanId(id);
+                setPreviousView('interest-details');
+                setCurrentView('loan-details');
+            }}
+        />;
       case 'collection-calendar':
         return <CollectionCalendar 
             onBack={() => setCurrentView('dashboard')} 

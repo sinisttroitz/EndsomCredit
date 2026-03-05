@@ -5,9 +5,10 @@ import { Loan } from '../types';
 
 interface InterestDetailsProps {
     onBack: () => void;
+    onLoanSelect: (loanId: string) => void;
 }
 
-export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack }) => {
+export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoanSelect }) => {
     const [loans, setLoans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<'this-month' | 'last-month' | 'all'>('all');
@@ -24,13 +25,18 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack }) => {
                 .from('loans')
                 .select(`
                     *,
-                    client:clients (name)
+                    client:clients (name),
+                    loan_amortizations (
+                        payment_date,
+                        interest_paid,
+                        created_at
+                    )
                 `)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
 
-            const filteredLoans = (data || []).filter((loan: any) => {
+            const filteredLoans = (data || []).map((loan: any) => {
                 const amount = Number(loan.amount);
                 const installmentValue = Number(loan.installment_value) || 0;
                 const installments = Number(loan.installments) || 1;
@@ -44,10 +50,34 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack }) => {
                      interestReceived += interest;
                 }
 
-                if (interestReceived <= 0) return false;
+                // Determine the date of interest receipt
+                let interestDate = new Date(loan.created_at);
+                
+                // Check amortizations for the latest interest payment
+                if (loan.loan_amortizations && loan.loan_amortizations.length > 0) {
+                    const interestAmortizations = loan.loan_amortizations.filter((a: any) => a.interest_paid > 0);
+                    if (interestAmortizations.length > 0) {
+                        // Sort by date descending
+                        interestAmortizations.sort((a: any, b: any) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
+                        interestDate = new Date(interestAmortizations[0].payment_date);
+                    } else if (loan.updated_at && interestReceived > 0) {
+                         // If no specific amortization but interest was paid (e.g. renewal), use updated_at
+                         interestDate = new Date(loan.updated_at);
+                    }
+                } else if (loan.updated_at && interestReceived > 0) {
+                    // Fallback to updated_at if no amortizations but interest exists
+                    interestDate = new Date(loan.updated_at);
+                }
 
-                // Date Filter Logic (using created_at as proxy for now)
-                const loanDate = new Date(loan.created_at);
+                return {
+                    ...loan,
+                    interestReceived,
+                    interestDate
+                };
+            }).filter((loan: any) => {
+                if (loan.interestReceived <= 0) return false;
+
+                const loanDate = loan.interestDate;
                 const now = new Date();
                 
                 if (filter === 'this-month') {
@@ -76,6 +106,9 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack }) => {
                 return acc + interestReceived;
             }, 0);
 
+            // Sort by interest date descending
+            filteredLoans.sort((a: any, b: any) => b.interestDate.getTime() - a.interestDate.getTime());
+
             setLoans(filteredLoans);
             setTotalInterest(total);
 
@@ -86,9 +119,8 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack }) => {
         }
     };
 
-    const formatDate = (dateString: string) => {
-        if (!dateString) return '';
-        const date = new Date(dateString);
+    const formatDate = (date: Date) => {
+        if (!date) return '';
         return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
     };
 
@@ -189,7 +221,11 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack }) => {
                             }
 
                             return (
-                                <div key={loan.id} className="bg-white dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-4 hover:shadow-md transition-shadow">
+                                <div 
+                                    key={loan.id} 
+                                    onClick={() => onLoanSelect(loan.id)}
+                                    className="bg-white dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-4 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
+                                >
                                     <div className="w-12 h-12 rounded-full bg-green-50 dark:bg-green-900/20 flex items-center justify-center text-green-500 shadow-sm border border-green-100 dark:border-green-900/30">
                                         <TrendingUp className="w-5 h-5" />
                                     </div>
@@ -198,12 +234,12 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack }) => {
                                         <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
                                             <span>Contrato #{loan.id.substring(0,4)}</span>
                                             <span className="w-1 h-1 rounded-full bg-gray-300"></span>
-                                            <span>{formatDate(loan.created_at)}</span>
+                                            <span>{formatDate(loan.interestDate)}</span>
                                         </p>
                                     </div>
                                     <div className="text-right">
                                         <p className="font-bold text-green-600 dark:text-green-400 text-sm">
-                                            + R$ {interestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            + R$ {loan.interestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </p>
                                         <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mt-0.5">JUROS</p>
                                     </div>
