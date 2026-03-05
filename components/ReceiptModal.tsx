@@ -92,7 +92,7 @@ export function ReceiptModal({ isOpen, onClose, data }: ReceiptModalProps) {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-6">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center sm:p-6">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
             
             <div className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-md bg-gray-100 dark:bg-gray-900 rounded-none sm:rounded-[32px] shadow-2xl overflow-hidden flex flex-col">
@@ -226,7 +226,7 @@ export function ReceiptModal({ isOpen, onClose, data }: ReceiptModalProps) {
                 </div>
 
                 {/* Fixed Bottom Action Button */}
-                <div className="absolute bottom-0 left-0 right-0 p-6 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-t border-gray-200 dark:border-gray-800">
+                <div className="absolute bottom-0 left-0 right-0 z-50 p-6 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-t border-gray-200 dark:border-gray-800">
                     <button 
                         onClick={handleShare}
                         disabled={isSharing}
