@@ -53,8 +53,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [showFineModal, setShowFineModal] = useState(false);
     const [fineInstallment, setFineInstallment] = useState<Installment | null>(null);
     const [fineFixed, setFineFixed] = useState('');
-    const [activeActionMenu, setActiveActionMenu] = useState<number | null>(null);
-    
+
     // Batch Payment State
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedInstallments, setSelectedInstallments] = useState<number[]>([]);
@@ -64,11 +63,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const handleConfirmAmortization = async (amountPaid: number, preview: any) => {
         if (!loan) return;
-        
+
         setProcessing(true);
         try {
             const { breakdown, result } = preview;
-            
+
             // 1. Insert Amortization Record
             const { error: amortError } = await supabase
                 .from('loan_amortizations')
@@ -81,13 +80,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     previous_balance: loan.balance,
                     new_balance: result.newBalance
                 });
-                
+
             if (amortError) throw amortError;
-            
+
             // 2. Update Loan
             // result.newDueDate is a formatted string "DD MMM YYYY" which causes Invalid Date if passed to Date constructor directly in some environments.
             // We will rely on the recalculated nextDueISO below.
-            
+
             const today = new Date();
             const nextDue = new Date(today);
             if (loan.frequency === 'Quinzenal') {
@@ -100,10 +99,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             // Calculate new totals for Dashboard accuracy
             const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
             const currentAmountPaid = Number(loan.amount_paid) || 0;
-            
+
             // Interest component includes: Past Interest + Pro-Rata + Fines
             const interestComponentPaid = breakdown.pastInterest + breakdown.proRata + breakdown.fines;
-            
+
             const newTotalInterestPaid = currentTotalInterestPaid + interestComponentPaid;
             const newAmountPaid = currentAmountPaid + amountPaid;
 
@@ -120,24 +119,28 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     amount_paid: newAmountPaid
                 })
                 .eq('id', loan.id);
-                
+
             if (loanError) throw loanError;
-            
+
             // 3. Clear Fines if paid
             if (breakdown.fines > 0) {
-                 const installmentsWithFines = installmentsList.filter(i => i.fine);
-                 for (const inst of installmentsWithFines) {
-                     if (inst.fine) {
-                         await supabase.from('installment_fines').delete().eq('id', inst.fine.id);
-                     }
-                 }
+                const installmentsWithFines = installmentsList.filter(i => i.fine);
+                for (const inst of installmentsWithFines) {
+                    if (inst.fine) {
+                        await supabase.from('installment_fines').delete().eq('id', inst.fine.id);
+                    }
+                }
             }
 
             setShowAmortizationPage(false);
             onBack(); // Go back to refresh or reload
         } catch (error) {
             console.error('Error amortizing:', error);
-            alert('Erro ao realizar abatimento.');
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao realizar abatimento.'
+            });
         } finally {
             setProcessing(false);
         }
@@ -147,7 +150,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         title: string;
         message: string;
         action: () => void;
-    }>({ open: false, title: '', message: '', action: () => {} });
+    }>({ open: false, title: '', message: '', action: () => { } });
 
     const [selectedInstallmentForDetail, setSelectedInstallmentForDetail] = useState<Installment | null>(null);
 
@@ -221,44 +224,55 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         setConfirmationModal(prev => ({ ...prev, open: false }));
         setProcessing(true);
         try {
-            // Calculate total value of selected installments
-            const selectedValue = installmentsList
-                .filter(i => selectedInstallments.includes(i.number))
-                .reduce((acc, curr) => acc + curr.value, 0);
+            const selectedInsts = installmentsList.filter(i => selectedInstallments.includes(i.number));
+            const totalPaidNow = selectedInsts.reduce((acc, curr) => acc + curr.value, 0);
+            const baseValueToAbate = selectedInsts.reduce((acc, curr) => acc + curr.originalValue, 0);
+            const extraProfit = Math.max(0, totalPaidNow - baseValueToAbate);
 
             const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-            
-            let newBalance = Number(loan.balance) - selectedValue;
+
+            let newBalance = Number(loan.balance) - baseValueToAbate;
             if (newBalance < 0.01) newBalance = 0;
-            
+
             const newProgress = Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
 
-            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null 
-                ? Number(loan.amount_paid) 
-                : Math.max(0, totalDebt - Number(loan.balance)) + (Number(loan.total_interest_paid) || 0);
-            
-            const newAmountPaid = currentAmountPaid + selectedValue;
+            const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null
+                ? Number(loan.amount_paid)
+                : Math.max(0, totalDebt - Number(loan.balance)) + currentTotalInterestPaid;
 
             const { error } = await supabase
                 .from('loans')
-                .update({ 
+                .update({
                     balance: newBalance,
                     progress: newProgress,
                     status: newStatus,
-                    amount_paid: newAmountPaid
+                    amount_paid: currentAmountPaid + totalPaidNow,
+                    total_interest_paid: currentTotalInterestPaid + extraProfit
                 })
                 .eq('id', loan.id);
 
             if (error) throw error;
-            
+
+            // Delete fines for these installments
+            for (const inst of selectedInsts) {
+                if (inst.fine) {
+                    await supabase.from('installment_fines').delete().eq('id', inst.fine.id);
+                }
+            }
+
             setIsSelectionMode(false);
             setSelectedInstallments([]);
-            await fetchLoanData(); 
-            
+            await fetchLoanData();
+
         } catch (error) {
             console.error(error);
-            alert("Erro ao registrar pagamento em lote.");
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao registrar pagamento em lote.'
+            });
         } finally {
             setProcessing(false);
         }
@@ -266,39 +280,53 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const handleAVPayment = () => {
         if (!loan || !avAmount) return;
-        
-        const amount = Number(avAmount.replace(',', '.'));
-        if (isNaN(amount) || amount <= 0) {
-            alert("Valor inválido");
+
+        const avRequestedAmount = Number(avAmount.replace(',', '.'));
+        if (isNaN(avRequestedAmount) || avRequestedAmount <= 0) {
+            setAlertModal({
+                open: true,
+                title: 'Valor Inválido',
+                message: 'O valor inserido é inválido.'
+            });
             return;
         }
 
         const currentCredit = Number(loan.client?.credit_balance) || 0;
-        let totalAvailable = amount + currentCredit;
-        
+        let totalAvailable = avRequestedAmount + currentCredit;
+
         // Filter unpaid installments and sort by date (number)
         const unpaidInstallments = installmentsList
             .filter(i => i.status !== 'paid')
             .sort((a, b) => a.number - b.number);
-            
+
         let paidAmount = 0;
-        let paidCount = 0;
-        
+        let avPaidCount = 0;
+
         // Calculate how many installments can be paid
         for (const inst of unpaidInstallments) {
             // Use a small epsilon for float comparison to avoid issues like 100.00000000001 > 100
             if (totalAvailable >= inst.value - 0.01) {
                 totalAvailable -= inst.value;
                 paidAmount += inst.value;
-                paidCount++;
+                avPaidCount++;
             } else {
                 break;
             }
         }
-        
-        const message = paidCount === 0 
-            ? `O valor R$ ${amount.toFixed(2)} será adicionado ao saldo de crédito do cliente. Confirmar?`
-            : `Confirmar pagamento de ${paidCount} parcela(s)? Restará R$ ${totalAvailable.toFixed(2)} de crédito.`;
+
+        // Bloqueio conforme solicitado: Não permitir excedente que vira crédito se o empréstimo for quitado
+        if (avPaidCount === unpaidInstallments.length && totalAvailable > 0.01) {
+            setAlertModal({
+                open: true,
+                title: "Valor Excedente",
+                message: "O valor inserido excede o necessário para quitar o empréstimo. Não é possível gerar crédito excedente em uma quitação total."
+            });
+            return;
+        }
+
+        const message = avPaidCount === 0
+            ? `O valor R$ ${avRequestedAmount.toFixed(2)} será adicionado ao saldo de crédito do cliente. Confirmar?`
+            : `Confirmar pagamento de ${avPaidCount} parcela(s)? Restará R$ ${totalAvailable.toFixed(2)} de crédito.`;
 
         setConfirmationModal({
             open: true,
@@ -307,54 +335,84 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             action: () => executeAVPayment(paidAmount, totalAvailable)
         });
     };
-
     const executeAVPayment = async (paidAmount: number, newCreditBalance: number) => {
         if (!loan) return;
         setConfirmationModal(prev => ({ ...prev, open: false }));
         setProcessing(true);
-        
+
         try {
-            // Update Loan
+            // Calculate base amount to abate from balance (only original installment values)
+            const unpaidInstallments = installmentsList
+                .filter(i => i.status !== 'paid')
+                .sort((a, b) => a.number - b.number);
+
+            let tempTotal = paidAmount;
+            let baseValueToAbate = 0;
+            const paidInsts = [];
+
+            for (const inst of unpaidInstallments) {
+                if (tempTotal >= inst.value - 0.01) {
+                    tempTotal -= inst.value;
+                    baseValueToAbate += inst.originalValue;
+                    paidInsts.push(inst);
+                } else {
+                    break;
+                }
+            }
+
+            const extraProfit = Math.max(0, paidAmount - baseValueToAbate);
             const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-            let newBalance = Number(loan.balance) - paidAmount;
+
+            let newBalance = Number(loan.balance) - baseValueToAbate;
             if (newBalance < 0.01) newBalance = 0;
-            
+
             const newProgress = Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
-            
-            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null 
-                ? Number(loan.amount_paid) 
-                : Math.max(0, totalDebt - Number(loan.balance)) + (Number(loan.total_interest_paid) || 0);
-            
-            const newAmountPaid = currentAmountPaid + paidAmount;
+
+            const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null
+                ? Number(loan.amount_paid)
+                : Math.max(0, totalDebt - Number(loan.balance)) + currentTotalInterestPaid;
 
             const { error: loanError } = await supabase
                 .from('loans')
-                .update({ 
+                .update({
                     balance: newBalance,
                     progress: newProgress,
                     status: newStatus,
-                    amount_paid: newAmountPaid
+                    amount_paid: currentAmountPaid + paidAmount,
+                    total_interest_paid: currentTotalInterestPaid + extraProfit
                 })
                 .eq('id', loan.id);
-                
+
             if (loanError) throw loanError;
-            
+
+            // Delete fines
+            for (const inst of paidInsts) {
+                if (inst.fine) {
+                    await supabase.from('installment_fines').delete().eq('id', inst.fine.id);
+                }
+            }
+
             // Update Client Credit Balance
             const { error: clientError } = await supabase
                 .from('clients')
                 .update({ credit_balance: newCreditBalance })
                 .eq('id', loan.client_id);
-                
+
             if (clientError) throw clientError;
-            
+
             setShowAVModal(false);
             setAvAmount('');
             await fetchLoanData();
-            
+
         } catch (error) {
             console.error(error);
-            alert("Erro ao processar pagamento AV.");
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao processar pagamento AV.'
+            });
         } finally {
             setProcessing(false);
         }
@@ -394,45 +452,45 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         if (!loan || !loan.client?.phone) return;
 
         const overdueInstallments = installmentsList.filter(i => i.status === 'late');
-        
+
         let message = '';
         if (overdueInstallments.length > 0) {
             const nome = loan.client.name;
             const contrato = loan.id.substring(0, 6);
-            
+
             if (overdueInstallments.length === 1) {
                 const firstUnpaid = overdueInstallments[0];
                 const parcela = firstUnpaid.number;
-                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
 
                 const extras = [];
                 if (firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0) {
-                    extras.push(`R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros por atraso`);
+                    extras.push(`R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de juros por atraso`);
                 }
                 if (firstUnpaid.fine) {
-                    extras.push(`R$ ${firstUnpaid.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de multa manual`);
+                    extras.push(`R$ ${firstUnpaid.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de multa manual`);
                 }
-                
+
                 const infoAdicional = extras.length > 0 ? ` (incluindo ${extras.join(' e ')})` : '';
 
                 message = `Olá, ${nome},\n\nConforme consta em nosso sistema, identificamos a seguinte parcela em aberto:\n\nParcela nº: ${parcela}\n\nValor: R$ ${valor}${infoAdicional}\n\nContrato: ${contrato}\n\nVencimento: ${data}\n\nSolicitamos, por gentileza, a regularização do pagamento para evitar a incidência de encargos adicionais.\n\nCaso o pagamento já tenha sido efetuado, pedimos a gentileza de desconsiderar esta mensagem.`;
             } else {
                 const totalValue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
-                const valorTotalFormatado = totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const valorTotalFormatado = totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const parcelasStr = overdueInstallments.map(i => i.number).join(', ');
-                
+
                 let detalhesParcelas = '';
                 overdueInstallments.forEach(i => {
                     const data = (i.originalDate || i.date).toLocaleDateString('pt-BR');
-                    const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-                    
+                    const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
                     const extras = [];
                     if (i.accumulatedInterest && i.accumulatedInterest > 0) {
-                        extras.push(`R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros`);
+                        extras.push(`R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de juros`);
                     }
                     if (i.fine) {
-                        extras.push(`R$ ${i.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de multa`);
+                        extras.push(`R$ ${i.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de multa`);
                     }
                     const infoAdicional = extras.length > 0 ? ` (inclui ${extras.join(' e ')})` : '';
 
@@ -446,7 +504,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             if (firstUnpaid) {
                 const nome = loan.client.name;
                 const parcela = firstUnpaid.number;
-                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const contrato = loan.id.substring(0, 6);
                 const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
 
@@ -455,18 +513,22 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 message = `Olá, ${loan.client.name}.\n\nEstamos entrando em contato referente ao seu contrato ${loan.id.substring(0, 6)}.`;
             }
         }
-        
+
         const encodedMessage = encodeURIComponent(message);
         const phone = loan.client.phone.replace(/\D/g, '');
         const whatsappUrl = `https://wa.me/55${phone}?text=${encodedMessage}`;
-        
+
         window.open(whatsappUrl, '_blank');
         setShowChargeOptionsModal(false);
     };
 
     const handlePixCharge = () => {
         if (!userSettings?.pix_key) {
-            alert("Você precisa configurar sua chave PIX no perfil antes de usar esta função.");
+            setAlertModal({
+                open: true,
+                title: 'Configuração Necessária',
+                message: 'Você precisa configurar sua chave PIX no perfil antes de usar esta função.'
+            });
             return;
         }
         setShowChargeOptionsModal(false);
@@ -475,7 +537,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             setShowPixTypeSelectionModal(true);
         } else {
             setShowPixModal(true);
-            
+
             // Pre-fill with overdue amount if any
             const overdueInstallments = installmentsList.filter(i => i.status === 'late');
             const totalOverdue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
@@ -504,8 +566,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         if (type === 'full') {
             amount = Number(loan.balance);
         } else if (type === 'renew') {
-             const principal = Number(loan.amount);
-             amount = principal * (Number(loan.interest_rate) / 100);
+            const principal = Number(loan.amount);
+            amount = principal * (Number(loan.interest_rate) / 100);
         }
 
         setPixAmount(amount.toFixed(2));
@@ -514,7 +576,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const generatePix = (amountStr: string) => {
         if (!userSettings?.pix_key) return;
-        
+
         const amount = parseFloat(amountStr.replace(',', '.'));
         if (isNaN(amount) || amount <= 0) {
             setPixPayload('');
@@ -533,7 +595,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const handleDeleteLoan = async () => {
         if (!deletePassword) {
-            alert("Por favor, informe sua senha.");
+            setAlertModal({
+                open: true,
+                title: 'Senha Necessária',
+                message: 'Por favor, informe sua senha.'
+            });
             return;
         }
 
@@ -548,7 +614,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             });
 
             if (signInError) {
-                alert("Senha incorreta.");
+                setAlertModal({
+                    open: true,
+                    title: 'Senha Incorreta',
+                    message: 'A senha informada está incorreta.'
+                });
                 setProcessing(false);
                 return;
             }
@@ -560,11 +630,19 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
             if (deleteError) throw deleteError;
 
-            alert("Empréstimo excluído com sucesso.");
-            onBack(); 
+            setAlertModal({
+                open: true,
+                title: 'Sucesso',
+                message: 'Empréstimo excluído com sucesso.'
+            });
+            onBack();
         } catch (error) {
             console.error(error);
-            alert("Erro ao excluir empréstimo.");
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao excluir empréstimo.'
+            });
         } finally {
             setProcessing(false);
             setShowDeleteModal(false);
@@ -580,12 +658,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 .select('*, client:clients(name, credit_balance, phone)')
                 .eq('id', loanId)
                 .single();
-            
+
             if (error) throw error;
 
             // Process recurring interest for this loan
             const updated = await processRecurringInterest([data]);
-            
+
             let finalData = data;
             if (updated) {
                 const { data: freshData } = await supabase
@@ -628,13 +706,31 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             if (fineFixed) {
                 const fixed = parseFloat(fineFixed.replace(',', '.'));
                 if (isNaN(fixed) || fixed <= 0) {
-                    alert("Valor da multa inválido");
+                    setAlertModal({
+                        open: true,
+                        title: 'Valor Inválido',
+                        message: 'Falta informar ou o valor da multa é inválido.'
+                    });
                     setProcessing(false);
                     return;
                 }
                 fineValue = fixed;
             } else {
-                alert("Informe o valor da multa");
+                setAlertModal({
+                    open: true,
+                    title: 'Informe a Multa',
+                    message: 'É necessário informar o valor da multa.'
+                });
+                setProcessing(false);
+                return;
+            }
+
+            if (fineInstallment.status !== 'late' && !fineInstallment.fine) {
+                setAlertModal({
+                    open: true,
+                    title: 'Operação Inválida',
+                    message: 'Só é possível aplicar multa em parcelas em atraso.'
+                });
                 setProcessing(false);
                 return;
             }
@@ -668,10 +764,14 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             setFineFixed('');
             setFineInstallment(null);
             await fetchLoanData();
-            
+
         } catch (error) {
             console.error("Error saving fine", error);
-            alert("Erro ao salvar multa.");
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao salvar multa.'
+            });
         } finally {
             setProcessing(false);
         }
@@ -679,7 +779,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const handleRemoveFine = () => {
         if (!loan || !fineInstallment) return;
-        
+
         setAlertModal({
             open: true,
             title: 'Remover Multa',
@@ -709,7 +809,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             await fetchLoanData();
         } catch (error) {
             console.error("Error removing fine:", error);
-            alert("Erro ao remover multa.");
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao remover multa.'
+            });
         } finally {
             setProcessing(false);
         }
@@ -717,37 +821,62 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const handleConfirmPayment = async () => {
         if (!loan || loan.balance <= 0) return;
-        
+
         setProcessing(true);
         try {
-            const installmentValue = loan.installment_value || (loan.amount / (loan.installments || 1));
+            // Find the first unpaid installment to check for fines/late interest
+            const firstUnpaid = installmentsList.find(i => i.status !== 'paid');
+            if (!firstUnpaid) throw new Error("Nenhuma parcela pendente encontrada.");
+
+            const installmentBaseValue = loan.installment_value || (loan.amount / (loan.installments || 1));
             const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-            
-            let newBalance = Number(loan.balance) - Number(installmentValue);
-            // Avoid negative balance due to floating point errors
+
+            // Valor total pago nesta transação (Parcela + Juros de Atraso + Multas)
+            const totalPaidNow = firstUnpaid.value;
+            const extraProfit = Math.max(0, totalPaidNow - installmentBaseValue);
+
+            let newBalance = Number(loan.balance) - Number(installmentBaseValue);
             if (newBalance < 0.01) newBalance = 0;
-            
-            // Calculate progress based on Total Debt, not Principal Amount
+
             const newProgress = Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)));
             const newStatus = newBalance === 0 ? 'paid' : 'active';
 
+            const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null
+                ? Number(loan.amount_paid)
+                : Math.max(0, totalDebt - Number(loan.balance)) + currentTotalInterestPaid;
+
             const { error } = await supabase
                 .from('loans')
-                .update({ 
+                .update({
                     balance: newBalance,
                     progress: newProgress,
-                    status: newStatus
+                    status: newStatus,
+                    amount_paid: currentAmountPaid + totalPaidNow,
+                    total_interest_paid: currentTotalInterestPaid + extraProfit
                 })
                 .eq('id', loan.id);
 
             if (error) throw error;
-            
+
+            // Delete fine if paid
+            if (firstUnpaid.fine) {
+                await supabase
+                    .from('installment_fines')
+                    .delete()
+                    .eq('id', firstUnpaid.fine.id);
+            }
+
             setShowSinglePaymentConfirmModal(false);
-            await fetchLoanData(); 
-            
+            await fetchLoanData();
+
         } catch (error) {
             console.error(error);
-            alert("Erro ao registrar pagamento.");
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao registrar pagamento.'
+            });
         } finally {
             setProcessing(false);
         }
@@ -762,7 +891,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
         if (type === 'full') {
             const totalToPay = Number(loan.balance) + totalFines;
-            message = `Tem certeza que deseja quitar todo o empréstimo?\n\nValor Total: R$ ${totalToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${totalFines > 0 ? `\n(Incluindo R$ ${totalFines.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de multas)` : ''}`;
+            message = `Tem certeza que deseja quitar todo o empréstimo?\n\nValor Total: R$ ${totalToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${totalFines > 0 ? `\n(Incluindo R$ ${totalFines.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de multas)` : ''}`;
         } else {
             // Calculate renewal details for the message
             let currentDue: Date;
@@ -786,17 +915,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             }
 
             const formattedDate = currentDue.toLocaleDateString('pt-BR');
-            
+
             const principal = Number(loan.amount);
             const interest = principal * (Number(loan.interest_rate) / 100);
             const newBalance = principal + interest;
             const formattedBalance = newBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            
+
             const interestToPay = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
 
-            message = `Deseja pagar os juros${totalFines > 0 ? ' e multas' : ''} e renovar o empréstimo?\n\nValor a Pagar: R$ ${interestToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\nNova Data de Vencimento: ${formattedDate}\nNovo Valor do Empréstimo: R$ ${formattedBalance}`;
+            message = `Deseja pagar os juros${totalFines > 0 ? ' e multas' : ''} e renovar o empréstimo?\n\nValor a Pagar: R$ ${interestToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nNova Data de Vencimento: ${formattedDate}\nNovo Valor do Empréstimo: R$ ${formattedBalance}`;
         }
-            
+
         setConfirmationModal({
             open: true,
             title,
@@ -812,10 +941,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         try {
             let updates: any = {};
             const totalFines = fines.reduce((acc, curr) => acc + curr.fine_value, 0);
-            
+
             const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null 
-                ? Number(loan.amount_paid) 
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null
+                ? Number(loan.amount_paid)
                 : Math.max(0, totalDebt - Number(loan.balance)) + (Number(loan.total_interest_paid) || 0);
 
             if (type === 'full') {
@@ -837,7 +966,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 } else {
                     currentDue = new Date();
                 }
-                
+
                 // Add period based on frequency
                 const installments = loan.installments || 1;
                 if (loan.frequency === 'Diária') {
@@ -851,12 +980,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 }
 
                 const newDueDateStr = currentDue.toISOString().split('T')[0];
-                
+
                 // Reset balance to Principal + Interest
                 const principal = Number(loan.amount);
                 const interest = principal * (Number(loan.interest_rate) / 100);
                 const newBalance = principal + interest;
-                
+
                 // Calculate interest paid in this renewal (Current Balance - Principal) + Fines
                 const interestPaid = Math.max(0, Number(loan.balance) - principal) + totalFines;
                 const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
@@ -870,33 +999,41 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     amount_paid: currentAmountPaid + interestPaid
                 };
             }
-            
+
             const { error } = await supabase
                 .from('loans')
                 .update(updates)
                 .eq('id', loan.id);
-                
+
             if (error) throw error;
 
             // Delete fines if paid
             if (totalFines > 0) {
-                 const { error: finesError } = await supabase
-                     .from('installment_fines')
-                     .delete()
-                     .eq('loan_id', loan.id);
-                 if (finesError) console.error("Error deleting fines", finesError);
+                const { error: finesError } = await supabase
+                    .from('installment_fines')
+                    .delete()
+                    .eq('loan_id', loan.id);
+                if (finesError) console.error("Error deleting fines", finesError);
             }
-            
+
             setShowMensalPaymentModal(false);
             await fetchLoanData();
-            
+
             if (type === 'renew') {
-                alert("Empréstimo renovado com sucesso! Novo vencimento em 30 dias.");
+                setAlertModal({
+                    open: true,
+                    title: 'Sucesso',
+                    message: 'Empréstimo renovado com sucesso! Novo vencimento em 30 dias.'
+                });
             }
-            
+
         } catch (error) {
             console.error(error);
-            alert("Erro ao processar pagamento.");
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao processar pagamento.'
+            });
         } finally {
             setProcessing(false);
         }
@@ -908,7 +1045,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         const paidInstallments = installmentsList.filter(i => i.status === 'paid');
 
         if (paidInstallments.length === 0) {
-            alert("Nenhum pagamento registrado para este empréstimo.");
+            setAlertModal({
+                open: true,
+                title: 'Sem Pagamentos',
+                message: 'Nenhum pagamento registrado para este empréstimo.'
+            });
             return;
         }
 
@@ -916,7 +1057,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
         if (type === 'last') {
             const lastPaid = paidInstallments[paidInstallments.length - 1];
-            
+
             // Prepare data for Image Receipt
             const data = {
                 amount: lastPaid.value,
@@ -939,8 +1080,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             setShowReceiptModal(false);
             setShowReceiptImageModal(true);
             return;
-        } 
-        
+        }
+
         // Prepare data for Extract Image
         const data = {
             emissionDate: now,
@@ -964,7 +1105,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const handleNewLoan = () => {
         if (!loan || !onNewLoan) return;
-        
+
         onNewLoan({
             clientId: loan.client_id,
             amount: loan.amount,
@@ -982,7 +1123,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     if (showAmortizationPage) {
         return (
-            <Amortization 
+            <Amortization
                 loan={loan}
                 installmentsList={installmentsList}
                 onBack={() => setShowAmortizationPage(false)}
@@ -997,14 +1138,14 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const percentage = loan.status === 'paid' ? 100 : Math.max(0, loan.progress || 0);
     const paidCount = installmentsList.filter(i => i.status === 'paid').length;
     const totalCount = installmentsList.length;
-    
+
     // Determine display status based on installments
     const isLate = installmentsList.some(i => i.status === 'late');
     const displayStatus = isLate && loan.status !== 'paid' ? 'late' : loan.status;
 
     // Calculate original amount fallback if it's 0 (due to amortization)
-    const originalAmount = Number(loan.amount) > 0 
-        ? Number(loan.amount) 
+    const originalAmount = Number(loan.amount) > 0
+        ? Number(loan.amount)
         : totalDebt / (1 + (Number(loan.interest_rate) / 100));
 
     // For paid loans, use the actual amount paid stored in DB if available, otherwise fallback to calculation
@@ -1014,7 +1155,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-            <header className={`bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-16 shadow-lg relative z-10 transition-colors duration-300 ${isSelectionMode ? 'bg-gray-900' : ''}`}>
+            <header className={`bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-8 pb-12 shadow-lg relative z-10 transition-colors duration-300 ${isSelectionMode ? 'bg-gray-900' : ''}`}>
                 <div className="flex items-center justify-between mb-4">
                     {isSelectionMode ? (
                         <>
@@ -1040,37 +1181,38 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     )}
                 </div>
             </header>
-            
-            <main className="flex-1 px-5 -mt-8 pb-32 relative z-20 overflow-y-auto no-scrollbar">
-                
+
+            <main className="flex-1 px-5 -mt-6 pb-32 relative z-20 overflow-y-auto no-scrollbar">
+
                 {/* Summary Card */}
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-md border border-gray-100 dark:border-gray-800 mb-6">
                     <div className="flex flex-col items-center text-center">
-                        <span className="text-[10px] font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-[0.2em] mb-1">Contrato #{loan.id.substring(0,6)}</span>
+                        <span className="text-[10px] font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-[0.2em] mb-1">Contrato #{loan.id.substring(0, 6)}</span>
                         <p className="text-xs text-text-sub-light dark:text-text-sub-dark mb-1">Saldo Devedor</p>
                         <h2 className="text-4xl font-bold text-primary dark:text-white mb-2 tracking-tight">
-                            R$ {installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            R$ {installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h2>
                         <div className="flex items-center gap-2 mt-2">
-                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold border uppercase ${
-                                displayStatus === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' :
-                                displayStatus === 'late' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' :
-                                displayStatus === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' :
-                                'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800'
-                            }`}>
+                            <span className="px-3 py-1 rounded text-[10px] font-bold border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase">
+                                {loan.frequency || 'N/A'}
+                            </span>
+                            <span className={`px-3 py-1 rounded text-[10px] font-bold border uppercase ${displayStatus === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' :
+                                    displayStatus === 'late' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' :
+                                        displayStatus === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' :
+                                            'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800'
+                                }`}>
                                 {displayStatus === 'active' ? 'EM DIA' : displayStatus === 'late' ? 'ATRASADO' : displayStatus === 'paid' ? 'QUITADO' : 'PENDENTE'}
                             </span>
-                            
+
                             <button
                                 onClick={handleCharge}
                                 disabled={loan.status === 'paid'}
-                                className={`px-3 py-1 rounded-full text-[10px] font-bold border uppercase transition-all flex items-center gap-1 ${
-                                    loan.status === 'paid' 
+                                className={`px-3 py-1 rounded text-[10px] font-bold border uppercase transition-all flex items-center gap-1 ${loan.status === 'paid'
                                         ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-50'
-                                        : isLate 
-                                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 cursor-pointer hover:opacity-80' 
+                                        : isLate
+                                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 cursor-pointer hover:opacity-80'
                                             : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-80'
-                                }`}
+                                    }`}
                             >
                                 <Banknote className="w-3 h-3" />
                                 Cobrar
@@ -1083,7 +1225,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 mb-6">
                     <h3 className="text-sm font-bold text-primary dark:text-white mb-6">Status do Pagamento</h3>
                     <div className="flex items-center justify-between gap-6">
-                        <div 
+                        <div
                             className="w-28 h-28 rounded-full flex items-center justify-center relative shadow-inner"
                             style={{
                                 background: `conic-gradient(${displayStatus === 'late' ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)`
@@ -1096,7 +1238,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         <div className="flex-1 space-y-3">
                             <div>
                                 <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-semibold">Total Amortizado</p>
-                                <p className="text-lg font-bold text-primary dark:text-white">R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                <p className="text-lg font-bold text-primary dark:text-white">R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                             </div>
                             <div>
                                 <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-semibold">Parcelas Pagas</p>
@@ -1110,11 +1252,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Valor Solicitado</p>
-                        <p className="font-bold text-gray-900 dark:text-white">R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="font-bold text-gray-900 dark:text-white">R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Total Pago</p>
-                        <p className="font-bold text-secondary">R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <p className="font-bold text-secondary">R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Taxa de Juros</p>
@@ -1122,7 +1264,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : loan.frequency === 'Quinzenal' ? 'a.q.' : 'a.m.'}
                         </p>
                     </div>
-                    <div 
+                    <div
                         className={`bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm ${loan.status === 'paid' ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors' : ''}`}
                         onClick={() => {
                             if (loan.status === 'paid') {
@@ -1137,14 +1279,14 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     <ChevronRight className="w-3 h-3 opacity-50" />
                                 </p>
                                 <p className="font-bold text-green-600 dark:text-green-400">
-                                    R$ {(Number(loan.total_interest_paid) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {(Number(loan.total_interest_paid) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                             </>
                         ) : (
                             <>
                                 <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Crédito Disponível</p>
                                 <p className="font-bold text-blue-600 dark:text-blue-400">
-                                    R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                             </>
                         )}
@@ -1156,7 +1298,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     <div className="flex items-center justify-between mb-6">
                         <h3 className="text-sm font-bold text-primary dark:text-white">Histórico de Parcelas</h3>
                         {!isSelectionMode && (
-                            <span 
+                            <span
                                 className="text-xs text-accent-blue font-medium cursor-pointer"
                                 onClick={() => setShowAllInstallments(!showAllInstallments)}
                             >
@@ -1166,10 +1308,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     </div>
                     <div className="relative space-y-6">
                         <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-100 dark:bg-gray-700"></div>
-                        
+
                         {(showAllInstallments || isSelectionMode ? installmentsList : installmentsList.slice(0, 5)).map((inst) => (
-                            <div 
-                                key={inst.number} 
+                            <div
+                                key={inst.number}
                                 className={`relative flex items-center gap-4 transition-all duration-200 ${inst.status !== 'paid' ? 'cursor-pointer active:scale-[0.99]' : 'cursor-pointer active:scale-[0.99]'}`}
                                 onClick={() => {
                                     if (isSelectionMode && inst.status !== 'paid') {
@@ -1180,95 +1322,62 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 }}
                             >
                                 {isSelectionMode ? (
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors ${
-                                        inst.status === 'paid' ? 'border-gray-200 bg-gray-100 opacity-50' :
-                                        selectedInstallments.includes(inst.number) ? 'border-primary bg-primary text-white' : 'border-gray-300'
-                                    }`}>
-                                        {inst.status === 'paid' ? <Check className="w-4 h-4 text-gray-400" /> : 
-                                         selectedInstallments.includes(inst.number) && <Check className="w-4 h-4" />}
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors ${inst.status === 'paid' ? 'border-gray-200 bg-gray-100 opacity-50' :
+                                            selectedInstallments.includes(inst.number) ? 'border-primary bg-primary text-white' : 'border-gray-300'
+                                        }`}>
+                                        {inst.status === 'paid' ? <Check className="w-4 h-4 text-gray-400" /> :
+                                            selectedInstallments.includes(inst.number) && <Check className="w-4 h-4" />}
                                     </div>
                                 ) : (
-                                    <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white dark:ring-card-dark ${
-                                        inst.status === 'paid' ? 'bg-secondary' :
-                                        inst.status === 'late' ? 'bg-danger' :
-                                        inst.status === 'pending' ? 'bg-accent-blue' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
-                                    }`}>
+                                    <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white dark:ring-card-dark ${inst.status === 'paid' ? 'bg-secondary' :
+                                            inst.status === 'late' ? 'bg-danger' :
+                                                inst.status === 'pending' ? 'bg-accent-blue' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
+                                        }`}>
                                         {inst.status === 'paid' ? <Check className="w-4 h-4" /> :
-                                         inst.status === 'future' ? <Circle className="w-4 h-4" /> :
-                                         <Clock className="w-4 h-4" />}
+                                            inst.status === 'future' ? <Circle className="w-4 h-4" /> :
+                                                <Clock className="w-4 h-4" />}
                                     </div>
                                 )}
-                                
+
                                 <div className={`flex-1 flex justify-between items-center ${inst.status === 'future' && !isSelectionMode ? 'opacity-60' : ''}`}>
                                     <div>
                                         <p className="text-sm font-bold text-primary dark:text-white">Parcela #{String(inst.number).padStart(2, '0')}</p>
                                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark">
-                                            {inst.status === 'paid' ? `Paga` : 
-                                             inst.status === 'late' ? `Vencido desde ${(inst.originalDate || inst.date).toLocaleDateString()}` :
-                                             inst.status === 'pending' ? `Vence em ${inst.date.toLocaleDateString()}` :
-                                             `Prevista para ${inst.date.toLocaleDateString()}`}
+                                            {inst.status === 'paid' ? `Paga` :
+                                                inst.status === 'late' ? `Vencido desde ${(inst.originalDate || inst.date).toLocaleDateString()}` :
+                                                    inst.status === 'pending' ? `Vence em ${inst.date.toLocaleDateString()}` :
+                                                        `Prevista para ${inst.date.toLocaleDateString()}`}
                                         </p>
                                     </div>
                                     <div className="text-right">
                                         <div className="flex flex-col items-end gap-0.5 mb-1">
                                             {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0 && inst.originalValue && Math.abs(inst.value - inst.originalValue) > 0.01) && (
                                                 <span className="text-[10px] text-gray-400 line-through">
-                                                    R$ {inst.originalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    R$ {inst.originalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </span>
                                             )}
                                             {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0) && (
                                                 <span className="text-[10px] text-red-500/80 font-medium">
-                                                    + Juros R$ {inst.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    + Juros R$ {inst.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </span>
                                             )}
                                             {inst.fine && (
                                                 <span className="text-[10px] text-red-500/80 font-medium">
-                                                    + Multa {inst.fine.fine_type === 'percent' ? `${inst.fine.fine_value}%` : `R$ ${inst.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                                    + Multa {inst.fine.fine_type === 'percent' ? `${inst.fine.fine_value}%` : `R$ ${inst.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                                                 </span>
                                             )}
                                         </div>
                                         <div className="flex items-center justify-end gap-2">
-                                            <div className={`flex items-baseline gap-1 ${
-                                                inst.status === 'paid' ? 'text-secondary' :
-                                                inst.status === 'late' ? 'text-danger' :
-                                                inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
-                                            }`}>
+                                            <div className={`flex items-baseline gap-1 ${inst.status === 'paid' ? 'text-secondary' :
+                                                    inst.status === 'late' ? 'text-danger' :
+                                                        inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
+                                                }`}>
                                                 <span className="text-xs font-medium opacity-70">R$</span>
                                                 <span className="text-lg font-bold">
-                                                    {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </span>
                                             </div>
-                                            {inst.status === 'late' && !isSelectionMode && (
-                                                <div className="relative">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setActiveActionMenu(activeActionMenu === inst.number ? null : inst.number);
-                                                        }}
-                                                        className="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-                                                    >
-                                                        <Plus className="w-4 h-4" />
-                                                    </button>
-                                                    
-                                                    {activeActionMenu === inst.number && (
-                                                        <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-gray-800 shadow-xl rounded-xl border border-gray-100 dark:border-gray-700 p-1 min-w-[140px] animate-in fade-in zoom-in duration-200">
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setFineInstallment(inst);
-                                                                    setFineFixed(inst.fine ? String(inst.fine.fine_value) : '');
-                                                                    setShowFineModal(true);
-                                                                    setActiveActionMenu(null);
-                                                                }}
-                                                                className="w-full text-left px-3 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors flex items-center gap-2"
-                                                            >
-                                                                <AlertTriangle className="w-3 h-3" />
-                                                                {inst.fine ? 'Gerenciar Multa' : 'Aplicar Multa'}
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
+                                            {/* Fine button removed from here */}
                                         </div>
                                     </div>
                                 </div>
@@ -1280,14 +1389,14 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 <div className="space-y-3 mb-8">
                     {isSelectionMode ? (
                         <>
-                            <button 
+                            <button
                                 onClick={handleBatchPayment}
                                 disabled={processing || selectedInstallments.length === 0}
                                 className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
                             >
                                 {processing ? 'Processando...' : `Marcar como pagas (${selectedInstallments.length})`}
                             </button>
-                            <button 
+                            <button
                                 onClick={toggleSelectionMode}
                                 className="w-full bg-transparent border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-sm"
                             >
@@ -1297,7 +1406,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     ) : (
                         <>
                             {loan.status !== 'paid' && (
-                                <button 
+                                <button
                                     onClick={() => {
                                         if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
                                             setShowMensalPaymentModal(true);
@@ -1311,10 +1420,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     Registrar Pagamento
                                 </button>
                             )}
-                            
+
                             {/* Batch Payment Button - Always visible if not paid AND not Mensal/Quinzenal */}
                             {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && (
-                                <button 
+                                <button
                                     onClick={toggleSelectionMode}
                                     className="w-full bg-white dark:bg-gray-800 text-primary dark:text-white border border-gray-200 dark:border-gray-700 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-sm"
                                 >
@@ -1322,7 +1431,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </button>
                             )}
 
-                            <button 
+                            <button
                                 onClick={() => setShowReceiptModal(true)}
                                 className="w-full bg-transparent border-2 border-primary dark:border-white text-primary dark:text-white py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2"
                             >
@@ -1331,7 +1440,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             </button>
 
                             {loan.status === 'paid' && (
-                                <button 
+                                <button
                                     onClick={handleNewLoan}
                                     className="w-full bg-secondary/10 border border-secondary text-secondary py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
                                 >
@@ -1340,7 +1449,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </button>
                             )}
 
-                            <button 
+                            <button
                                 onClick={() => setShowDeleteModal(true)}
                                 className="w-full bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
                             >
@@ -1367,7 +1476,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                         <div className="space-y-3">
                             {/* 1. Pagar 1 Parcela (Blue Theme) */}
-                            <button 
+                            <button
                                 onClick={() => {
                                     setShowPaymentModal(false);
                                     setShowSinglePaymentConfirmModal(true);
@@ -1384,12 +1493,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     </div>
                                 </div>
                                 <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
-                                    R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </button>
 
                             {/* 2. Informar AV (White Theme) */}
-                            <button 
+                            <button
                                 onClick={() => {
                                     setShowPaymentModal(false);
                                     setShowAVModal(true);
@@ -1407,8 +1516,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                                 <ChevronRight className="w-5 h-5 text-gray-400 group-hover:translate-x-1 transition-transform ml-2" />
                             </button>
-                            
-                            <button 
+
+                            <button
                                 onClick={() => setShowPaymentModal(false)}
                                 className="w-full py-4 text-xs font-bold text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors uppercase tracking-wider mt-2"
                             >
@@ -1433,7 +1542,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                         <div className="mb-6 bg-green-50 dark:bg-green-900/20 p-4 rounded-2xl border border-green-100 dark:border-green-800 text-center">
                             <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase mb-1">Valor da Parcela</p>
-                            <p className="text-3xl font-bold text-green-700 dark:text-green-300">R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                            <p className="text-3xl font-bold text-green-700 dark:text-green-300">R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                         </div>
 
                         <div className="space-y-4">
@@ -1441,7 +1550,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 Deseja confirmar o pagamento de 1 parcela no valor acima?
                             </p>
 
-                            <button 
+                            <button
                                 onClick={handleConfirmPayment}
                                 disabled={processing}
                                 className="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-bold shadow-lg shadow-green-600/20 transition disabled:opacity-70"
@@ -1467,7 +1576,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                         <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-2xl border border-blue-100 dark:border-blue-800">
                             <p className="text-xs text-blue-600 dark:text-blue-400 font-bold uppercase mb-1">Saldo de Crédito Atual</p>
-                            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                         </div>
 
                         <div className="space-y-4">
@@ -1484,7 +1593,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 />
                             </div>
 
-                            <button 
+                            <button
                                 onClick={handleAVPayment}
                                 disabled={!avAmount || processing}
                                 className="w-full bg-primary text-white py-4 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition disabled:opacity-70"
@@ -1510,7 +1619,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                         <div className="space-y-3">
                             {/* 1. Pagar Tudo (Blue Theme) */}
-                            <button 
+                            <button
                                 onClick={() => handleMensalPayment('full')}
                                 disabled={processing}
                                 className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800 flex items-center justify-between hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all active:scale-[0.98] disabled:opacity-70 group text-left"
@@ -1525,12 +1634,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     </div>
                                 </div>
                                 <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
-                                    R$ {(Number(loan.balance) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {(Number(loan.balance) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </button>
-                            
+
                             {/* 2. Pagar Juros (White Theme) */}
-                            <button 
+                            <button
                                 onClick={() => handleMensalPayment('renew')}
                                 disabled={processing}
                                 className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all active:scale-[0.98] disabled:opacity-70 group text-left"
@@ -1545,12 +1654,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     </div>
                                 </div>
                                 <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
-                                    R$ {(Math.max(0, Number(loan.balance) - Number(loan.amount)) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {(Math.max(0, Number(loan.balance) - Number(loan.amount)) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </button>
 
                             {/* 3. Abater Capital (White Theme) */}
-                            <button 
+                            <button
                                 onClick={() => {
                                     setShowMensalPaymentModal(false);
                                     setShowAmortizationPage(true);
@@ -1569,8 +1678,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                                 <ChevronRight className="w-5 h-5 text-gray-400 group-hover:translate-x-1 transition-transform ml-2" />
                             </button>
-                            
-                            <button 
+
+                            <button
                                 onClick={() => setShowMensalPaymentModal(false)}
                                 className="w-full py-4 text-xs font-bold text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors uppercase tracking-wider mt-2"
                             >
@@ -1594,7 +1703,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         </div>
 
                         <div className="space-y-3">
-                            <button 
+                            <button
                                 onClick={() => handleGenerateReceipt('last')}
                                 className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
                             >
@@ -1607,7 +1716,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                             </button>
 
-                            <button 
+                            <button
                                 onClick={() => handleGenerateReceipt('full')}
                                 className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
                             >
@@ -1640,13 +1749,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
-                            <button 
+                            <button
                                 onClick={() => setConfirmationModal(prev => ({ ...prev, open: false }))}
                                 className="py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                             >
                                 Cancelar
                             </button>
-                            <button 
+                            <button
                                 onClick={confirmationModal.action}
                                 className="py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 flex items-center justify-center gap-2 transition-colors"
                             >
@@ -1670,7 +1779,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
                                 Esta ação é irreversível. Para confirmar, digite sua senha de acesso.
                             </p>
-                            
+
                             <input
                                 type="password"
                                 value={deletePassword}
@@ -1681,7 +1790,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
-                            <button 
+                            <button
                                 onClick={() => {
                                     setShowDeleteModal(false);
                                     setDeletePassword('');
@@ -1690,7 +1799,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             >
                                 Cancelar
                             </button>
-                            <button 
+                            <button
                                 onClick={handleDeleteLoan}
                                 disabled={!deletePassword || processing}
                                 className="py-3 px-4 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-70"
@@ -1718,7 +1827,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         </div>
 
                         <div className="space-y-3">
-                            <button 
+                            <button
                                 onClick={handleWhatsAppCharge}
                                 className="w-full p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800 flex items-center gap-4 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors text-left group"
                             >
@@ -1731,7 +1840,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                             </button>
 
-                            <button 
+                            <button
                                 onClick={handlePixCharge}
                                 className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center gap-4 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-left group"
                             >
@@ -1744,7 +1853,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                             </button>
 
-                            <button 
+                            <button
                                 onClick={() => setShowChargeOptionsModal(false)}
                                 className="w-full py-3 px-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors mt-2"
                             >
@@ -1766,13 +1875,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 <X className="w-5 h-5 text-gray-500" />
                             </button>
                         </div>
-                        
+
                         <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
                             Selecione o tipo de cobrança para este empréstimo mensal.
                         </p>
 
                         <div className="space-y-3">
-                            <button 
+                            <button
                                 onClick={() => handleSelectPixType('full')}
                                 className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 flex items-center gap-4 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-left group"
                             >
@@ -1781,11 +1890,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                                 <div>
                                     <h4 className="font-bold text-gray-900 dark:text-white">Cobrar Quitação</h4>
-                                    <p className="text-xs text-gray-500">Valor Total: R$ {Number(loan?.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                    <p className="text-xs text-gray-500">Valor Total: R$ {Number(loan?.balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                 </div>
                             </button>
 
-                            <button 
+                            <button
                                 onClick={() => handleSelectPixType('renew')}
                                 className="w-full p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800 flex items-center gap-4 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors text-left group"
                             >
@@ -1794,11 +1903,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                                 <div>
                                     <h4 className="font-bold text-gray-900 dark:text-white">Cobrar Renovação</h4>
-                                    <p className="text-xs text-gray-500">Apenas Juros: R$ {(Number(loan?.amount) * (Number(loan?.interest_rate) / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                    <p className="text-xs text-gray-500">Apenas Juros: R$ {(Number(loan?.amount) * (Number(loan?.interest_rate) / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                 </div>
                             </button>
 
-                            <button 
+                            <button
                                 onClick={() => handleSelectPixType('manual')}
                                 className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left group"
                             >
@@ -1846,7 +1955,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                             {pixPayload && (
                                 <div className="flex flex-col items-center p-4 bg-white dark:bg-white rounded-xl border border-gray-200 shadow-sm">
-                                    <img 
+                                    <img
                                         src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixPayload)}`}
                                         alt="QR Code PIX"
                                         className="w-48 h-48 mb-4"
@@ -1854,10 +1963,14 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     <p className="text-xs text-center text-gray-500 mb-3 break-all px-2">
                                         {pixPayload.substring(0, 30)}...
                                     </p>
-                                    <button 
+                                    <button
                                         onClick={() => {
                                             navigator.clipboard.writeText(pixPayload);
-                                            alert("Código PIX Copia e Cola copiado!");
+                                            setAlertModal({
+                                                open: true,
+                                                title: 'Copiado',
+                                                message: 'Código PIX Copia e Cola copiado com sucesso!'
+                                            });
                                         }}
                                         className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-200 transition-colors"
                                     >
@@ -1895,14 +2008,14 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             </p>
                         </div>
                         <div className="flex gap-3">
-                            <button 
+                            <button
                                 onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}
                                 className={`flex-1 py-3 px-4 rounded-xl font-bold transition-colors ${alertModal.onConfirm ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700' : 'bg-primary text-white hover:bg-primary/90'}`}
                             >
                                 Entendi
                             </button>
                             {alertModal.onConfirm && (
-                                <button 
+                                <button
                                     onClick={alertModal.onConfirm}
                                     className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors"
                                 >
@@ -1930,7 +2043,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-2xl border border-green-100 dark:border-green-800 mb-4">
                                 <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase mb-1">Total Recebido</p>
                                 <p className="text-3xl font-bold text-green-700 dark:text-green-300">
-                                    R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                             </div>
 
@@ -1938,33 +2051,33 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
                                     <span className="text-sm text-gray-600 dark:text-gray-400">Principal (Valor Emprestado)</span>
                                     <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                        R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
-                                
+
                                 <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
                                     <span className="text-sm text-gray-600 dark:text-gray-400">Juros do Contrato</span>
                                     <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                        R$ {Math.max(0, ((loan.installment_value || 0) * (loan.installments || 1)) - originalAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {Math.max(0, ((loan.installment_value || 0) * (loan.installments || 1)) - originalAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
 
                                 <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800">
                                     <span className="text-sm text-gray-600 dark:text-gray-400">Juros Adicionais / Multas</span>
                                     <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                        R$ {Math.max(0, displayTotalPaid - ((loan.installment_value || 0) * (loan.installments || 1))).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {Math.max(0, displayTotalPaid - ((loan.installment_value || 0) * (loan.installments || 1))).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
 
                                 <div className="flex justify-between items-center pt-2">
                                     <span className="text-base font-bold text-gray-900 dark:text-white">Lucro Total (Juros)</span>
                                     <span className="text-xl font-bold text-green-600 dark:text-green-400">
-                                        R$ {Math.max(0, displayTotalPaid - originalAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {Math.max(0, displayTotalPaid - originalAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
                             </div>
 
-                            <button 
+                            <button
                                 onClick={() => setShowInterestBreakdownModal(false)}
                                 className="w-full mt-6 bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98]"
                             >
@@ -1991,7 +2104,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                         <div className="space-y-4">
                             <p className="text-sm text-gray-500">
-                                {fineInstallment.fine ? 'Editando' : 'Aplicando'} multa na parcela #{fineInstallment.number} de R$ {fineInstallment.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || fineInstallment.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                {fineInstallment.fine ? 'Editando' : 'Aplicando'} multa na parcela #{fineInstallment.number} de R$ {fineInstallment.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || fineInstallment.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
 
                             <div>
@@ -2022,7 +2135,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 >
                                     {processing ? 'Processando...' : (fineInstallment.fine ? 'Atualizar Multa' : 'Confirmar Aplicação')}
                                 </button>
-                                
+
                                 {fineInstallment.fine && (
                                     <button
                                         onClick={handleRemoveFine}
@@ -2056,16 +2169,16 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
                                     <span className="text-sm text-gray-500 dark:text-gray-400">Valor Original</span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                        R$ {selectedInstallmentForDetail.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {selectedInstallmentForDetail.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
                             )}
-                            
+
                             {Boolean(selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) && (
                                 <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
                                     <span className="text-sm text-danger font-medium">Juros Acumulados</span>
                                     <span className="text-sm font-bold text-danger">
-                                        + R$ {selectedInstallmentForDetail.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        + R$ {selectedInstallmentForDetail.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
                             )}
@@ -2074,9 +2187,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
                                     <span className="text-sm text-red-500 font-medium">Multa Manual ({selectedInstallmentForDetail.fine.fine_type === 'percent' ? `${selectedInstallmentForDetail.fine.fine_value}%` : 'Fixa'})</span>
                                     <span className="text-sm font-bold text-red-500">
-                                        + R$ {selectedInstallmentForDetail.fine.fine_type === 'percent' 
-                                            ? ((selectedInstallmentForDetail.originalValue || 0) * (selectedInstallmentForDetail.fine.fine_value / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
-                                            : selectedInstallmentForDetail.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+                                        + R$ {selectedInstallmentForDetail.fine.fine_type === 'percent'
+                                            ? ((selectedInstallmentForDetail.originalValue || 0) * (selectedInstallmentForDetail.fine.fine_value / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                            : selectedInstallmentForDetail.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                                         }
                                     </span>
                                 </div>
@@ -2087,7 +2200,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) || selectedInstallmentForDetail.fine) ? 'Total Atual' : 'Valor da Parcela'}
                                 </span>
                                 <span className="text-xl font-black text-primary dark:text-white">
-                                    R$ {selectedInstallmentForDetail.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {selectedInstallmentForDetail.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </div>
 
@@ -2102,9 +2215,24 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             </div>
                         </div>
 
-                        <button 
+                        {(selectedInstallmentForDetail.status === 'late' || selectedInstallmentForDetail.fine) && selectedInstallmentForDetail.status !== 'paid' && (
+                            <button
+                                onClick={() => {
+                                    setFineInstallment(selectedInstallmentForDetail);
+                                    setFineFixed(selectedInstallmentForDetail.fine ? String(selectedInstallmentForDetail.fine.fine_value) : '');
+                                    setShowFineModal(true);
+                                    setSelectedInstallmentForDetail(null);
+                                }}
+                                className="w-full mt-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 py-3 rounded-2xl font-bold border border-red-100 dark:border-red-800 transition active:scale-[0.98] flex items-center justify-center gap-2"
+                            >
+                                <AlertTriangle className="w-4 h-4" />
+                                {selectedInstallmentForDetail.fine ? 'Gerenciar Multa' : 'Aplicar Multa'}
+                            </button>
+                        )}
+
+                        <button
                             onClick={() => setSelectedInstallmentForDetail(null)}
-                            className="w-full mt-8 bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98]"
+                            className="w-full mt-3 bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98]"
                         >
                             Fechar
                         </button>
@@ -2114,7 +2242,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
             {/* Receipt Image Modal */}
             {showReceiptImageModal && receiptData && (
-                <ReceiptModal 
+                <ReceiptModal
                     isOpen={showReceiptImageModal}
                     onClose={() => setShowReceiptImageModal(false)}
                     data={receiptData}
@@ -2123,7 +2251,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
             {/* Extract Image Modal */}
             {showExtractImageModal && extractData && (
-                <ExtractModal 
+                <ExtractModal
                     isOpen={showExtractImageModal}
                     onClose={() => setShowExtractImageModal(false)}
                     data={extractData}

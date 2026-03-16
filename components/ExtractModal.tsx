@@ -135,7 +135,7 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-2xl p-4 border border-blue-100 dark:border-blue-800">
                                 <p className="text-xs text-blue-600 dark:text-blue-300 mb-1">Total Pago Acumulado</p>
                                 <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">
-                                    R$ {data.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {data.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                             </div>
 
@@ -143,7 +143,7 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                             <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700">
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Saldo Devedor Atual</p>
                                 <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                                    R$ {data.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {data.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                             </div>
 
@@ -152,7 +152,7 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                                 <div className="bg-green-50 dark:bg-green-900/20 rounded-2xl p-4 border border-green-100 dark:border-green-800">
                                     <p className="text-xs text-green-600 dark:text-green-300 mb-1">Crédito Disponível</p>
                                     <p className="text-2xl font-bold text-green-700 dark:text-green-400">
-                                        R$ {data.creditAvailable.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {data.creditAvailable.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </p>
                                 </div>
                             )}
@@ -173,7 +173,7 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                                         <div className="flex justify-between items-start mb-1">
                                             <p className="font-bold text-gray-900 dark:text-white">Parcela #{String(inst.number).padStart(2, '0')}</p>
                                             <p className="font-bold text-gray-900 dark:text-white">
-                                                R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                         <div className="flex justify-between items-center">

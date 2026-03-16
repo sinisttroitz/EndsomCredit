@@ -124,7 +124,7 @@ export function ReceiptModal({ isOpen, onClose, data }: ReceiptModalProps) {
                             </div>
                             <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">PAGAMENTO REALIZADO</p>
                             <h1 className="text-4xl font-bold text-gray-900 dark:text-white tracking-tight">
-                                R$ {data.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                R$ {data.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </h1>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
                                 Pago em {data.date}
@@ -166,7 +166,7 @@ export function ReceiptModal({ isOpen, onClose, data }: ReceiptModalProps) {
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm text-gray-500 dark:text-gray-400">Valor Original</span>
                                     <span className="text-sm font-medium text-gray-900 dark:text-white">
-                                        R$ {(data.originalValue || data.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {(data.originalValue || data.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
                                 
@@ -174,7 +174,7 @@ export function ReceiptModal({ isOpen, onClose, data }: ReceiptModalProps) {
                                     <div className="flex justify-between items-center">
                                         <span className="text-sm text-gray-500 dark:text-gray-400">Juros Acumulados</span>
                                         <span className="text-sm font-medium text-red-500">
-                                            + R$ {data.interest?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            + R$ {data.interest?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
                                     </div>
                                 )}
@@ -183,7 +183,7 @@ export function ReceiptModal({ isOpen, onClose, data }: ReceiptModalProps) {
                                     <div className="flex justify-between items-center">
                                         <span className="text-sm text-gray-500 dark:text-gray-400">Multa ({data.fineType === 'percent' ? '%' : 'Fixa'})</span>
                                         <span className="text-sm font-medium text-red-500">
-                                            + R$ {data.fine?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            + R$ {data.fine?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
                                     </div>
                                 )}
@@ -192,7 +192,7 @@ export function ReceiptModal({ isOpen, onClose, data }: ReceiptModalProps) {
                             <div className="pt-4 border-t border-dashed border-gray-200 dark:border-gray-700 flex justify-between items-center">
                                 <span className="font-bold text-gray-900 dark:text-white">Total Pago</span>
                                 <span className="font-bold text-blue-600 dark:text-blue-400 text-lg">
-                                    R$ {data.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {data.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </div>
                         </div>
@@ -203,7 +203,7 @@ export function ReceiptModal({ isOpen, onClose, data }: ReceiptModalProps) {
                                 <div className="flex-1 flex justify-between items-center">
                                     <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Crédito Disponível</span>
                                     <span className="font-bold text-blue-700 dark:text-blue-300">
-                                        R$ {data.creditBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {data.creditBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
                             </div>

@@ -213,24 +213,24 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-            <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-16 shadow-lg relative z-10">
-                <div className="flex items-center justify-between mb-8">
+            <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-8 pb-10 shadow-lg relative z-10">
+                <div className="flex items-center justify-between mb-4">
                     <button onClick={onBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 active:scale-95 transition-transform hover:bg-white/20">
                         <ArrowLeft className="w-5 h-5" />
                     </button>
                     <h1 className="text-lg font-semibold">Perfil do Cliente</h1>
                     <div className="w-10 h-10"></div>
                 </div>
-                <div className="flex items-center gap-5">
-                    <div className="w-20 h-20 rounded-3xl border-4 border-white/10 overflow-hidden bg-gray-200 flex-shrink-0 relative">
+                <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl border-2 border-white/10 overflow-hidden bg-gray-200 flex-shrink-0 relative">
                         {client.avatar_url ? (
                             <img alt="Perfil" className="w-full h-full object-cover" src={client.avatar_url} />
                         ) : (
-                            <div className="w-full h-full flex items-center justify-center text-primary text-xl font-bold bg-white">{client.name.substring(0,2).toUpperCase()}</div>
+                            <div className="w-full h-full flex items-center justify-center text-primary text-lg font-bold bg-white">{client.name.substring(0,2).toUpperCase()}</div>
                         )}
                     </div>
                     <div>
-                        <h2 className="text-2xl font-bold">{client.name}</h2>
+                        <h2 className="text-xl font-bold">{client.name}</h2>
                         <p className="text-white/60 text-sm font-medium">Cliente desde {new Date(client.created_at || Date.now()).toLocaleDateString()}</p>
                         <div className={`mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider border ${
                             isClientLate 
@@ -243,7 +243,7 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                 </div>
             </header>
 
-            <div className="px-6 -mt-8 relative z-20">
+            <div className="px-6 -mt-4 relative z-20">
                 <div className="bg-card-light dark:bg-card-dark rounded-2xl p-5 shadow-xl shadow-black/5 flex justify-between items-center border border-gray-100 dark:border-gray-800">
                     <div className="flex flex-col">
                         <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium mb-1">Total Devido</span>

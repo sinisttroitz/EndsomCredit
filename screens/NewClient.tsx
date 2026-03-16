@@ -236,7 +236,7 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-      <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-10 shadow-lg relative z-10">
+      <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-8 pb-6 shadow-lg relative z-10">
         <div className="flex items-center justify-between mb-2">
           <button onClick={onBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 hover:bg-white/20 transition-colors">
             <ArrowLeft className="w-5 h-5" />

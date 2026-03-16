@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Search, Plus, Minus, Calendar, Check } from 'lucide-react';
+import { ArrowLeft, Search, Plus, Minus, Calendar, Check, AlertTriangle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Client } from '../types';
 
@@ -55,6 +55,14 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   const [selectedClientName, setSelectedClientName] = useState('');
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
+
+  const [alertModal, setAlertModal] = useState<{
+      open: boolean;
+      title: string;
+      message: string;
+      onConfirm?: () => void;
+      confirmText?: string;
+  }>({ open: false, title: '', message: '' });
 
   // Load pre-selected client if any
   useEffect(() => {
@@ -116,7 +124,14 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   const monthlyPayment = installments > 0 ? totalAmount / installments : 0;
 
   const handleSave = async () => {
-    if (!clientId) return alert("Selecione um cliente");
+    if (!clientId) {
+        setAlertModal({
+            open: true,
+            title: 'Aviso',
+            message: 'Selecione um cliente para prosseguir com o empréstimo.'
+        });
+        return;
+    }
     
     setLoading(true);
     try {
@@ -144,7 +159,11 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
         onSuccess();
     } catch (e) {
         console.error(e);
-        alert("Erro ao criar empréstimo");
+        setAlertModal({
+            open: true,
+            title: 'Erro',
+            message: 'Erro ao criar empréstimo'
+        });
     } finally {
         setLoading(false);
     }
@@ -152,14 +171,14 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-      <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-8 shadow-lg relative z-10">
-        <div className="flex items-center mb-6">
+      <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-8 pb-5 shadow-lg relative z-10">
+        <div className="flex items-center mb-4">
           <button onClick={onBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 mr-4 hover:bg-white/20 transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-2xl font-bold tracking-tight">Novo Empréstimo</h1>
+          <h1 className="text-xl font-bold tracking-tight">Novo Empréstimo</h1>
         </div>
-        <p className="text-gray-300 text-sm pl-1">Preencha os dados abaixo para simular e criar um novo contrato.</p>
+        <p className="text-gray-300 text-[10px] pl-1 font-medium">Preencha os dados abaixo para simular um contrato.</p>
       </header>
 
       <main className="flex-1 px-5 pt-6 pb-8 overflow-y-auto space-y-6 no-scrollbar">
@@ -355,6 +374,40 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
             </button>
         </div>
       </main>
+
+      {/* Alert Modal */}
+      {alertModal.open && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}></div>
+              <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                  <div className="flex flex-col items-center text-center mb-6">
+                      <div className="w-16 h-16 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mb-4">
+                          <AlertTriangle className="w-8 h-8 text-yellow-600 dark:text-yellow-500" />
+                      </div>
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{alertModal.title}</h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {alertModal.message}
+                      </p>
+                  </div>
+                  <div className="flex gap-3">
+                      <button 
+                          onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}
+                          className={`flex-1 py-3 px-4 rounded-xl font-bold transition-colors ${alertModal.onConfirm ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700' : 'bg-primary text-white hover:bg-primary/90'}`}
+                      >
+                          Entendi
+                      </button>
+                      {alertModal.onConfirm && (
+                          <button 
+                              onClick={alertModal.onConfirm}
+                              className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors"
+                          >
+                              {alertModal.confirmText || 'Confirmar'}
+                          </button>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

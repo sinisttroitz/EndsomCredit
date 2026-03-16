@@ -15,6 +15,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
     const [loans, setLoans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [frequencyFilter, setFrequencyFilter] = useState<'all' | 'Diária' | 'Semanal' | 'Quinzenal' | 'Mensal'>('all');
 
     useEffect(() => {
         fetchLoans();
@@ -65,18 +66,25 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
             if (!isLoanLate(loan)) return false;
         }
         
+        // Search Filter
         if (searchTerm) {
              const clientName = loan.client?.name?.toLowerCase() || '';
-             return clientName.includes(searchTerm.toLowerCase());
+             if (!clientName.includes(searchTerm.toLowerCase())) return false;
         }
+
+        // Frequency Filter
+        if (frequencyFilter !== 'all' && loan.frequency !== frequencyFilter) {
+            return false;
+        }
+
         return true;
     });
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-      <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-8 shadow-lg relative z-10 md:rounded-none md:pt-6 md:pb-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6 md:mb-0">
-          <h1 className="text-3xl font-bold tracking-tight">Empréstimos</h1>
+      <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-8 pb-5 shadow-lg relative z-10 md:rounded-none md:pt-6 md:pb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4 md:mb-0">
+          <h1 className="text-xl font-bold tracking-tight">Empréstimos</h1>
           
           <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
             <div className="relative w-full md:w-64">
@@ -91,23 +99,39 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                     <Search className="text-gray-300 w-5 h-5" />
                 </div>
             </div>
+            <div className="relative w-full md:w-48">
+                <select 
+                    value={frequencyFilter}
+                    onChange={(e) => setFrequencyFilter(e.target.value as any)}
+                    className="w-full py-3.5 pl-4 pr-10 rounded-xl text-white appearance-none focus:outline-none focus:ring-2 focus:ring-white/30 transition shadow-sm bg-white/10 backdrop-blur-sm border border-white/20 md:py-2 text-sm font-medium cursor-pointer"
+                >
+                    <option value="all" className="bg-gray-900 text-white">Todas Frequências</option>
+                    <option value="Diária" className="bg-gray-900 text-white">Diária</option>
+                    <option value="Semanal" className="bg-gray-900 text-white">Semanal</option>
+                    <option value="Quinzenal" className="bg-gray-900 text-white">Quinzenal</option>
+                    <option value="Mensal" className="bg-gray-900 text-white">Mensal</option>
+                </select>
+                <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
+                    <SlidersHorizontal className="text-gray-300 w-4 h-4" />
+                </div>
+            </div>
 
-            <div className="flex space-x-2 overflow-x-auto no-scrollbar pb-2 md:pb-0">
+            <div className="bg-white/10 dark:bg-white/5 p-1 rounded-2xl flex items-center shadow-inner backdrop-blur-sm border border-white/10 w-full md:w-[360px]">
                 <button 
                     onClick={() => setFilter('active')}
-                    className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'active' ? 'bg-white text-primary font-bold' : 'bg-white/10 text-white border border-white/20 hover:bg-white/20'}`}
+                    className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all duration-200 uppercase tracking-widest ${filter === 'active' ? 'bg-white text-gray-900 shadow-lg' : 'text-white/70 hover:text-white'}`}
                 >
                     Ativos
                 </button>
                 <button 
                     onClick={() => setFilter('late')}
-                    className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'late' ? 'bg-white text-primary font-bold' : 'bg-white/10 text-white border border-white/20 hover:bg-white/20'}`}
+                    className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all duration-200 uppercase tracking-widest ${filter === 'late' ? 'bg-white text-gray-900 shadow-lg' : 'text-white/70 hover:text-white'}`}
                 >
                     Atrasados
                 </button>
                 <button 
                     onClick={() => setFilter('paid')}
-                    className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'paid' ? 'bg-white text-primary font-bold' : 'bg-white/10 text-white border border-white/20 hover:bg-white/20'}`}
+                    className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all duration-200 uppercase tracking-widest ${filter === 'paid' ? 'bg-white text-gray-900 shadow-lg' : 'text-white/70 hover:text-white'}`}
                 >
                     Quitados
                 </button>
@@ -139,6 +163,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                         <th className="p-4">Cliente</th>
                         <th className="p-4">Valor Emprestado</th>
                         <th className="p-4">Saldo Devedor</th>
+                        <th className="p-4">Frequência</th>
                         <th className="p-4 w-1/5">Progresso</th>
                         <th className="p-4">Próx. Vencimento</th>
                         <th className="p-4">Status</th>
@@ -198,10 +223,13 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                                     </div>
                                 </td>
                                 <td className="p-4 text-sm text-gray-600 dark:text-gray-300">
-                                    R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
                                 <td className="p-4 text-sm font-bold text-gray-900 dark:text-white">
-                                    R$ {outstandingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {outstandingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-4 text-xs font-medium text-gray-500">
+                                    {loan.frequency || 'N/A'}
                                 </td>
                                 <td className="p-4">
                                     <div className="flex items-center gap-2">
@@ -307,13 +335,8 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                   </div>
                 </div>
                 
-                <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                    displayStatus === 'active' ? 'bg-green-50 text-green-700 border-green-200' :
-                    displayStatus === 'late' ? 'bg-red-50 text-red-700 border-red-200' :
-                    displayStatus === 'paid' ? 'bg-gray-50 text-gray-700 border-gray-200' :
-                    'bg-orange-50 text-orange-700 border-orange-200'
-                }`}>
-                    {displayStatus === 'active' ? 'Em dia' : displayStatus === 'late' ? 'Em atraso' : displayStatus === 'paid' ? 'Pago' : 'Pendente'}
+                <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-gray-100 text-gray-600 border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700">
+                    {loan.frequency || 'N/A'}
                 </span>
               </div>
 
@@ -342,22 +365,33 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
               </div>
 
               <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
-                {displayStatus === 'pending' ? (
-                     <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                        <Hourglass className="w-3.5 h-3.5" />
-                        <span>Aguardando Aprovação</span>
-                     </div>
-                ) : displayStatus === 'late' ? (
-                    <div className="flex items-center gap-1.5 text-xs text-red-500 font-medium">
-                        <AlertTriangle className="w-3.5 h-3.5" />
-                        <span>Venceu: {dateDisplayStr}</span>
-                    </div>
-                ) : (
-                    <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span>Vencimento: {dateDisplayStr}</span>
-                    </div>
-                )}
+                <div className="flex items-center gap-3">
+                    {displayStatus === 'pending' ? (
+                        <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                            <Hourglass className="w-3.5 h-3.5" />
+                            <span>Aguardando Aprovação</span>
+                        </div>
+                    ) : displayStatus === 'late' ? (
+                        <div className="flex items-center gap-1.5 text-xs text-red-500 font-medium">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <span>Venceu: {dateDisplayStr}</span>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                            <Calendar className="w-3.5 h-3.5" />
+                            <span>Vencimento: {dateDisplayStr}</span>
+                        </div>
+                    )}
+
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide border ${
+                        displayStatus === 'active' ? 'bg-green-50 text-green-700 border-green-200' :
+                        displayStatus === 'late' ? 'bg-red-50 text-red-700 border-red-200' :
+                        displayStatus === 'paid' ? 'bg-gray-50 text-gray-700 border-gray-200' :
+                        'bg-orange-50 text-orange-700 border-orange-200'
+                    }`}>
+                        {displayStatus === 'active' ? 'Em dia' : displayStatus === 'late' ? 'Em atraso' : displayStatus === 'paid' ? 'Pago' : 'Pendente'}
+                    </span>
+                </div>
                 
                 <ChevronRight className="w-4 h-4 text-gray-300" />
               </div>

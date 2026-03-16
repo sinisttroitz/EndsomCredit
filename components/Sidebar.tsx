@@ -31,7 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const userInitial = displayName.charAt(0).toUpperCase();
 
   return (
-    <aside className="hidden md:flex flex-col w-64 bg-[#1E1E24] text-white h-screen sticky top-0">
+    <aside className="hidden md:flex flex-col w-64 bg-primary text-white h-screen sticky top-0">
       {/* Logo Area */}
       <div className="p-6 flex items-center justify-center border-b border-gray-800">
         {logo ? (

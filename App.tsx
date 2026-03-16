@@ -48,7 +48,7 @@ const App: React.FC = () => {
   // Save state to localStorage whenever it changes
   useEffect(() => {
     if (currentView !== 'login') {
-        localStorage.setItem('currentView', JSON.stringify(currentView));
+      localStorage.setItem('currentView', JSON.stringify(currentView));
     }
     localStorage.setItem('previousView', JSON.stringify(previousView));
     localStorage.setItem('selectedClientId', JSON.stringify(selectedClientId));
@@ -58,28 +58,28 @@ const App: React.FC = () => {
 
   const fetchSystemLogo = async () => {
     try {
-        // We assume a bucket named 'system' and a file named 'logo.png'
-        const { data } = supabase.storage
-            .from('system')
-            .getPublicUrl('logo.png');
-        
-        if (data && data.publicUrl) {
-            // Add cache busting timestamp to ensure fresh logo
-            const freshUrl = `${data.publicUrl}?t=${new Date().getTime()}`;
-            setSystemLogo(freshUrl);
-        }
+      // We assume a bucket named 'system' and a file named 'logo.png'
+      const { data } = supabase.storage
+        .from('system')
+        .getPublicUrl('logo.png');
 
-        // Fetch sidebar logo (logo2.png)
-        const { data: sidebarData } = supabase.storage
-            .from('system')
-            .getPublicUrl('logo2.png');
-        
-        if (sidebarData && sidebarData.publicUrl) {
-            const freshSidebarUrl = `${sidebarData.publicUrl}?t=${new Date().getTime()}`;
-            setSidebarLogo(freshSidebarUrl);
-        }
+      if (data && data.publicUrl) {
+        // Add cache busting timestamp to ensure fresh logo
+        const freshUrl = `${data.publicUrl}?t=${new Date().getTime()}`;
+        setSystemLogo(freshUrl);
+      }
+
+      // Fetch sidebar logo (logo2.png)
+      const { data: sidebarData } = supabase.storage
+        .from('system')
+        .getPublicUrl('logo2.png');
+
+      if (sidebarData && sidebarData.publicUrl) {
+        const freshSidebarUrl = `${sidebarData.publicUrl}?t=${new Date().getTime()}`;
+        setSidebarLogo(freshSidebarUrl);
+      }
     } catch (err) {
-        console.error("Error fetching system logo from storage:", err);
+      console.error("Error fetching system logo from storage:", err);
     }
   };
 
@@ -91,7 +91,7 @@ const App: React.FC = () => {
   // Refresh logo whenever we go back to login screen
   useEffect(() => {
     if (currentView === 'login') {
-        fetchSystemLogo();
+      fetchSystemLogo();
     }
   }, [currentView]);
 
@@ -100,7 +100,7 @@ const App: React.FC = () => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (!session) {
-          setCurrentView('login');
+        setCurrentView('login');
       }
       // If session exists, we keep the initialized currentView (restored from localStorage)
       // unless it is 'login', which is handled by the redirect effect below.
@@ -111,9 +111,9 @@ const App: React.FC = () => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
-      
+
       if (event === 'PASSWORD_RECOVERY') {
-          setCurrentView('reset-password');
+        setCurrentView('reset-password');
       } else if (!session) {
         setCurrentView('login');
         // Clear storage on logout
@@ -130,32 +130,32 @@ const App: React.FC = () => {
 
   const fetchUserProfile = async (userId: string) => {
     try {
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', userId)
-            .single();
-        
-        if (error) throw error;
-        setUserProfile(data);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-        // Check subscription
-        const now = new Date();
-        const accessUntil = new Date(data.access_until);
-        
-        if (!data.is_admin && accessUntil < now) {
-            setCurrentView('subscription-expired');
-        }
+      if (error) throw error;
+      setUserProfile(data);
+
+      // Check subscription
+      const now = new Date();
+      const accessUntil = new Date(data.access_until);
+
+      if (!data.is_admin && accessUntil < now) {
+        setCurrentView('subscription-expired');
+      }
     } catch (err) {
-        console.error("Error fetching profile:", err);
+      console.error("Error fetching profile:", err);
     }
   };
 
   useEffect(() => {
     if (session?.user?.id) {
-        fetchUserProfile(session.user.id);
+      fetchUserProfile(session.user.id);
     } else {
-        setUserProfile(null);
+      setUserProfile(null);
     }
   }, [session]);
 
@@ -172,135 +172,135 @@ const App: React.FC = () => {
       case 'login':
         return <Login onLogin={() => setCurrentView('dashboard')} logo={systemLogo} />;
       case 'dashboard':
-        return <Dashboard 
-            userProfile={userProfile}
-            onClientSelect={(id) => {
-                setSelectedClientId(id);
-                setPreviousView('dashboard');
-                setCurrentView('client-details');
-            }}
-            onLoanSelect={(id) => {
-                setSelectedLoanId(id);
-                setPreviousView('dashboard');
-                setCurrentView('loan-details');
-            }}
-            onViewLateLoans={() => {
-                setInitialLoansFilter('late');
-                setCurrentView('loans');
-            }}
-            onViewClients={() => {
-                setCurrentView('clients');
-            }}
-            onViewInterestDetails={() => {
-                setCurrentView('interest-details');
-            }}
-            onViewCollectionCalendar={() => {
-                setCurrentView('collection-calendar');
-            }}
-            onViewReports={() => {
-                setCurrentView('reports');
-            }}
+        return <Dashboard
+          userProfile={userProfile}
+          onClientSelect={(id) => {
+            setSelectedClientId(id);
+            setPreviousView('dashboard');
+            setCurrentView('client-details');
+          }}
+          onLoanSelect={(id) => {
+            setSelectedLoanId(id);
+            setPreviousView('dashboard');
+            setCurrentView('loan-details');
+          }}
+          onViewLateLoans={() => {
+            setInitialLoansFilter('late');
+            setCurrentView('loans');
+          }}
+          onViewClients={() => {
+            setCurrentView('clients');
+          }}
+          onViewInterestDetails={() => {
+            setCurrentView('interest-details');
+          }}
+          onViewCollectionCalendar={() => {
+            setCurrentView('collection-calendar');
+          }}
+          onViewReports={() => {
+            setCurrentView('reports');
+          }}
         />;
       case 'interest-details':
-        return <InterestDetails 
-            onBack={() => setCurrentView('dashboard')} 
-            onLoanSelect={(id) => {
-                setSelectedLoanId(id);
-                setPreviousView('interest-details');
-                setCurrentView('loan-details');
-            }}
+        return <InterestDetails
+          onBack={() => setCurrentView('dashboard')}
+          onLoanSelect={(id) => {
+            setSelectedLoanId(id);
+            setPreviousView('interest-details');
+            setCurrentView('loan-details');
+          }}
         />;
       case 'collection-calendar':
-        return <CollectionCalendar 
-            onBack={() => setCurrentView('dashboard')} 
-            onLoanSelect={(id) => {
-                setSelectedLoanId(id);
-                setPreviousView('collection-calendar');
-                setCurrentView('loan-details');
-            }}
+        return <CollectionCalendar
+          onBack={() => setCurrentView('dashboard')}
+          onLoanSelect={(id) => {
+            setSelectedLoanId(id);
+            setPreviousView('collection-calendar');
+            setCurrentView('loan-details');
+          }}
         />;
       case 'reports':
         return <Reports onBack={() => setCurrentView('dashboard')} />;
       case 'clients':
         return <Clients onClientSelect={(id) => {
-            setSelectedClientId(id);
-            setCurrentView('client-details');
+          setSelectedClientId(id);
+          setCurrentView('client-details');
         }} />;
       case 'loans':
-        return <Loans 
-            onLoanSelect={(id) => {
-                setSelectedLoanId(id);
-                setPreviousView(null);
-                setCurrentView('loan-details');
-            }} 
-            initialFilter={initialLoansFilter}
-            onFilterChange={setInitialLoansFilter}
+        return <Loans
+          onLoanSelect={(id) => {
+            setSelectedLoanId(id);
+            setPreviousView(null);
+            setCurrentView('loan-details');
+          }}
+          initialFilter={initialLoansFilter}
+          onFilterChange={setInitialLoansFilter}
         />;
       case 'profile':
         return <Profile onLogout={handleLogout} userEmail={session?.user?.email} onNavigate={setCurrentView} />;
       case 'new-loan':
-        return <NewLoan 
-            onBack={() => setCurrentView('dashboard')} 
-            onSuccess={() => {
-                setNewLoanInitialData(null);
-                setCurrentView('loans');
-            }}
-            preSelectedClientId={selectedClientId} 
-            initialData={newLoanInitialData}
+        return <NewLoan
+          onBack={() => setCurrentView('dashboard')}
+          onSuccess={() => {
+            setNewLoanInitialData(null);
+            setCurrentView('loans');
+          }}
+          preSelectedClientId={selectedClientId}
+          initialData={newLoanInitialData}
         />;
       case 'new-client':
-        return <NewClient 
-            onBack={() => setCurrentView('clients')} 
-            onSuccess={() => setCurrentView('clients')}
+        return <NewClient
+          onBack={() => setCurrentView('clients')}
+          onSuccess={() => setCurrentView('clients')}
         />;
       case 'client-details':
-        return <ClientDetails 
-            clientId={selectedClientId} 
-            onBack={() => {
-                if (previousView === 'dashboard') {
-                    setCurrentView('dashboard');
-                    setPreviousView(null);
-                } else {
-                    setCurrentView('clients');
-                }
-            }} 
-            onNewLoan={() => setCurrentView('new-loan')}
-            onEdit={() => setCurrentView('edit-client')}
-            onLoanSelect={(id) => {
-                setSelectedLoanId(id);
-                setPreviousView('client-details');
-                setCurrentView('loan-details');
-            }}
+        return <ClientDetails
+          clientId={selectedClientId}
+          onBack={() => {
+            if (previousView === 'dashboard') {
+              setCurrentView('dashboard');
+              setPreviousView(null);
+            } else {
+              setCurrentView('clients');
+            }
+          }}
+          onNewLoan={() => setCurrentView('new-loan')}
+          onEdit={() => setCurrentView('edit-client')}
+          onLoanSelect={(id) => {
+            setSelectedLoanId(id);
+            setPreviousView('client-details');
+            setCurrentView('loan-details');
+          }}
         />;
       case 'edit-client':
-        return <EditClient 
-            clientId={selectedClientId} 
-            onBack={() => setCurrentView('client-details')}
-            onSuccess={() => setCurrentView('client-details')}
-            onDelete={() => {
-                setSelectedClientId(null);
-                setCurrentView('clients');
-            }}
+        return <EditClient
+          clientId={selectedClientId}
+          onBack={() => setCurrentView('client-details')}
+          onSuccess={() => setCurrentView('client-details')}
+          onDelete={() => {
+            setSelectedClientId(null);
+            setCurrentView('clients');
+          }}
         />;
       case 'loan-details':
-        return <LoanDetails 
-            loanId={selectedLoanId}
-            onBack={() => {
-                if (previousView === 'client-details') {
-                    setCurrentView('client-details');
-                    setPreviousView(null);
-                } else if (previousView === 'dashboard') {
-                    setCurrentView('dashboard');
-                    setPreviousView(null);
-                } else {
-                    setCurrentView('loans');
-                }
-            }}
-            onNewLoan={(data) => {
-                setNewLoanInitialData(data);
-                setSelectedClientId(data.clientId);
-                setCurrentView('new-loan');
-            }}
+        return <LoanDetails
+          loanId={selectedLoanId}
+          onBack={() => {
+            if (previousView === 'client-details') {
+              setCurrentView('client-details');
+              setPreviousView(null);
+            } else if (previousView === 'dashboard') {
+              setCurrentView('dashboard');
+              setPreviousView(null);
+            } else {
+              setCurrentView('loans');
+            }
+          }}
+          onNewLoan={(data) => {
+            setNewLoanInitialData(data);
+            setSelectedClientId(data.clientId);
+            setCurrentView('new-loan');
+          }}
         />;
       case 'admin-users':
         return <AdminUsers onBack={() => setCurrentView('profile')} />;
@@ -309,20 +309,20 @@ const App: React.FC = () => {
       case 'reset-password':
         return <ResetPassword onSuccess={() => setCurrentView('login')} logo={systemLogo} />;
       default:
-        return <Dashboard 
-            onClientSelect={(id) => {
-                setSelectedClientId(id);
-                setPreviousView('dashboard');
-                setCurrentView('client-details');
-            }}
-            onLoanSelect={(id) => {
-                setSelectedLoanId(id);
-                setPreviousView('dashboard');
-                setCurrentView('loan-details');
-            }}
-            onViewClients={() => {
-                setCurrentView('clients');
-            }}
+        return <Dashboard
+          onClientSelect={(id) => {
+            setSelectedClientId(id);
+            setPreviousView('dashboard');
+            setCurrentView('client-details');
+          }}
+          onLoanSelect={(id) => {
+            setSelectedLoanId(id);
+            setPreviousView('dashboard');
+            setCurrentView('loan-details');
+          }}
+          onViewClients={() => {
+            setCurrentView('clients');
+          }}
         />;
     }
   };
@@ -331,42 +331,42 @@ const App: React.FC = () => {
     <div className="flex h-screen w-full bg-background-light dark:bg-background-dark overflow-hidden">
       {session && currentView !== 'login' && currentView !== 'subscription-expired' && (
         <div className="hidden md:flex">
-            <Sidebar 
-                currentView={currentView} 
-                onNavigate={(view) => {
-                    setCurrentView(view);
-                    setPreviousView(null);
-                    // Clear selection when navigating from menu
-                    if (view !== 'new-loan') setSelectedClientId(null);
-                }}
-                logo={sidebarLogo || systemLogo}
-                userEmail={session.user.email}
-                userName={session.user.user_metadata?.full_name}
-                onLogout={handleLogout}
-            />
+          <Sidebar
+            currentView={currentView}
+            onNavigate={(view) => {
+              setCurrentView(view);
+              setPreviousView(null);
+              // Clear selection when navigating from menu
+              if (view !== 'new-loan') setSelectedClientId(null);
+            }}
+            logo={sidebarLogo || systemLogo}
+            userEmail={session.user.email}
+            userName={session.user.user_metadata?.full_name}
+            onLogout={handleLogout}
+          />
         </div>
       )}
-      
+
       <main className="flex-1 h-full relative overflow-hidden flex flex-col">
         <div className={`w-full h-full mx-auto md:mx-0 ${currentView === 'login' ? '' : 'max-w-md md:max-w-none'} overflow-y-auto no-scrollbar relative shadow-2xl md:shadow-none`}>
-            {renderView()}
+          {renderView()}
         </div>
       </main>
 
       {session && currentView !== 'subscription-expired' && (
         <div className="md:hidden">
-            <BottomNav 
-                currentView={currentView} 
-                onNavigate={(view) => {
-                    setCurrentView(view);
-                    setPreviousView(null);
-                    setIsMenuOpen(false);
-                    // Limpar seleção ao navegar pelo menu
-                    if (view !== 'new-loan') setSelectedClientId(null);
-                }} 
-                isMenuOpen={isMenuOpen}
-                setIsMenuOpen={setIsMenuOpen}
-            />
+          <BottomNav
+            currentView={currentView}
+            onNavigate={(view) => {
+              setCurrentView(view);
+              setPreviousView(null);
+              setIsMenuOpen(false);
+              // Limpar seleção ao navegar pelo menu
+              if (view !== 'new-loan') setSelectedClientId(null);
+            }}
+            isMenuOpen={isMenuOpen}
+            setIsMenuOpen={setIsMenuOpen}
+          />
         </div>
       )}
     </div>

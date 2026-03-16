@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Filter, Wallet, Banknote, AlertTriangle, X, Share2, QrCode, Copy } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Filter, Wallet, Banknote, AlertTriangle, X, Share2, QrCode, Copy, MapPin } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment } from '../types';
@@ -100,7 +100,7 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
         try {
             const { data: loans, error } = await supabase
                 .from('loans')
-                .select('*, client:clients(name, avatar_url, phone)')
+                .select('*, client:clients(name, avatar_url, phone, address, number, city, state)')
                 .neq('status', 'paid'); // Only active/late loans matter for collection
 
             if (error) throw error;
@@ -176,25 +176,25 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
             if (overdueInstallments.length === 1) {
                 const firstUnpaid = overdueInstallments[0];
                 const parcela = firstUnpaid.number;
-                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
 
                 const jurosInfo = firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0 
-                    ? ` (incluindo R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros por atraso)`
+                    ? ` (incluindo R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de juros por atraso)`
                     : '';
 
                 message = `Olá, ${nome},\n\nConforme consta em nosso sistema, identificamos a seguinte parcela em aberto:\n\nParcela nº: ${parcela}\n\nValor: R$ ${valor}${jurosInfo}\n\nContrato: ${contrato}\n\nVencimento: ${data}\n\nSolicitamos, por gentileza, a regularização do pagamento para evitar a incidência de encargos adicionais.\n\nCaso o pagamento já tenha sido efetuado, pedimos a gentileza de desconsiderar esta mensagem.`;
             } else {
                 const totalValue = overdueInstallments.reduce((acc, curr) => acc + curr.value, 0);
-                const valorTotalFormatado = totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const valorTotalFormatado = totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const parcelasStr = overdueInstallments.map(i => i.number).join(', ');
                 
                 let detalhesParcelas = '';
                 overdueInstallments.forEach(i => {
                     const data = (i.originalDate || i.date).toLocaleDateString('pt-BR');
-                    const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                    const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                     const jurosInfo = i.accumulatedInterest && i.accumulatedInterest > 0 
-                        ? ` (inclui R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de juros)`
+                        ? ` (inclui R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de juros)`
                         : '';
                     detalhesParcelas += `- Parcela ${i.number}: R$ ${valor} (Vencimento: ${data})${jurosInfo}\n`;
                 });
@@ -206,7 +206,7 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
             if (firstUnpaid) {
                 const nome = selectedLoanForCharge.client.name;
                 const parcela = firstUnpaid.number;
-                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const contrato = selectedLoanForCharge.id.substring(0, 6);
                 const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
 
@@ -226,7 +226,11 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
 
     const handlePixCharge = () => {
         if (!userSettings?.pix_key) {
-            alert("Você precisa configurar sua chave PIX no perfil antes de usar esta função.");
+            setAlertModal({
+                open: true,
+                title: 'Configuração Necessária',
+                message: 'Você precisa configurar sua chave PIX no perfil antes de usar esta função.'
+            });
             return;
         }
         setShowChargeOptionsModal(false);
@@ -331,19 +335,19 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-            <header className="bg-white dark:bg-gray-900 px-4 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-                <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                    <ChevronLeft className="w-6 h-6 text-gray-600 dark:text-gray-300" />
+            <header className="bg-primary dark:bg-black text-white px-4 py-6 flex items-center justify-between sticky top-0 z-10 shadow-lg">
+                <button onClick={onBack} className="p-2 rounded-full hover:bg-white/10 transition-colors">
+                    <ChevronLeft className="w-6 h-6 text-white" />
                 </button>
                 <div className="flex items-center gap-2">
-                     <button onClick={handlePrevMonth} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
-                        <ChevronLeft className="w-4 h-4 text-gray-400" />
+                     <button onClick={handlePrevMonth} className="p-1 rounded-full hover:bg-white/10">
+                        <ChevronLeft className="w-4 h-4 text-white/70" />
                     </button>
-                    <h1 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                    <h1 className="text-sm font-bold text-white uppercase tracking-wider">
                         {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
                     </h1>
-                    <button onClick={handleNextMonth} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
-                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                    <button onClick={handleNextMonth} className="p-1 rounded-full hover:bg-white/10">
+                        <ChevronRight className="w-4 h-4 text-white/70" />
                     </button>
                 </div>
                 <div className="w-10"></div> {/* Spacer */}
@@ -385,33 +389,37 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                 </div>
 
                 {/* Summary Card (Blue) */}
-                <div className="bg-blue-600 rounded-[2rem] p-6 mb-8 relative overflow-hidden shadow-xl shadow-blue-200 dark:shadow-blue-900/20 text-white">
+                <div className="bg-blue-600 rounded-2xl p-4 mb-6 relative overflow-hidden shadow-lg shadow-blue-200 dark:shadow-blue-900/20 text-white">
                     {/* Background decoration */}
-                    <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
-                    <div className="absolute right-10 top-10 w-20 h-20 bg-white/5 rounded-full blur-xl"></div>
+                    <div className="absolute -right-10 -bottom-10 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
                     
-                    <div className="relative z-10 flex justify-between items-end">
-                        <div className="flex-1">
-                            <p className="text-xs font-medium text-blue-100 uppercase tracking-wider mb-2">
-                                Resumo Diário ({isSameDay(selectedDate, new Date()) ? 'Hoje' : selectedDate.toLocaleDateString('pt-BR')})
+                    <div className="relative z-10 flex items-center justify-between">
+                        <div>
+                            <p className="text-[10px] font-bold text-blue-100 uppercase tracking-widest mb-1 opacity-80">
+                                Resumo Diário • {isSameDay(selectedDate, new Date()) ? 'Hoje' : selectedDate.toLocaleDateString('pt-BR')}
                             </p>
-                            <h3 className="text-4xl font-bold mb-4 tracking-tight">
-                                R$ {totalSelectedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </h3>
-                            <div className="flex gap-2">
-                                <span className="bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-lg text-xs font-medium">
-                                    {selectedDayCharges.length} Cobranças
-                                </span>
-                                {lateCount > 0 && (
-                                    <span className="bg-red-500/20 backdrop-blur-sm px-3 py-1.5 rounded-lg text-xs font-medium text-red-100 border border-red-500/30">
-                                        {lateCount} Atrasadas
+                            <div className="flex items-center gap-3">
+                                <h3 className="text-3xl font-extrabold tracking-tight">
+                                    R$ {totalSelectedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </h3>
+                                <div className="flex gap-1.5">
+                                    <span className="bg-white/20 backdrop-blur-sm px-2 py-0.5 rounded-md text-[10px] font-bold uppercase">
+                                        {selectedDayCharges.length} Cobranças
                                     </span>
-                                )}
+                                </div>
                             </div>
+                            {lateCount > 0 && (
+                                <div className="mt-2 flex items-center gap-1.5">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></div>
+                                    <span className="text-[10px] font-bold text-red-100 uppercase">
+                                        {lateCount} {lateCount === 1 ? 'cobrança em atraso' : 'cobranças em atraso'}
+                                    </span>
+                                </div>
+                            )}
                         </div>
                         
-                        <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center shadow-inner border border-white/10">
-                            <Wallet className="w-7 h-7 text-white" />
+                        <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-xl flex items-center justify-center border border-white/10">
+                            <Wallet className="w-6 h-6 text-white" />
                         </div>
                     </div>
                 </div>
@@ -455,22 +463,37 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                                         <h4 className="font-bold text-gray-900 dark:text-white truncate text-base">{item.loan.client?.name}</h4>
                                         <p className="text-xs text-gray-500 truncate mt-0.5">Contrato: #{item.loan.id.substring(0, 6)}</p>
                                     </div>
-                                    
-                                    <button 
-                                        onClick={(e) => handleChargeLoan(e, item.loan)}
-                                        className={`p-2 rounded-full shadow-sm transition-colors flex-shrink-0 ${
-                                            isLate 
-                                                ? 'bg-green-500 hover:bg-green-600 text-white' 
-                                                : 'bg-gray-200 hover:bg-gray-300 text-gray-600 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300'
-                                        }`}
-                                        title="Cobrar via WhatsApp"
-                                    >
-                                        <Banknote className="w-4 h-4" />
-                                    </button>
-
+                                         <div className="flex items-center gap-1">
+                                        {item.loan.client?.address && (
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const client = item.loan.client;
+                                                    const addressQuery = `${client?.address}, ${client?.number || ''}, ${client?.city || ''}, ${client?.state || ''}`;
+                                                    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressQuery)}`, '_blank');
+                                                }}
+                                                className="p-2 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 dark:text-blue-400 shadow-sm transition-colors flex-shrink-0"
+                                                title="Ver no Mapa"
+                                            >
+                                                <MapPin className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                        <button 
+                                            onClick={(e) => handleChargeLoan(e, item.loan)}
+                                            className={`p-2 rounded-full shadow-sm transition-colors flex-shrink-0 ${
+                                                isLate 
+                                                    ? 'bg-green-500 hover:bg-green-600 text-white' 
+                                                    : 'bg-gray-200 hover:bg-gray-300 text-gray-600 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300'
+                                            }`}
+                                            title="Cobrar via WhatsApp"
+                                        >
+                                            <Banknote className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                
                                     <div className="text-right">
                                         <p className="font-bold text-gray-900 dark:text-white text-base">
-                                            R$ {item.installment.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            R$ {item.installment.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </p>
                                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase inline-block mt-1 ${
                                             item.installment.status === 'late' 
@@ -582,7 +605,11 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                                     <button 
                                         onClick={() => {
                                             navigator.clipboard.writeText(pixPayload);
-                                            alert("Código PIX Copia e Cola copiado!");
+                                            setAlertModal({
+                                                open: true,
+                                                title: 'Copiado',
+                                                message: 'Código PIX Copia e Cola copiado com sucesso!'
+                                            });
                                         }}
                                         className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-200 transition-colors"
                                     >

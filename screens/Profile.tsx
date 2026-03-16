@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Edit2, MapPin, CreditCard, ChevronRight, Lock, Save, X, Loader2, Search, Download, FileText } from 'lucide-react';
+import { LogOut, Edit2, MapPin, CreditCard, ChevronRight, Lock, Save, X, Loader2, Search, Download, FileText, Users, Crown, Clock, AlertTriangle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { UserSettings } from '../types';
 import jsPDF from 'jspdf';
@@ -7,15 +7,19 @@ import autoTable from 'jspdf-autotable';
 
 interface ProfileProps {
     onLogout: () => void;
+    onNavigate?: (view: any) => void;
     userEmail?: string;
 }
 
-export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
+import { Profile as UserProfileData } from '../types';
+
+export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigate }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfileData | null>(null);
   
   // Password Change State
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -38,6 +42,14 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
   const [email, setEmail] = useState(userEmail || '');
   const [name, setName] = useState('');
 
+  const [alertModal, setAlertModal] = useState<{
+      open: boolean;
+      title: string;
+      message: string;
+      onConfirm?: () => void;
+      confirmText?: string;
+  }>({ open: false, title: '', message: '' });
+
   // Fetch initial data
   useEffect(() => {
     fetchSettings();
@@ -50,6 +62,15 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
         if (user) {
             setName(user.user_metadata.full_name || '');
             
+            // Fetch Profile info (Subscription)
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', user.id)
+                .single();
+            
+            if (profileData) setUserProfile(profileData);
+
             const { data, error } = await supabase
                 .from('user_settings')
                 .select('*')
@@ -74,6 +95,14 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
     }
   };
 
+  const getDaysRemaining = () => {
+    if (!userProfile?.access_until) return 0;
+    const expiry = new Date(userProfile.access_until);
+    const now = new Date();
+    const diff = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    return diff > 0 ? diff : 0;
+  };
+
   const handleDownloadData = async (format: 'pdf' | 'csv') => {
       setDownloading(true);
       try {
@@ -85,7 +114,11 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
           if (error) throw error;
 
           if (!loans || loans.length === 0) {
-              alert("Nenhum empréstimo encontrado para gerar relatório.");
+              setAlertModal({
+                  open: true,
+                  title: 'Sem Dados',
+                  message: 'Nenhum empréstimo encontrado para gerar relatório.'
+              });
               return;
           }
 
@@ -97,7 +130,11 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
           setShowDownloadModal(false);
       } catch (error) {
           console.error("Erro ao gerar relatório:", error);
-          alert("Erro ao gerar relatório. Tente novamente.");
+          setAlertModal({
+              open: true,
+              title: 'Erro',
+              message: 'Erro ao gerar relatório. Tente novamente.'
+          });
       } finally {
           setDownloading(false);
       }
@@ -198,15 +235,27 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
 
   const handleUpdatePassword = async () => {
     if (!currentPassword) {
-        alert("Por favor, insira sua senha atual.");
+        setAlertModal({
+            open: true,
+            title: 'Senha Atual',
+            message: 'Por favor, insira sua senha atual.'
+        });
         return;
     }
     if (newPassword !== confirmPassword) {
-        alert("As senhas não coincidem.");
+        setAlertModal({
+            open: true,
+            title: 'Senhas Diferentes',
+            message: 'As senhas não coincidem.'
+        });
         return;
     }
     if (newPassword.length < 6) {
-        alert("A senha deve ter pelo menos 6 caracteres.");
+        setAlertModal({
+            open: true,
+            title: 'Senha Curta',
+            message: 'A senha deve ter pelo menos 6 caracteres.'
+        });
         return;
     }
 
@@ -228,14 +277,22 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
         const { error } = await supabase.auth.updateUser({ password: newPassword });
         if (error) throw error;
         
-        alert("Senha atualizada com sucesso!");
+        setAlertModal({
+            open: true,
+            title: 'Sucesso',
+            message: 'Senha atualizada com sucesso!'
+        });
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
         setShowPasswordModal(false);
     } catch (error: any) {
         console.error("Erro ao atualizar senha:", error);
-        alert(`Erro ao atualizar senha: ${error.message || error}`);
+        setAlertModal({
+            open: true,
+            title: 'Erro',
+            message: `Erro ao atualizar senha: ${error.message || error}`
+        });
     } finally {
         setUpdatingPassword(false);
     }
@@ -258,11 +315,19 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
                     state: data.uf
                 }));
             } else {
-                alert("CEP não encontrado.");
+                setAlertModal({
+                    open: true,
+                    title: 'CEP não encontrado',
+                    message: 'O CEP informado não foi encontrado.'
+                });
             }
         } catch (error) {
             console.error("Erro ao buscar CEP", error);
-            alert("Erro ao buscar CEP. Verifique sua conexão.");
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao buscar CEP. Verifique sua conexão.'
+            });
         } finally {
             setLoadingCep(false);
         }
@@ -279,7 +344,11 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
         if (email !== userEmail) {
             const { error: emailError } = await supabase.auth.updateUser({ email: email });
             if (emailError) throw emailError;
-            alert("Email atualizado! Verifique sua caixa de entrada para confirmar a alteração.");
+            setAlertModal({
+                open: true,
+                title: 'Email Atualizado',
+                message: 'Email atualizado! Verifique sua caixa de entrada para confirmar a alteração.'
+            });
         }
 
         // Update name if changed
@@ -304,7 +373,11 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
         setCep(''); // Limpa o CEP após salvar, pois só armazenamos a cidade/uf
     } catch (error: any) {
         console.error("Error saving settings:", error);
-        alert(`Erro ao salvar alterações: ${error.message || error}`);
+        setAlertModal({
+            open: true,
+            title: 'Erro ao Salvar',
+            message: `Erro ao salvar alterações: ${error.message || error}`
+        });
     } finally {
         setSaving(false);
     }
@@ -321,11 +394,24 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
       <header className="bg-primary dark:bg-black text-white px-6 pt-12 pb-20 rounded-b-b-header shadow-lg relative z-10">
         <div className="flex justify-between items-center mb-8">
             <h1 className="text-3xl font-bold">Configurações</h1>
-            <button onClick={onLogout} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors">
-                <LogOut className="w-5 h-5 text-gray-300" />
-            </button>
+            <div className="flex gap-2">
+                {userProfile?.is_admin && onNavigate && (
+                    <button 
+                        onClick={() => onNavigate('admin-users')}
+                        className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors"
+                        title="Gestão de Usuários"
+                    >
+                        <Users className="w-5 h-5 text-gray-300" />
+                    </button>
+                )}
+                <button onClick={onLogout} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-colors">
+                    <LogOut className="w-5 h-5 text-gray-300" />
+                </button>
+            </div>
         </div>
-        <p className="text-gray-400 text-sm max-w-xs">Gerencie sua conta e preferências</p>
+        <div className="flex items-center gap-3">
+            <p className="text-gray-400 text-sm">Gerencie sua conta e preferências</p>
+        </div>
         
         {/* Absolute positioned profile picture overlap */}
         <div className="absolute -bottom-14 left-1/2 transform -translate-x-1/2">
@@ -631,6 +717,40 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail }) => {
         )}
 
       </main>
+
+      {/* Alert Modal */}
+      {alertModal.open && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}></div>
+              <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                  <div className="flex flex-col items-center text-center mb-6">
+                      <div className="w-16 h-16 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mb-4">
+                          <AlertTriangle className="w-8 h-8 text-yellow-600 dark:text-yellow-500" />
+                      </div>
+                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{alertModal.title}</h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {alertModal.message}
+                      </p>
+                  </div>
+                  <div className="flex gap-3">
+                      <button 
+                          onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}
+                          className={`flex-1 py-3 px-4 rounded-xl font-bold transition-colors ${alertModal.onConfirm ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700' : 'bg-primary text-white hover:bg-primary/90'}`}
+                      >
+                          Entendi
+                      </button>
+                      {alertModal.onConfirm && (
+                          <button 
+                              onClick={alertModal.onConfirm}
+                              className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-primary hover:bg-primary/90 transition-colors"
+                          >
+                              {alertModal.confirmText || 'Confirmar'}
+                          </button>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

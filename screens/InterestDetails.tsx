@@ -41,18 +41,18 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
                 const installmentValue = Number(loan.installment_value) || 0;
                 const installments = Number(loan.installments) || 1;
                 const totalDebt = installmentValue * installments;
-                
+
                 // Calculate Interest Received for this loan
                 let interestReceived = (Number(loan.total_interest_paid) || 0);
 
                 if (loan.status === 'paid' && totalDebt > 0 && amount > 0) {
-                     const interest = totalDebt - amount;
-                     interestReceived += interest;
+                    const interest = totalDebt - amount;
+                    interestReceived += interest;
                 }
 
                 // Determine the date of interest receipt
                 let interestDate = new Date(loan.created_at);
-                
+
                 // Check amortizations for the latest interest payment
                 if (loan.loan_amortizations && loan.loan_amortizations.length > 0) {
                     const interestAmortizations = loan.loan_amortizations.filter((a: any) => a.interest_paid > 0);
@@ -61,8 +61,8 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
                         interestAmortizations.sort((a: any, b: any) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
                         interestDate = new Date(interestAmortizations[0].payment_date);
                     } else if (loan.updated_at && interestReceived > 0) {
-                         // If no specific amortization but interest was paid (e.g. renewal), use updated_at
-                         interestDate = new Date(loan.updated_at);
+                        // If no specific amortization but interest was paid (e.g. renewal), use updated_at
+                        interestDate = new Date(loan.updated_at);
                     }
                 } else if (loan.updated_at && interestReceived > 0) {
                     // Fallback to updated_at if no amortizations but interest exists
@@ -79,14 +79,14 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
 
                 const loanDate = loan.interestDate;
                 const now = new Date();
-                
+
                 if (filter === 'this-month') {
                     return loanDate.getMonth() === now.getMonth() && loanDate.getFullYear() === now.getFullYear();
                 } else if (filter === 'last-month') {
                     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
                     return loanDate.getMonth() === lastMonth.getMonth() && loanDate.getFullYear() === lastMonth.getFullYear();
                 }
-                
+
                 return true;
             });
 
@@ -96,12 +96,12 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
                 const installmentValue = Number(loan.installment_value) || 0;
                 const installments = Number(loan.installments) || 1;
                 const totalDebt = installmentValue * installments;
-                
+
                 let interestReceived = (Number(loan.total_interest_paid) || 0);
 
                 if (loan.status === 'paid' && totalDebt > 0 && amount > 0) {
-                     const interest = totalDebt - amount;
-                     interestReceived += interest;
+                    const interest = totalDebt - amount;
+                    interestReceived += interest;
                 }
                 return acc + interestReceived;
             }, 0);
@@ -129,11 +129,11 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
         if (filter === 'this-month') {
             const start = new Date(now.getFullYear(), now.getMonth(), 1);
             const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-            return `${start.toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'})} - ${end.toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'})}`;
+            return `${start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} - ${end.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
         } else if (filter === 'last-month') {
             const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
             const end = new Date(now.getFullYear(), now.getMonth(), 0);
-            return `${start.toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'})} - ${end.toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'})}`;
+            return `${start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} - ${end.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
         }
         return 'Todo o Período';
     };
@@ -163,28 +163,25 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
                         <p className="text-xs text-blue-100 uppercase tracking-wider mb-1">Período</p>
                         <p className="text-sm font-semibold">{getPeriodText()}</p>
                     </div>
-                    <button className="bg-white text-primary px-4 py-2 rounded-lg text-xs font-bold shadow-sm hover:bg-blue-50 transition-colors">
-                        Ver Relatório
-                    </button>
                 </div>
             </header>
 
             {/* Filters */}
             <div className="px-6 mt-6">
                 <div className="flex space-x-3 overflow-x-auto no-scrollbar pb-2">
-                    <button 
+                    <button
                         onClick={() => setFilter('this-month')}
                         className={`px-5 py-2.5 rounded-full text-xs font-bold shadow-sm whitespace-nowrap transition-all ${filter === 'this-month' ? 'bg-primary text-white shadow-primary/30' : 'bg-white dark:bg-card-dark text-gray-500 border border-gray-100 dark:border-gray-800'}`}
                     >
                         Este Mês
                     </button>
-                    <button 
+                    <button
                         onClick={() => setFilter('last-month')}
                         className={`px-5 py-2.5 rounded-full text-xs font-bold shadow-sm whitespace-nowrap transition-all ${filter === 'last-month' ? 'bg-primary text-white shadow-primary/30' : 'bg-white dark:bg-card-dark text-gray-500 border border-gray-100 dark:border-gray-800'}`}
                     >
                         Mês Passado
                     </button>
-                    <button 
+                    <button
                         onClick={() => setFilter('all')}
                         className={`px-5 py-2.5 rounded-full text-xs font-bold shadow-sm whitespace-nowrap transition-all ${filter === 'all' ? 'bg-primary text-white shadow-primary/30' : 'bg-white dark:bg-card-dark text-gray-500 border border-gray-100 dark:border-gray-800'}`}
                     >
@@ -212,17 +209,17 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
                             const installmentValue = Number(loan.installment_value) || 0;
                             const installments = Number(loan.installments) || 1;
                             const totalDebt = installmentValue * installments;
-                            
+
                             let interestReceived = (Number(loan.total_interest_paid) || 0);
-            
+
                             if (loan.status === 'paid' && totalDebt > 0 && amount > 0) {
-                                 const interest = totalDebt - amount;
-                                 interestReceived += interest;
+                                const interest = totalDebt - amount;
+                                interestReceived += interest;
                             }
 
                             return (
-                                <div 
-                                    key={loan.id} 
+                                <div
+                                    key={loan.id}
                                     onClick={() => onLoanSelect(loan.id)}
                                     className="bg-white dark:bg-card-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-4 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
                                 >
@@ -232,7 +229,7 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
                                     <div className="flex-1 min-w-0">
                                         <h4 className="font-bold text-gray-900 dark:text-white text-sm truncate">{loan.client?.name || 'Cliente Desconhecido'}</h4>
                                         <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
-                                            <span>Contrato #{loan.id.substring(0,4)}</span>
+                                            <span>Contrato #{loan.id.substring(0, 4)}</span>
                                             <span className="w-1 h-1 rounded-full bg-gray-300"></span>
                                             <span>{formatDate(loan.interestDate)}</span>
                                         </p>

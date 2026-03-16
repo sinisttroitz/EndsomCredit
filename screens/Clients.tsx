@@ -281,9 +281,9 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
       
       {/* Mobile View */}
       <div className="md:hidden flex flex-col h-full">
-        <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-12 pb-8 shadow-lg relative z-10">
-            <div className="flex items-center justify-between mb-6">
-            <h1 className="text-3xl font-bold tracking-tight">Clientes</h1>
+        <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-8 pb-5 shadow-lg relative z-10">
+            <div className="flex items-center justify-between mb-4">
+            <h1 className="text-xl font-bold tracking-tight">Clientes</h1>
             </div>
             <div className="relative mb-2">
             <input 
@@ -300,25 +300,25 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
         </header>
 
         <div className="px-6 mt-6 mb-2">
-            <div className="flex space-x-3 overflow-x-auto no-scrollbar pb-2">
-            <button 
-                onClick={() => setFilter('all')}
-                className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'all' ? 'bg-primary text-white' : 'bg-white text-text-sub-light border border-gray-200'}`}
-            >
-                Todos
-            </button>
-            <button 
-                onClick={() => setFilter('active')}
-                className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'active' ? 'bg-primary text-white' : 'bg-white text-text-sub-light border border-gray-200'}`}
-            >
-                Ativos
-            </button>
-            <button 
-                onClick={() => setFilter('late')}
-                className={`px-5 py-2 rounded-full text-sm font-medium shadow-md whitespace-nowrap transition-colors ${filter === 'late' ? 'bg-primary text-white' : 'bg-white text-text-sub-light border border-gray-200'}`}
-            >
-                Em Atraso
-            </button>
+            <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl flex items-center shadow-inner">
+                <button 
+                    onClick={() => setFilter('all')}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-wider ${filter === 'all' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                >
+                    Todos
+                </button>
+                <button 
+                    onClick={() => setFilter('active')}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-wider ${filter === 'active' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                >
+                    Ativos
+                </button>
+                <button 
+                    onClick={() => setFilter('late')}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-wider ${filter === 'late' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 tracking-tight'}`}
+                >
+                    Em Atraso
+                </button>
             </div>
         </div>
 
@@ -347,7 +347,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                     <div>
                     <h3 className="font-bold text-gray-900 dark:text-white">{client.name}</h3>
                     <p className="text-xs text-text-sub-light dark:text-text-sub-dark mt-0.5">
-                        Saldo Devedor: <span className="font-semibold text-gray-800 dark:text-gray-200">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                        Saldo Devedor: <span className="font-semibold text-gray-800 dark:text-gray-200">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </p>
                     </div>
                 </div>
@@ -401,35 +401,31 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                         Novo Cliente
                     </button>
                 </div>
-            </header>
-
-            {/* Filters Bar */}
-            <div className="px-8 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-card-dark flex items-center gap-4">
-                <div className="flex space-x-2">
+            </header>            {/* Filters Bar */}
+            <div className="px-8 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-card-dark flex items-center justify-between gap-4">
+                <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl flex items-center shadow-inner min-w-[320px]">
                     <button 
                         onClick={() => setFilter('all')}
-                        className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${filter === 'all' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400'}`}
+                        className={`flex-1 px-6 py-2 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-widest ${filter === 'all' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
                     >
                         Todos
                     </button>
                     <button 
                         onClick={() => setFilter('active')}
-                        className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${filter === 'active' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400'}`}
+                        className={`flex-1 px-6 py-2 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-widest ${filter === 'active' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
                     >
                         Ativos
                     </button>
                     <button 
                         onClick={() => setFilter('late')}
-                        className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${filter === 'late' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400'}`}
+                        className={`flex-1 px-6 py-2 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-widest ${filter === 'late' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
                     >
                         Em Atraso
                     </button>
                 </div>
                 
-                <div className="flex-1"></div>
-
-                <button className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-2 text-xs font-medium">
-                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                <button className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-2 text-xs font-black uppercase tracking-widest">
+                    <SlidersHorizontal className="w-4 h-4" />
                     Filtros Avançados
                 </button>
             </div>
@@ -477,7 +473,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                                         {client.city ? `${client.city}/${client.state || ''}` : '-'}
                                     </td>
                                     <td className="p-4">
-                                        <p className="font-bold text-sm text-gray-900 dark:text-white">R$ {client.debt.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                        <p className="font-bold text-sm text-gray-900 dark:text-white">R$ {client.debt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                     </td>
                                     <td className="p-4">
                                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
@@ -596,7 +592,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect }) => {
                                         <div className="flex justify-between items-start mb-4">
                                             <div>
                                                 <span className="text-[10px] text-gray-400 block uppercase font-bold">Contrato #{loan.id.substring(0, 6)}</span>
-                                                <span className="text-xl font-bold">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                <span className="text-xl font-bold">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                             </div>
                                             <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
                                                 loan.status === 'active' ? 'bg-green-500/20 text-green-400' : 
