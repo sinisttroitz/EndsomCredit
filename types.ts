@@ -37,6 +37,7 @@ export interface Loan {
   skip_sunday?: boolean;
   total_interest_paid?: number;
   amount_paid?: number;
+  installment_fines?: InstallmentFine[];
   created_at?: string;
 }
 
@@ -73,7 +74,16 @@ export interface LoanAmortization {
     created_at: string;
 }
 
-export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar';
+export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar' | 'admin-users' | 'subscription-expired' | 'reports' | 'reset-password';
+
+export interface Profile {
+  id: string;
+  email: string;
+  full_name: string;
+  access_until: string;
+  is_admin: boolean;
+  created_at: string;
+}
 
 export interface UserProfile {
   id: string;

@@ -11,10 +11,15 @@ import { ClientDetails } from './screens/ClientDetails';
 import { InterestDetails } from './screens/InterestDetails';
 import { LoanDetails } from './screens/LoanDetails';
 import { CollectionCalendar } from './screens/CollectionCalendar';
+import { Reports } from './screens/Reports';
 import { Login } from './screens/Login';
+import { ResetPassword } from './screens/ResetPassword';
+import { AdminUsers } from './screens/AdminUsers';
+import { SubscriptionExpired } from './screens/SubscriptionExpired';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
 import { supabase } from './supabaseClient';
+import { Profile as UserProfileData } from './types';
 
 const App: React.FC = () => {
   // Helper to load state from localStorage
@@ -38,6 +43,7 @@ const App: React.FC = () => {
   const [newLoanInitialData, setNewLoanInitialData] = useState<any>(null);
   const [systemLogo, setSystemLogo] = useState<string>('');
   const [sidebarLogo, setSidebarLogo] = useState<string>('');
+  const [userProfile, setUserProfile] = useState<UserProfileData | null>(null);
 
   // Save state to localStorage whenever it changes
   useEffect(() => {
@@ -103,9 +109,12 @@ const App: React.FC = () => {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
-      if (!session) {
+      
+      if (event === 'PASSWORD_RECOVERY') {
+          setCurrentView('reset-password');
+      } else if (!session) {
         setCurrentView('login');
         // Clear storage on logout
         localStorage.removeItem('currentView');
@@ -119,16 +128,41 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Redirect to dashboard if logged in but on login screen
+  const fetchUserProfile = async (userId: string) => {
+    try {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
+        
+        if (error) throw error;
+        setUserProfile(data);
+
+        // Check subscription
+        const now = new Date();
+        const accessUntil = new Date(data.access_until);
+        
+        if (!data.is_admin && accessUntil < now) {
+            setCurrentView('subscription-expired');
+        }
+    } catch (err) {
+        console.error("Error fetching profile:", err);
+    }
+  };
+
   useEffect(() => {
-      if (session && currentView === 'login') {
-          setCurrentView('dashboard');
-      }
-  }, [session, currentView]);
+    if (session?.user?.id) {
+        fetchUserProfile(session.user.id);
+    } else {
+        setUserProfile(null);
+    }
+  }, [session]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentView('login');
+    setUserProfile(null);
   };
 
   const renderView = () => {
@@ -139,6 +173,7 @@ const App: React.FC = () => {
         return <Login onLogin={() => setCurrentView('dashboard')} logo={systemLogo} />;
       case 'dashboard':
         return <Dashboard 
+            userProfile={userProfile}
             onClientSelect={(id) => {
                 setSelectedClientId(id);
                 setPreviousView('dashboard');
@@ -162,6 +197,9 @@ const App: React.FC = () => {
             onViewCollectionCalendar={() => {
                 setCurrentView('collection-calendar');
             }}
+            onViewReports={() => {
+                setCurrentView('reports');
+            }}
         />;
       case 'interest-details':
         return <InterestDetails 
@@ -181,6 +219,8 @@ const App: React.FC = () => {
                 setCurrentView('loan-details');
             }}
         />;
+      case 'reports':
+        return <Reports onBack={() => setCurrentView('dashboard')} />;
       case 'clients':
         return <Clients onClientSelect={(id) => {
             setSelectedClientId(id);
@@ -197,7 +237,7 @@ const App: React.FC = () => {
             onFilterChange={setInitialLoansFilter}
         />;
       case 'profile':
-        return <Profile onLogout={handleLogout} userEmail={session?.user?.email} />;
+        return <Profile onLogout={handleLogout} userEmail={session?.user?.email} onNavigate={setCurrentView} />;
       case 'new-loan':
         return <NewLoan 
             onBack={() => setCurrentView('dashboard')} 
@@ -262,6 +302,12 @@ const App: React.FC = () => {
                 setCurrentView('new-loan');
             }}
         />;
+      case 'admin-users':
+        return <AdminUsers onBack={() => setCurrentView('profile')} />;
+      case 'subscription-expired':
+        return <SubscriptionExpired onLogout={handleLogout} />;
+      case 'reset-password':
+        return <ResetPassword onSuccess={() => setCurrentView('login')} logo={systemLogo} />;
       default:
         return <Dashboard 
             onClientSelect={(id) => {
@@ -283,7 +329,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-full bg-background-light dark:bg-background-dark overflow-hidden">
-      {session && currentView !== 'login' && (
+      {session && currentView !== 'login' && currentView !== 'subscription-expired' && (
         <div className="hidden md:flex">
             <Sidebar 
                 currentView={currentView} 
@@ -307,7 +353,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {session && (
+      {session && currentView !== 'subscription-expired' && (
         <div className="md:hidden">
             <BottomNav 
                 currentView={currentView} 

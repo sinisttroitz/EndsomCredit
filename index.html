@@ -12,7 +12,7 @@
             theme: {
                 extend: {
                     colors: {
-                        primary: "#1E1E24",
+                        primary: "#000000",
                         secondary: "#10B981",
                         danger: "#EF4444",
                         "accent-blue": "#3B82F6",
@@ -36,9 +36,14 @@
         };
     </script>
     <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+        }
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #F3F4F6;
+            background: #FFFFFF;
         }
         .no-scrollbar::-webkit-scrollbar {
             display: none;
@@ -46,6 +51,10 @@
         .no-scrollbar {
             -ms-overflow-style: none;
             scrollbar-width: none;
+        }
+        /* Dashboard background color */
+        .bg-background-light {
+            background-color: #F3F4F6 !important;
         }
     </style>
 <script type="importmap">
