@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, SlidersHorizontal, ChevronRight, AlertTriangle, Calendar, Hourglass, RefreshCw } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronRight, AlertTriangle, Calendar, Hourglass, RefreshCw, Check, ChevronDown } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
@@ -16,6 +16,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [frequencyFilter, setFrequencyFilter] = useState<'all' | 'Diária' | 'Semanal' | 'Quinzenal' | 'Mensal'>('all');
+    const [showFreqDropdown, setShowFreqDropdown] = useState(false);
 
     useEffect(() => {
         fetchLoans();
@@ -48,6 +49,25 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
             setLoading(false);
         }
     };
+
+    const freqLabels = {
+        all: 'Todas Frequências',
+        'Diária': 'Diária',
+        'Semanal': 'Semanal',
+        'Quinzenal': 'Quinzenal',
+        'Mensal': 'Mensal'
+    };
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            if (!target.closest('.freq-dropdown-container')) {
+                setShowFreqDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const isLoanLate = (loan: Loan): boolean => {
         if (loan.status === 'paid') return false;
@@ -99,21 +119,34 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                     <Search className="text-gray-300 w-5 h-5" />
                 </div>
             </div>
-            <div className="relative w-full md:w-48">
-                <select 
-                    value={frequencyFilter}
-                    onChange={(e) => setFrequencyFilter(e.target.value as any)}
-                    className="w-full py-3.5 pl-4 pr-10 rounded-xl text-white appearance-none focus:outline-none focus:ring-2 focus:ring-white/30 transition shadow-sm bg-white/10 backdrop-blur-sm border border-white/20 md:py-2 text-sm font-medium cursor-pointer"
+            <div className="relative w-full md:w-56 freq-dropdown-container">
+                <button 
+                    onClick={() => setShowFreqDropdown(!showFreqDropdown)}
+                    className="w-full py-3.5 pl-4 pr-10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/30 transition shadow-sm bg-white/10 backdrop-blur-sm border border-white/20 md:py-2 text-sm font-medium flex items-center justify-between"
                 >
-                    <option value="all" className="bg-gray-900 text-white">Todas Frequências</option>
-                    <option value="Diária" className="bg-gray-900 text-white">Diária</option>
-                    <option value="Semanal" className="bg-gray-900 text-white">Semanal</option>
-                    <option value="Quinzenal" className="bg-gray-900 text-white">Quinzenal</option>
-                    <option value="Mensal" className="bg-gray-900 text-white">Mensal</option>
-                </select>
-                <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
-                    <SlidersHorizontal className="text-gray-300 w-4 h-4" />
-                </div>
+                    <span className="truncate">{freqLabels[frequencyFilter]}</span>
+                    <ChevronDown className={`w-4 h-4 text-gray-300 transition-transform duration-200 ${showFreqDropdown ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {showFreqDropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-[#1A1A1A] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[100] animate-in fade-in zoom-in duration-200 origin-top">
+                        {(['all', 'Diária', 'Semanal', 'Quinzenal', 'Mensal'] as const).map((opt) => (
+                            <button
+                                key={opt}
+                                onClick={() => {
+                                    setFrequencyFilter(opt);
+                                    setShowFreqDropdown(false);
+                                }}
+                                className="w-full px-4 py-3.5 text-left text-sm hover:bg-white/5 transition-colors flex items-center justify-between group"
+                            >
+                                <span className={`${frequencyFilter === opt ? 'text-white font-bold' : 'text-white/60 group-hover:text-white'}`}>
+                                    {freqLabels[opt]}
+                                </span>
+                                {frequencyFilter === opt && <Check className="w-4 h-4 text-primary font-bold" />}
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="bg-white/10 dark:bg-white/5 p-1 rounded-2xl flex items-center shadow-inner backdrop-blur-sm border border-white/10 w-full md:w-[360px]">

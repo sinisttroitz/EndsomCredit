@@ -61,7 +61,7 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
         const originalFines = installmentsList
             .filter(i => i.status !== 'paid' && i.fine)
             .reduce((sum, i) => sum + (i.fine?.fine_value || 0), 0);
-        
+
         const totalFines = includeFines ? originalFines : 0;
 
         // 2. Calculate Past Accumulated Interest
@@ -70,50 +70,71 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
             .reduce((sum, i) => sum + (i.accumulatedInterest || 0), 0);
 
         // 3. Calculate Base Values from Current Balance
-        // loan.balance includes both Principal and Contract Interest for remaining installments
+        // loan.balance includes BOTH Unpaid Contract Debt and Past Accumulated Interest!
         const currentBalance = Number(loan.balance);
+
+        // Get true Unpaid Contract Debt by removing Past Interest
+        const unpaidContractDebt = Math.max(0, currentBalance - totalPastInterest);
+
         const rate = Number(loan.interest_rate) / 100;
-        
-        // Separate Principal and Contract Interest
-        // Balance = Principal * (1 + rate)  =>  Principal = Balance / (1 + rate)
-        const currentPrincipal = currentBalance / (1 + rate);
-        const contractInterest = currentBalance - currentPrincipal;
+
+        // Unpaid Contract Debt = Unpaid Principal * (1 + rate)
+        const currentPrincipal = unpaidContractDebt / (1 + rate);
+        const contractInterest = unpaidContractDebt - currentPrincipal;
 
         // 4. Calculate Pro-rata Interest (Current Period)
-        const periodDays = loan.frequency === 'Quinzenal' ? 15 : 30;
+        let periodDays = 30;
+        if (loan.frequency === 'Quinzenal') periodDays = 15;
+        if (loan.frequency === 'Semanal') periodDays = 7;
+        if (loan.frequency === 'Diária') periodDays = 1;
+
         const [y, m, d] = loan.due_date.split('-').map(Number);
         const currentDueDate = new Date(y, m - 1, d);
-        
-        const cycleStartDate = new Date(currentDueDate);
-        if (loan.frequency === 'Quinzenal') {
-            cycleStartDate.setDate(cycleStartDate.getDate() - 15);
-        } else {
-            cycleStartDate.setMonth(cycleStartDate.getMonth() - 1);
-        }
-        
+
         const today = new Date();
-        today.setHours(0,0,0,0);
-        
+        today.setHours(0, 0, 0, 0);
+
+        const cycleStartDate = new Date(currentDueDate);
+
+        // If the due date is in the future, we are within a normal cycle, so it started 1 period ago.
+        // If it's in the past/today, processRecurringInterest already updated it to the start of the CURRENT late period!
+        if (cycleStartDate > today) {
+            if (loan.frequency === 'Diária') {
+                cycleStartDate.setDate(cycleStartDate.getDate() - 1);
+            } else if (loan.frequency === 'Semanal') {
+                cycleStartDate.setDate(cycleStartDate.getDate() - 7);
+            } else if (loan.frequency === 'Quinzenal') {
+                cycleStartDate.setDate(cycleStartDate.getDate() - 15);
+            } else {
+                cycleStartDate.setMonth(cycleStartDate.getMonth() - 1);
+            }
+        }
+
         // Calculate total days elapsed since the start of the current cycle
         const diffTime = today.getTime() - cycleStartDate.getTime();
         const totalDaysElapsed = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-        
+
         const monthlyRate = Number(loan.interest_rate) || 0;
+
+        // To be completely mathematically accurate, pro-rata shouldn't exceed the monthly rate if days > 30, 
+        // though fullPeriods should always be 0 because processRecurringInterest updates every term.
         const dailyRate = monthlyRate / 30;
         const monthlyInterestRef = currentPrincipal * (monthlyRate / 100);
 
         // Split into Full Periods (Past Interest) and Remainder (Pro-Rata)
+        // Note: Because processRecurringInterest already updates past due dates, fullPeriods should realistically always be 0.
         const fullPeriods = Math.floor(totalDaysElapsed / periodDays);
         const proRataDays = totalDaysElapsed % periodDays;
-        
+
         const interestFromFullPeriods = fullPeriods * monthlyInterestRef;
         const originalProRataInterest = currentPrincipal * (dailyRate / 100) * proRataDays;
         const proRataInterest = includeProRata ? originalProRataInterest : 0;
 
         const finalPastInterest = totalPastInterest + interestFromFullPeriods;
-        
-        // Total Debt = Balance (Principal + Contract Interest) + Past Interest + Fines + Pro-Rata
-        const totalDebt = currentBalance + finalPastInterest + totalFines + proRataInterest;
+
+        // Total Debt = Unpaid Contract Debt + Past Interest + Fines + Pro-Rata
+        // which reduces back to currentBalance + interestFromFullPeriods + totalFines + proRataInterest
+        const totalDebt = currentBalance + interestFromFullPeriods + totalFines + proRataInterest;
 
         setPreview(prev => ({
             ...prev!,
@@ -171,10 +192,26 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
         const principalPaid = remaining; // Can go up to full principal
 
         // Calculate New State
-        // New Balance = Current Balance - (Contract Interest Paid + Principal Paid)
-        const currentBalance = preview.breakdown.principal + preview.breakdown.contractInterest;
+        // New Balance = Current Balance - (Contract Interest Paid + Principal Paid + Fines + Past Interest + ProRata)
+        // Actually, the new debt is what's left unpaid.
+        // Current Balance essentially stores Unpaid Contract Debt + Past Interest.
+        // Fines and ProRata are NOT saved in loan.balance yet.
+        // So newBalance must be: (Unpaid Contract Debt - contractInterestPaid - principalPaid) + (Past Interest - pastInterestPaid)
+
+        // Wait, capitalAbated is defined as what we subtract from the principal/contract interest.
         const balancePaid = contractInterestPaid + principalPaid;
-        const newBalance = Math.max(0, currentBalance - balancePaid);
+
+        // The previous balance includes the unpaid past interest.
+        // Since we may have paid off some of the past interest, we must reflect that in the new balance.
+        // newBalance = Unpaid Contract + Unpaid Past Interest
+        const newContractDebt = Math.max(0, (preview.breakdown.principal + preview.breakdown.contractInterest) - balancePaid);
+        const newPastInterest = Math.max(0, preview.breakdown.pastInterest - pastInterestPaid);
+        
+        const unpaidFines = preview.breakdown.fines - finesPaid;
+        const unpaidProRata = preview.breakdown.proRata - proRataPaid;
+
+        const newBalance = newContractDebt + newPastInterest + unpaidFines + unpaidProRata;
+
         const isPaidOff = newBalance <= 0.01;
 
         let formattedDate = '';
@@ -190,7 +227,7 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
             } else {
                 nextDue.setMonth(today.getMonth() + 1);
             }
-            
+
             // Format date as DD MMM YYYY for display
             const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
             formattedDate = `${nextDue.getDate()} ${months[nextDue.getMonth()]} ${nextDue.getFullYear()}`;
@@ -228,11 +265,11 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
             </div>
 
             <div className="flex-1 p-6 max-w-3xl mx-auto w-full space-y-6">
-                
+
                 {/* Total Debt Breakdown */}
                 <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
                     <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"></p>
-                    
+
                     <div className="mb-6">
                         <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">TOTAL DA DÍVIDA ATUALIZADA</p>
                         <h2 className="text-4xl font-bold text-gray-900 dark:text-white">R$ {formatCurrency(preview.totalDebt)}</h2>
@@ -256,7 +293,7 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                         <div className="flex justify-between items-center text-sm">
                             <div className="flex items-center gap-2">
                                 <span className="text-gray-600 dark:text-gray-400">Multa Administrativa</span>
-                                <button 
+                                <button
                                     onClick={() => setIncludeFines(!includeFines)}
                                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${includeFines ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`}
                                 >
@@ -278,7 +315,7 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                         <div className="flex justify-between items-center text-sm">
                             <div className="flex items-center gap-2">
                                 <span className="text-gray-600 dark:text-gray-400">Pro-Rata ({preview.daysElapsed} dias)</span>
-                                <button 
+                                <button
                                     onClick={() => setIncludeProRata(!includeProRata)}
                                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${includeProRata ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`}
                                 >
@@ -305,8 +342,8 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                     <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">Valor a Pagar</p>
                     <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-4 focus-within:ring-2 focus-within:ring-blue-500 transition-all">
                         <span className="text-gray-400 font-bold text-xl">R$</span>
-                        <input 
-                            type="number" 
+                        <input
+                            type="number"
                             value={amount}
                             onChange={(e) => {
                                 const val = e.target.value;
@@ -327,7 +364,7 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                 {Number(amount) > 0 && (
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
                         <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">Distribuição de Pagamento</p>
-                        
+
                         <div className="space-y-6">
                             {/* Multas */}
                             <div className="flex items-center gap-4">
@@ -340,7 +377,7 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                                         <span className="text-sm font-bold text-gray-900 dark:text-white">- R$ {formatCurrency(preview.distribution.finesPaid)}</span>
                                     </div>
                                     <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                        <div 
+                                        <div
                                             className="h-full bg-blue-600 rounded-full transition-all duration-500"
                                             style={{ width: preview.breakdown.fines > 0 ? `${(preview.distribution.finesPaid / preview.breakdown.fines) * 100}%` : '0%' }}
                                         />
@@ -360,7 +397,7 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                                         <span className="text-sm font-bold text-gray-900 dark:text-white">- R$ {formatCurrency(preview.distribution.pastInterestPaid)}</span>
                                     </div>
                                     <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                        <div 
+                                        <div
                                             className="h-full bg-blue-600 rounded-full transition-all duration-500"
                                             style={{ width: preview.breakdown.pastInterest > 0 ? `${(preview.distribution.pastInterestPaid / preview.breakdown.pastInterest) * 100}%` : '0%' }}
                                         />
@@ -379,7 +416,7 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                                         <span className="text-sm font-bold text-gray-900 dark:text-white">- R$ {formatCurrency(preview.distribution.proRataPaid)}</span>
                                     </div>
                                     <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                        <div 
+                                        <div
                                             className="h-full bg-blue-600 rounded-full transition-all duration-500"
                                             style={{ width: preview.breakdown.proRata > 0 ? `${(preview.distribution.proRataPaid / preview.breakdown.proRata) * 100}%` : '0%' }}
                                         />
@@ -411,13 +448,13 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
 
                 {/* Action Buttons */}
                 <div className="flex gap-4 pt-4 pb-32">
-                    <button 
+                    <button
                         onClick={onBack}
                         className="flex-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 py-4 rounded-xl font-bold text-lg transition-colors"
                     >
                         Cancelar
                     </button>
-                    <button 
+                    <button
                         onClick={() => onConfirm(Number(amount), preview)}
                         disabled={!amount || Number(amount) <= 0 || processing}
                         className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-600/20 transition-all active:scale-[0.98] disabled:opacity-70 disabled:scale-100"

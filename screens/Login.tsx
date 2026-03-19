@@ -50,41 +50,43 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
     setForgotMessage(null);
 
     try {
-        const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-            redirectTo: `${window.location.origin}/reset-password`,
-        });
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
 
-        if (error) throw error;
+      if (error) throw error;
 
-        setForgotMessage({ 
-            type: 'success', 
-            text: 'Link de recuperação enviado! Verifique seu e-mail para continuar.' 
-        });
+      setForgotMessage({
+        type: 'success',
+        text: 'Link de recuperação enviado! Verifique seu e-mail para continuar.'
+      });
     } catch (err: any) {
-        console.error(err);
-        setForgotMessage({ 
-            type: 'error', 
-            text: err.message || 'Erro ao enviar e-mail de recuperação.' 
-        });
+      console.error(err);
+      setForgotMessage({
+        type: 'error',
+        text: err.message || 'Erro ao enviar e-mail de recuperação.'
+      });
     } finally {
-        setForgotLoading(false);
+      setForgotLoading(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-full bg-black relative overflow-y-auto no-scrollbar">
-      <main className="relative z-10 flex-1 flex flex-col items-center px-8 pt-12 pb-8 w-full max-w-sm mx-auto">
+    <div
+      className="flex flex-col h-full bg-black relative overflow-y-auto no-scrollbar bg-cover bg-center bg-no-repeat"
+      style={{ backgroundImage: 'linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.8)), url("https://wjltsjvdcbrbsunpsqwz.supabase.co/storage/v1/object/public/system/bglogin.webp")' }}
+    >
+      <main className="relative z-10 flex-1 flex flex-col items-center px-8 pt-24 pb-8 w-full max-w-[340px] mx-auto">
         {/* Logo and Headings */}
-        <div className="mb-12 text-center w-full">
+        <div className="mb-2 text-center w-full">
           {logo ? (
-            <img src={logo} alt="Empresta Logo" className="h-28 mx-auto mb-6 object-contain" />
+            <img src={logo} alt="Empresta Logo" className="h-[150px] mx-auto mb-20 object-contain" />
           ) : (
-            <div className="h-28 mb-6 flex items-center justify-center">
+            <div className="h-[150px] mb-6 flex items-center justify-center">
               <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
             </div>
           )}
-          <h1 className="text-white text-3xl font-bold tracking-tight mb-2">Acesse sua conta</h1>
-          <p className="text-white/40 text-sm">Painel Administrativo Restrito</p>
+          <h1 className="text-white text-2xl font-bold tracking-tight mb-2">Acesse sua conta</h1>
         </div>
 
         {/* Login Form */}
@@ -97,7 +99,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="block w-full px-6 py-5 bg-[#121212] border-transparent rounded-2xl text-white placeholder-white/60 focus:ring-2 focus:ring-white/10 outline-none transition-all duration-200 text-lg"
+                className="block w-full px-6 py-4 bg-[#121212] border-transparent rounded-2xl text-white placeholder-white/60 focus:ring-2 focus:ring-white/10 outline-none transition-all duration-200 text-base"
                 placeholder="seu@email.com"
                 required
               />
@@ -111,7 +113,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full px-6 py-5 bg-[#121212] border-transparent rounded-2xl text-white placeholder-white/60 focus:ring-2 focus:ring-white/10 outline-none transition-all duration-200 text-lg"
+                  className="block w-full px-6 py-4 bg-[#121212] border-transparent rounded-2xl text-white placeholder-white/60 focus:ring-2 focus:ring-white/10 outline-none transition-all duration-200 text-base"
                   placeholder="••••••••••••"
                   required
                 />
@@ -124,8 +126,8 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
                 </button>
               </div>
               <div className="text-right px-1">
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => {
                     setForgotEmail(email);
                     setForgotMessage(null);
@@ -149,7 +151,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
               <button
                 disabled={loading}
                 type="submit"
-                className="w-full bg-white text-[#111827] font-bold py-5 rounded-2xl shadow-xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-xl disabled:opacity-70"
+                className="w-full bg-white text-[#111827] font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-base disabled:opacity-70"
               >
                 <span>{loading ? 'Entrando...' : 'Entrar'}</span>
               </button>
@@ -157,18 +159,12 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
               <button
                 type="button"
                 onClick={() => setShowAccessModal(true)}
-                className="w-full bg-transparent border-2 border-white text-white font-bold py-5 rounded-2xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-xl"
+                className="w-full bg-transparent border-2 border-white text-white font-bold py-4 rounded-2xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-base"
               >
                 Solicitar Acesso
               </button>
             </div>
           </form>
-        </div>
-
-        {/* Security Badge */}
-        <div className="mt-16 flex items-center space-x-2 opacity-30">
-          <ShieldCheck className="w-4 h-4 text-white" />
-          <span className="text-[10px] uppercase font-bold tracking-[0.15em] text-white">Conexão Segura SSL</span>
         </div>
 
         {/* Footer Support */}
@@ -208,8 +204,8 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
       {/* Forgot Password Modal */}
       {showForgotModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div 
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300" 
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300"
             onClick={() => !forgotLoading && setShowForgotModal(false)}
           ></div>
           <div className="relative bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in slide-in-from-bottom-4 duration-300 border border-gray-100">
@@ -223,43 +219,42 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
               </p>
 
               <form onSubmit={handleForgotPassword} className="w-full space-y-4">
-                <input 
-                  type="email" 
+                <input
+                  type="email"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
-                  className="block w-full px-4 py-4 bg-gray-50 border border-gray-100 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary/20 outline-none transition-all duration-200" 
-                  placeholder="Seu e-mail cadastrado" 
+                  className="block w-full px-4 py-4 bg-gray-50 border border-gray-100 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary/20 outline-none transition-all duration-200"
+                  placeholder="Seu e-mail cadastrado"
                   required
                 />
 
                 {forgotMessage && (
-                    <div className={`p-4 rounded-xl text-xs flex items-start gap-2 text-left ${
-                        forgotMessage.type === 'success' 
-                        ? 'bg-green-50 text-green-700 border border-green-100' 
-                        : 'bg-red-50 text-red-700 border border-red-100'
+                  <div className={`p-4 rounded-xl text-xs flex items-start gap-2 text-left ${forgotMessage.type === 'success'
+                    ? 'bg-green-50 text-green-700 border border-green-100'
+                    : 'bg-red-50 text-red-700 border border-red-100'
                     }`}>
-                        {forgotMessage.type === 'success' ? <ShieldCheck className="w-4 h-4 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
-                        <span>{forgotMessage.text}</span>
-                    </div>
+                    {forgotMessage.type === 'success' ? <ShieldCheck className="w-4 h-4 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
+                    <span>{forgotMessage.text}</span>
+                  </div>
                 )}
 
                 <div className="flex flex-col gap-3 pt-2">
-                    <button 
-                        type="submit"
-                        disabled={forgotLoading}
-                        className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-[0.98] transition-all duration-200 text-lg disabled:opacity-70 flex items-center justify-center gap-2"
-                    >
-                        {forgotLoading ? (
-                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        ) : 'Enviar Link'}
-                    </button>
-                    <button 
-                        type="button" 
-                        onClick={() => setShowForgotModal(false)}
-                        className="w-full text-gray-500 font-bold py-2 text-sm hover:text-gray-700 transition-colors"
-                    >
-                        Cancelar
-                    </button>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-[0.98] transition-all duration-200 text-lg disabled:opacity-70 flex items-center justify-center gap-2"
+                  >
+                    {forgotLoading ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    ) : 'Enviar Link'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="w-full text-gray-500 font-bold py-2 text-sm hover:text-gray-700 transition-colors"
+                  >
+                    Cancelar
+                  </button>
                 </div>
               </form>
             </div>

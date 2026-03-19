@@ -25,20 +25,20 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onNavigate, i
         )}
 
         {/* FAB Menu */}
-        <div className={`fixed bottom-24 left-1/2 transform -translate-x-1/2 z-40 flex flex-col gap-3 transition-all duration-300 ${isMenuOpen ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-10 scale-90 pointer-events-none'}`}>
+        <div className={`fixed bottom-28 left-1/2 transform -translate-x-1/2 z-40 flex flex-row gap-3 w-[min(90vw,400px)] transition-all duration-300 ${isMenuOpen ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-10 scale-90 pointer-events-none'}`}>
              <button 
                 onClick={() => { setIsMenuOpen(false); onNavigate('new-loan'); }}
-                className="flex items-center gap-3 bg-white text-primary px-6 py-3 rounded-full shadow-xl font-semibold hover:bg-gray-50 active:scale-95 transition-transform"
+                className="flex-1 flex flex-row items-center justify-center gap-2 bg-white dark:bg-gray-800 text-primary dark:text-white px-3 py-3 rounded-2xl shadow-2xl font-bold hover:bg-gray-50 active:scale-95 transition-all border border-gray-100 dark:border-gray-700"
              >
-                <Wallet className="w-5 h-5 text-secondary" />
-                Novo Empréstimo
+                <Wallet className="w-5 h-5 text-secondary shrink-0" />
+                <span className="text-[10px] leading-none whitespace-nowrap">Novo Empréstimo</span>
              </button>
              <button 
                 onClick={() => { setIsMenuOpen(false); onNavigate('new-client'); }}
-                className="flex items-center gap-3 bg-white text-primary px-6 py-3 rounded-full shadow-xl font-semibold hover:bg-gray-50 active:scale-95 transition-transform"
+                className="flex-1 flex flex-row items-center justify-center gap-2 bg-white dark:bg-gray-800 text-primary dark:text-white px-3 py-3 rounded-2xl shadow-2xl font-bold hover:bg-gray-50 active:scale-95 transition-all border border-gray-100 dark:border-gray-700"
              >
-                <Users className="w-5 h-5 text-accent-blue" />
-                Novo Cliente
+                <Users className="w-5 h-5 text-accent-blue shrink-0" />
+                <span className="text-[10px] leading-none whitespace-nowrap">Novo Cliente</span>
              </button>
         </div>
 

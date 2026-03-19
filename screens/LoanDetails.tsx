@@ -74,8 +74,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 .insert({
                     loan_id: loan.id,
                     amount_paid: amountPaid,
-                    interest_paid: breakdown.proRata + breakdown.pastInterest,
-                    principal_paid: result.capitalAbated,
+                    interest_paid: breakdown.proRata + breakdown.pastInterest + preview.distribution.contractInterestPaid,
+                    principal_paid: preview.distribution.principalPaid,
                     fine_paid: breakdown.fines,
                     previous_balance: loan.balance,
                     new_balance: result.newBalance
@@ -100,8 +100,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
             const currentAmountPaid = Number(loan.amount_paid) || 0;
 
-            // Interest component includes: Past Interest + Pro-Rata + Fines
-            const interestComponentPaid = breakdown.pastInterest + breakdown.proRata + breakdown.fines;
+            // Interest component includes: Past Interest + Pro-Rata + Fines 
+            // Contract Interest isn't counted in total_interest_paid (extra profit) because it's part of the base loan structure
+            const interestComponentPaid = preview.distribution.pastInterestPaid + preview.distribution.proRataPaid + preview.distribution.finesPaid;
 
             const newTotalInterestPaid = currentTotalInterestPaid + interestComponentPaid;
             const newAmountPaid = currentAmountPaid + amountPaid;
@@ -112,7 +113,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 .from('loans')
                 .update({
                     balance: result.newBalance,
-                    amount: Math.max(0, Number(loan.amount) - result.capitalAbated), // Update principal
+                    amount: Math.max(0, Number(loan.amount) - preview.distribution.principalPaid), // Update principal
                     due_date: isPaidOff ? loan.due_date : nextDueISO,
                     status: isPaidOff ? 'paid' : 'active',
                     total_interest_paid: newTotalInterestPaid,
@@ -1197,9 +1198,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 {loan.frequency || 'N/A'}
                             </span>
                             <span className={`px-3 py-1 rounded text-[10px] font-bold border uppercase ${displayStatus === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' :
-                                    displayStatus === 'late' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' :
-                                        displayStatus === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' :
-                                            'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800'
+                                displayStatus === 'late' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' :
+                                    displayStatus === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' :
+                                        'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800'
                                 }`}>
                                 {displayStatus === 'active' ? 'EM DIA' : displayStatus === 'late' ? 'ATRASADO' : displayStatus === 'paid' ? 'QUITADO' : 'PENDENTE'}
                             </span>
@@ -1208,10 +1209,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 onClick={handleCharge}
                                 disabled={loan.status === 'paid'}
                                 className={`px-3 py-1 rounded text-[10px] font-bold border uppercase transition-all flex items-center gap-1 ${loan.status === 'paid'
-                                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-50'
-                                        : isLate
-                                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 cursor-pointer hover:opacity-80'
-                                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-80'
+                                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-50'
+                                    : isLate
+                                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 cursor-pointer hover:opacity-80'
+                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-80'
                                     }`}
                             >
                                 <Banknote className="w-3 h-3" />
@@ -1323,15 +1324,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             >
                                 {isSelectionMode ? (
                                     <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors ${inst.status === 'paid' ? 'border-gray-200 bg-gray-100 opacity-50' :
-                                            selectedInstallments.includes(inst.number) ? 'border-primary bg-primary text-white' : 'border-gray-300'
+                                        selectedInstallments.includes(inst.number) ? 'border-primary bg-primary text-white' : 'border-gray-300'
                                         }`}>
                                         {inst.status === 'paid' ? <Check className="w-4 h-4 text-gray-400" /> :
                                             selectedInstallments.includes(inst.number) && <Check className="w-4 h-4" />}
                                     </div>
                                 ) : (
                                     <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white dark:ring-card-dark ${inst.status === 'paid' ? 'bg-secondary' :
-                                            inst.status === 'late' ? 'bg-danger' :
-                                                inst.status === 'pending' ? 'bg-accent-blue' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
+                                        inst.status === 'late' ? 'bg-danger' :
+                                            inst.status === 'pending' ? 'bg-accent-blue' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
                                         }`}>
                                         {inst.status === 'paid' ? <Check className="w-4 h-4" /> :
                                             inst.status === 'future' ? <Circle className="w-4 h-4" /> :
@@ -1369,8 +1370,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                         </div>
                                         <div className="flex items-center justify-end gap-2">
                                             <div className={`flex items-baseline gap-1 ${inst.status === 'paid' ? 'text-secondary' :
-                                                    inst.status === 'late' ? 'text-danger' :
-                                                        inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
+                                                inst.status === 'late' ? 'text-danger' :
+                                                    inst.status === 'pending' ? 'text-accent-blue' : 'text-gray-500'
                                                 }`}>
                                                 <span className="text-xs font-medium opacity-70">R$</span>
                                                 <span className="text-lg font-bold">
@@ -1681,7 +1682,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                             <button
                                 onClick={() => setShowMensalPaymentModal(false)}
-                                className="w-full py-4 text-xs font-bold text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors uppercase tracking-wider mt-2"
+                                className="w-full py-4 text-xs font-bold text-red-500 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors uppercase tracking-wider mt-2"
                             >
                                 Cancelar
                             </button>
