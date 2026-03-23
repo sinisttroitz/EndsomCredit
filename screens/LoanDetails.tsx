@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment, InstallmentFine } from '../types';
@@ -30,6 +30,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [extractData, setExtractData] = useState<any>(null);
     const [showExtractImageModal, setShowExtractImageModal] = useState(false);
     const [showAVModal, setShowAVModal] = useState(false);
+    const [showAVConfirmModal, setShowAVConfirmModal] = useState(false);
+    const [avConfirmData, setAvConfirmData] = useState<{ paidCount: number, remainingCredit: number, paidAmount: number } | null>(null);
+    const [showRenewConfirmModal, setShowRenewConfirmModal] = useState(false);
+    const [renewConfirmData, setRenewConfirmData] = useState<{ amountToPay: number, nextDueDate: string, nextValue: number, type: 'full' | 'renew' } | null>(null);
     const [avAmount, setAvAmount] = useState('');
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [deletePassword, setDeletePassword] = useState('');
@@ -325,20 +329,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             return;
         }
 
-        const message = avPaidCount === 0
-            ? `O valor R$ ${avRequestedAmount.toFixed(2)} será adicionado ao saldo de crédito do cliente. Confirmar?`
-            : `Confirmar pagamento de ${avPaidCount} parcela(s)? Restará R$ ${totalAvailable.toFixed(2)} de crédito.`;
-
-        setConfirmationModal({
-            open: true,
-            title: 'Confirmar Pagamento AV',
-            message,
-            action: () => executeAVPayment(paidAmount, totalAvailable)
+        setAvConfirmData({
+            paidCount: avPaidCount,
+            remainingCredit: totalAvailable,
+            paidAmount: paidAmount
         });
+        setShowAVConfirmModal(true);
     };
     const executeAVPayment = async (paidAmount: number, newCreditBalance: number) => {
         if (!loan) return;
-        setConfirmationModal(prev => ({ ...prev, open: false }));
+        setShowAVConfirmModal(false);
+        setAvConfirmData(null);
         setProcessing(true);
 
         try {
@@ -887,13 +888,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         if (!loan) return;
 
         const totalFines = fines.reduce((acc, curr) => acc + curr.fine_value, 0);
-        const title = type === 'full' ? 'Quitar Empréstimo' : 'Renovar Empréstimo';
-        let message = '';
 
-        if (type === 'full') {
-            const totalToPay = Number(loan.balance) + totalFines;
-            message = `Tem certeza que deseja quitar todo o empréstimo?\n\nValor Total: R$ ${totalToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${totalFines > 0 ? `\n(Incluindo R$ ${totalFines.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de multas)` : ''}`;
-        } else {
+        if (type === 'renew') {
             // Calculate renewal details for the message
             let currentDue: Date;
             if (loan.due_date) {
@@ -920,24 +916,33 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const principal = Number(loan.amount);
             const interest = principal * (Number(loan.interest_rate) / 100);
             const newBalance = principal + interest;
-            const formattedBalance = newBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
             const interestToPay = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
 
-            message = `Deseja pagar os juros${totalFines > 0 ? ' e multas' : ''} e renovar o empréstimo?\n\nValor a Pagar: R$ ${interestToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\nNova Data de Vencimento: ${formattedDate}\nNovo Valor do Empréstimo: R$ ${formattedBalance}`;
+            setRenewConfirmData({
+                amountToPay: interestToPay,
+                nextDueDate: formattedDate,
+                nextValue: newBalance,
+                type: 'renew'
+            });
+            setShowRenewConfirmModal(true);
+        } else {
+            // Quitar Total
+            const totalToPay = Number(loan.balance) + totalFines;
+            setRenewConfirmData({
+                amountToPay: totalToPay,
+                nextDueDate: '',
+                nextValue: 0,
+                type: 'full'
+            });
+            setShowRenewConfirmModal(true);
         }
-
-        setConfirmationModal({
-            open: true,
-            title,
-            message,
-            action: () => executeMensalPayment(type)
-        });
     };
 
     const executeMensalPayment = async (type: 'full' | 'renew') => {
         if (!loan) return;
-        setConfirmationModal(prev => ({ ...prev, open: false }));
+        setShowRenewConfirmModal(false);
+        setRenewConfirmData(null);
         setProcessing(true);
         try {
             let updates: any = {};
@@ -1084,12 +1089,19 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         }
 
         // Prepare data for Extract Image
+        const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+        const displayTotalPaid = loan.status === 'paid' && loan.amount_paid
+            ? Number(loan.amount_paid)
+            : Math.max(0, totalDebt - Number(loan.balance));
+
+        const currentBalance = installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0);
+
         const data = {
             emissionDate: now,
             clientName: loan.client?.name || 'Cliente',
             contractId: loan.id.substring(0, 6).toUpperCase(),
-            totalPaid: paidInstallments.reduce((acc, curr) => acc + curr.value, 0),
-            balance: Number(loan.balance),
+            totalPaid: displayTotalPaid,
+            balance: currentBalance,
             creditAvailable: loan.client?.credit_balance,
             installments: paidInstallments.map(i => ({
                 number: i.number,
@@ -1476,46 +1488,46 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         </div>
 
                         <div className="space-y-3">
-                            {/* 1. Pagar 1 Parcela (Blue Theme) */}
+                            {/* 1. Pagar 1 Parcela */}
                             <button
                                 onClick={() => {
                                     setShowPaymentModal(false);
                                     setShowSinglePaymentConfirmModal(true);
                                 }}
-                                className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800 flex items-center justify-between hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all active:scale-[0.98] group text-left"
+                                className="w-full flex flex-col rounded-2xl overflow-hidden shadow-sm transition-transform active:scale-[0.98] border border-gray-100 dark:border-gray-800"
                             >
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-blue-200 dark:bg-blue-800 rounded-xl flex items-center justify-center text-blue-700 dark:text-blue-300 group-hover:scale-110 transition-transform shrink-0">
-                                        <Check className="w-6 h-6" />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Pagar 1 Parcela</h4>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Registrar pagamento padrão</p>
-                                    </div>
+                                <div className="w-full bg-gray-100 dark:bg-gray-800 py-3.5 px-4 flex items-center justify-center gap-2">
+                                    <Check className="w-4 h-4 text-gray-500" />
+                                    <span className="text-[15px] font-extrabold text-[#111827] dark:text-white">
+                                        Pagar 1 Parcela
+                                    </span>
                                 </div>
-                                <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
-                                    R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
+                                <div className="w-full bg-[#5AAB22] py-2 px-4 flex items-center justify-center">
+                                    <span className="text-lg font-black text-white">
+                                        R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
                             </button>
 
-                            {/* 2. Informar AV (White Theme) */}
+                            {/* 2. Informar AV */}
                             <button
                                 onClick={() => {
                                     setShowPaymentModal(false);
                                     setShowAVModal(true);
                                 }}
-                                className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all active:scale-[0.98] group text-left"
+                                className="w-full flex flex-col rounded-2xl overflow-hidden shadow-sm transition-transform active:scale-[0.98] border border-gray-100 dark:border-gray-800"
                             >
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-gray-600 dark:text-gray-300 group-hover:scale-110 transition-transform shrink-0">
-                                        <Plus className="w-6 h-6" />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Informar AV</h4>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Usar saldo + valor recebido</p>
-                                    </div>
+                                <div className="w-full bg-gray-100 dark:bg-gray-800 py-3.5 px-4 flex items-center justify-center gap-2">
+                                    <Plus className="w-4 h-4 text-gray-500" />
+                                    <span className="text-[15px] font-extrabold text-[#111827] dark:text-white">
+                                        Informar AV
+                                    </span>
                                 </div>
-                                <ChevronRight className="w-5 h-5 text-gray-400 group-hover:translate-x-1 transition-transform ml-2" />
+                                <div className="w-full bg-[#00AEEF] py-2 px-4 flex items-center justify-center text-white">
+                                    <span className="text-lg font-black">
+                                        Saldo + Recebido
+                                    </span>
+                                </div>
                             </button>
 
                             <button
@@ -1563,46 +1575,75 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 </div>
             )}
 
-            {/* AV Modal */}
-            {showAVModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAVModal(false)}></div>
-                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Informar AV</h3>
-                            <button onClick={() => setShowAVModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
-                                <X className="w-5 h-5 text-gray-500" />
-                            </button>
-                        </div>
+            {/* AV Full Screen Interface */}
+            {showAVModal && loan && (
+                <div className="fixed inset-0 z-50 bg-[#fcf8f8] dark:bg-gray-950 flex flex-col animate-in slide-in-from-bottom duration-300">
+                    <header className="flex justify-between items-center px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 shrink-0">
+                        <div className="w-10" />
+                        <h1 className="text-lg font-black text-gray-900 dark:text-white uppercase tracking-tighter">Informar AV</h1>
+                        <button onClick={() => setShowAVModal(false)} className="p-2 text-blue-600 dark:text-blue-400">
+                            <X className="w-6 h-6" />
+                        </button>
+                    </header>
 
-                        <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-2xl border border-blue-100 dark:border-blue-800">
-                            <p className="text-xs text-blue-600 dark:text-blue-400 font-bold uppercase mb-1">Saldo de Crédito Atual</p>
-                            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                        </div>
+                    <main className="flex-1 p-6 space-y-6 overflow-y-auto">
+                        {/* Balance Section */}
+                        <section className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-3xl p-6 shadow-sm">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-2">SALDO DE CRÉDITO ATUAL</p>
+                            <div className="flex items-baseline gap-1">
+                                <span className="text-xl font-medium text-gray-400">R$</span>
+                                <span className="text-5xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
+                                    {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                        </section>
 
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                    Valor Recebido (R$)
-                                </label>
-                                <input
-                                    type="number"
-                                    value={avAmount}
-                                    onChange={(e) => setAvAmount(e.target.value)}
-                                    className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-bold text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none"
-                                    placeholder="0,00"
-                                />
+                        {/* Input Section */}
+                        <section className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="block text-sm font-bold text-gray-900 dark:text-gray-300 px-1 uppercase tracking-tighter">Valor Recebido (R$)</label>
+                                <div className="relative group">
+                                    <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
+                                        <span className="text-gray-400 font-black text-xl">R$</span>
+                                    </div>
+                                    <input
+                                        type="number"
+                                        value={avAmount}
+                                        onChange={(e) => setAvAmount(e.target.value)}
+                                        className="block w-full pl-14 pr-4 py-6 bg-white dark:bg-gray-900 border-2 border-transparent focus:border-blue-600 focus:ring-0 rounded-3xl text-4xl font-black text-gray-900 dark:text-white transition-all placeholder-gray-200"
+                                        placeholder="0,00"
+                                    />
+                                </div>
                             </div>
 
+                            {/* Helper Text */}
+                            <div className="flex gap-4 p-5 bg-gray-100 dark:bg-gray-900 rounded-3xl">
+                                <Info className="w-6 h-6 text-blue-600 shrink-0" />
+                                <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400 font-semibold italic">
+                                    O valor informado será processado e deduzido do seu saldo de crédito disponível instantaneamente.
+                                </p>
+                            </div>
+                        </section>
+
+                        {/* Action Buttons (Moved closer to input) */}
+                        <div className="flex gap-4 pt-4">
                             <button
                                 onClick={handleAVPayment}
                                 disabled={!avAmount || processing}
-                                className="w-full bg-primary text-white py-4 rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition disabled:opacity-70"
+                                className="flex-1 bg-blue-600 text-white rounded-2xl py-4 flex flex-col items-center justify-center hover:bg-blue-700 transition-all active:scale-[0.98] disabled:opacity-50 disabled:bg-gray-300 shadow-lg shadow-blue-600/30"
                             >
-                                {processing ? 'Processando...' : 'Calcular e Pagar'}
+                                <Calculator className="w-6 h-6 mb-1" />
+                                <span className="text-[10px] font-black uppercase tracking-widest">Calcular e Pagar</span>
+                            </button>
+                            <button
+                                onClick={() => setShowAVModal(false)}
+                                className="flex-1 text-gray-400 dark:text-gray-600 py-4 flex flex-col items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-800 transition-all active:scale-[0.98]"
+                            >
+                                <XCircle className="w-6 h-6 mb-1" />
+                                <span className="text-[10px] font-black uppercase tracking-widest">Cancelar</span>
                             </button>
                         </div>
-                    </div>
+                    </main>
                 </div>
             )}
 
@@ -1619,65 +1660,64 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         </div>
 
                         <div className="space-y-3">
-                            {/* 1. Pagar Tudo (Blue Theme) */}
+                            {/* 1. Pagar Tudo */}
                             <button
                                 onClick={() => handleMensalPayment('full')}
                                 disabled={processing}
-                                className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800 flex items-center justify-between hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all active:scale-[0.98] disabled:opacity-70 group text-left"
+                                className="w-full flex flex-col rounded-2xl overflow-hidden shadow-sm transition-transform active:scale-[0.98] disabled:opacity-70 disabled:scale-100 border border-gray-100 dark:border-gray-800"
                             >
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-blue-200 dark:bg-blue-800 rounded-xl flex items-center justify-center text-blue-700 dark:text-blue-300 group-hover:scale-110 transition-transform shrink-0">
-                                        <Wallet className="w-6 h-6" />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Pagar Tudo (Encerrar)</h4>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Liquidação total do contrato</p>
-                                    </div>
+                                <div className="w-full bg-gray-100 dark:bg-gray-800 py-3.5 px-4 flex items-center justify-center gap-2">
+                                    <Wallet className="w-4 h-4 text-gray-500" />
+                                    <span className="text-[15px] font-extrabold text-[#111827] dark:text-white">
+                                        Pagar Tudo e Encerrar
+                                    </span>
                                 </div>
-                                <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
-                                    R$ {(Number(loan.balance) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
+                                <div className="w-full bg-[#5AAB22] py-2 px-4 flex items-center justify-center">
+                                    <span className="text-lg font-black text-white">
+                                        R$ {(Number(loan.balance) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
                             </button>
 
-                            {/* 2. Pagar Juros (White Theme) */}
+                            {/* 2. Pagar Juros */}
                             <button
                                 onClick={() => handleMensalPayment('renew')}
                                 disabled={processing}
-                                className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all active:scale-[0.98] disabled:opacity-70 group text-left"
+                                className="w-full flex flex-col rounded-2xl overflow-hidden shadow-sm transition-transform active:scale-[0.98] disabled:opacity-70 disabled:scale-100 border border-gray-100 dark:border-gray-800"
                             >
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-gray-600 dark:text-gray-300 group-hover:rotate-180 transition-transform duration-500 shrink-0">
-                                        <RefreshCw className="w-6 h-6" />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Pagar Juros (Renovar)</h4>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Manter contrato ativo</p>
-                                    </div>
+                                <div className="w-full bg-gray-100 dark:bg-gray-800 py-3.5 px-4 flex items-center justify-center gap-2">
+                                    <RefreshCw className="w-4 h-4 text-gray-500" />
+                                    <span className="text-[15px] font-extrabold text-[#111827] dark:text-white">
+                                        Pagar Juros e Renovar
+                                    </span>
                                 </div>
-                                <span className="font-bold text-gray-900 dark:text-white text-sm whitespace-nowrap ml-2">
-                                    R$ {(Math.max(0, Number(loan.balance) - Number(loan.amount)) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
+                                <div className="w-full bg-[#00AEEF] py-2 px-4 flex items-center justify-center">
+                                    <span className="text-lg font-black text-white">
+                                        R$ {(Math.max(0, Number(loan.balance) - Number(loan.amount)) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
                             </button>
 
-                            {/* 3. Abater Capital (White Theme) */}
+                            {/* 3. Abater Capital */}
                             <button
                                 onClick={() => {
                                     setShowMensalPaymentModal(false);
                                     setShowAmortizationPage(true);
                                 }}
                                 disabled={processing}
-                                className="w-full p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all active:scale-[0.98] disabled:opacity-70 group text-left"
+                                className="w-full flex flex-col rounded-2xl overflow-hidden shadow-sm transition-transform active:scale-[0.98] disabled:opacity-70 disabled:scale-100 border border-gray-100 dark:border-gray-800"
                             >
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-gray-600 dark:text-gray-300 group-hover:scale-110 transition-transform shrink-0">
-                                        <TrendingDown className="w-6 h-6" />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Abater Capital (Parcial)</h4>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Reduzir dívida e recalcular juros</p>
-                                    </div>
+                                <div className="w-full bg-gray-100 dark:bg-gray-800 py-3.5 px-4 flex items-center justify-center gap-2">
+                                    <TrendingDown className="w-4 h-4 text-gray-500" />
+                                    <span className="text-[15px] font-extrabold text-[#111827] dark:text-white">
+                                        Abater Capital
+                                    </span>
                                 </div>
-                                <ChevronRight className="w-5 h-5 text-gray-400 group-hover:translate-x-1 transition-transform ml-2" />
+                                <div className="w-full bg-[#F78B1F] py-2 px-4 flex items-center justify-center">
+                                    <span className="text-lg font-black text-white">
+                                        R$ {(Number(loan.balance) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
                             </button>
 
                             <button
@@ -1762,6 +1802,110 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             >
                                 Confirmar
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* AV Custom Confirmation Modal */}
+            {showAVConfirmModal && avConfirmData && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowAVConfirmModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-[32px] p-8 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center">
+                            {/* Blue Info Circle */}
+                            <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center mb-3">
+                                <Info className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                            </div>
+
+                            <h3 className="text-2xl font-black text-gray-900 dark:text-white mb-5 tracking-tighter">Confirmar Pagamento AV</h3>
+
+                            {/* Cards Section */}
+                            <div className="grid grid-cols-2 gap-3 w-full mb-10">
+                                <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-4 rounded-2xl border-l-4 border-blue-600 flex flex-col items-start text-left">
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Parcelas a Pagar</span>
+                                    <span className="text-sm font-black text-gray-900 dark:text-white leading-tight">{avConfirmData.paidCount} Parcela(s)</span>
+                                </div>
+                                <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-4 rounded-2xl flex flex-col items-start text-left">
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Saldo de Crédito</span>
+                                    <span className="text-sm font-black text-gray-900 dark:text-white leading-tight">
+                                        R$ {avConfirmData.remainingCredit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="w-full space-y-4">
+                                <button
+                                    onClick={() => executeAVPayment(avConfirmData.paidAmount, avConfirmData.remainingCredit)}
+                                    className="w-full bg-[#111827] dark:bg-white text-white dark:text-[#111827] py-5 rounded-3xl font-black text-lg transition-all active:scale-95 shadow-xl shadow-black/10"
+                                >
+                                    Confirmar
+                                </button>
+                                <button
+                                    onClick={() => setShowAVConfirmModal(false)}
+                                    className="w-full py-2 text-sm font-black text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors uppercase tracking-widest"
+                                >
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Renew Custom Confirmation Modal */}
+            {showRenewConfirmModal && renewConfirmData && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowRenewConfirmModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-[32px] p-8 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="flex flex-col items-center text-center">
+                            <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center mb-3">
+                                <Info className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                            </div>
+
+                            <h3 className="text-2xl font-black text-gray-900 dark:text-white mb-5 tracking-tighter uppercase">
+                                {renewConfirmData.type === 'renew' ? 'Renovar Empréstimo' : 'Quitar Empréstimo'}
+                            </h3>
+
+                            <div className="w-full space-y-3 mb-10">
+                                <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-5 rounded-2xl border-l-4 border-blue-600 flex flex-col items-start text-left">
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 leading-tight">Valor a Pagar Agora</span>
+                                    <span className="text-xl font-black text-gray-900 dark:text-white">
+                                        R$ {renewConfirmData.amountToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+
+                                {renewConfirmData.type === 'renew' && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-4 rounded-2xl flex flex-col items-start text-left">
+                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 leading-tight">Novo Vencimento</span>
+                                            <span className="text-xs font-black text-gray-900 dark:text-white">{renewConfirmData.nextDueDate}</span>
+                                        </div>
+                                        <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-4 rounded-2xl flex flex-col items-start text-left">
+                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 leading-tight">Novo Saldo</span>
+                                            <span className="text-xs font-black text-gray-900 dark:text-white leading-tight">
+                                                R$ {renewConfirmData.nextValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="w-full space-y-4">
+                                <button
+                                    onClick={() => executeMensalPayment(renewConfirmData.type)}
+                                    className="w-full bg-[#111827] dark:bg-white text-white dark:text-[#111827] py-5 rounded-3xl font-black text-lg transition-all active:scale-95 shadow-xl shadow-black/10"
+                                >
+                                    Confirmar
+                                </button>
+                                <button
+                                    onClick={() => setShowRenewConfirmModal(false)}
+                                    className="w-full py-2 text-sm font-black text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition-colors uppercase tracking-widest"
+                                >
+                                    Cancelar
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
