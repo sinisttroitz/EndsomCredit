@@ -179,7 +179,7 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                 const valor = firstUnpaid.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
 
-                const jurosInfo = firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0 
+                const jurosInfo = firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0.01 
                     ? ` (incluindo R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de juros por atraso)`
                     : '';
 
@@ -193,7 +193,7 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                 overdueInstallments.forEach(i => {
                     const data = (i.originalDate || i.date).toLocaleDateString('pt-BR');
                     const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    const jurosInfo = i.accumulatedInterest && i.accumulatedInterest > 0 
+                    const jurosInfo = i.accumulatedInterest && i.accumulatedInterest > 0.01 
                         ? ` (inclui R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de juros)`
                         : '';
                     detalhesParcelas += `- Parcela ${i.number}: R$ ${valor} (Vencimento: ${data})${jurosInfo}\n`;

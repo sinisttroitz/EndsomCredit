@@ -305,7 +305,7 @@ const App: React.FC = () => {
       case 'admin-users':
         return <AdminUsers onBack={() => setCurrentView('profile')} />;
       case 'subscription-expired':
-        return <SubscriptionExpired onLogout={handleLogout} />;
+        return <SubscriptionExpired onLogout={handleLogout} logo={systemLogo} />;
       case 'reset-password':
         return <ResetPassword onSuccess={() => setCurrentView('login')} logo={systemLogo} />;
       default:

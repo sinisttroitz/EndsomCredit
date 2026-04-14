@@ -60,15 +60,21 @@ export const AdminUsers: React.FC<AdminUsersProps> = ({ onBack }) => {
             const baseDate = current > now ? current : now;
             const newExpiry = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-            const { error } = await supabase
+            const { data, error } = await supabase
                 .from('profiles')
                 .update({ 
                     access_until: newExpiry.toISOString(),
                     updated_at: new Date().toISOString()
                 })
-                .eq('id', profileId);
+                .eq('id', profileId)
+                .select();
 
             if (error) throw error;
+            
+            if (!data || data.length === 0) {
+                // RLS possivelmente bloqueou a atualização (0 linhas afetadas)
+                throw new Error("Acesso negado ou registro não atualizado no banco (possível bloqueio de segurança/RLS).");
+            }
             
             // Refresh local state
             setProfiles(profiles.map(p => 

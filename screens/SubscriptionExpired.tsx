@@ -3,9 +3,10 @@ import { Clock, ShieldCheck, MessageCircle, ExternalLink } from 'lucide-react';
 
 interface SubscriptionExpiredProps {
     onLogout: () => void;
+    logo?: string;
 }
 
-export const SubscriptionExpired: React.FC<SubscriptionExpiredProps> = ({ onLogout }) => {
+export const SubscriptionExpired: React.FC<SubscriptionExpiredProps> = ({ onLogout, logo }) => {
     return (
         <div className="flex flex-col h-full bg-[#111827] relative overflow-hidden">
             {/* Background pattern */}
@@ -15,9 +16,11 @@ export const SubscriptionExpired: React.FC<SubscriptionExpiredProps> = ({ onLogo
             </div>
 
             <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-8 text-center">
-                <div className="w-24 h-24 bg-white/100 rounded-[1rem] flex items-center justify-center mb-3 border border-white/10 shadow-2xl">
-                    <Clock className="w-12 h-12 text-primary" />
-                </div>
+                {logo ? (
+                    <img src={logo} alt="Logo do Sistema" className="h-[120px] mb-8 object-contain" />
+                ) : (
+                    <Clock className="w-16 h-16 text-primary mb-8" />
+                )}
 
                 <h1 className="text-white text-3xl font-bold tracking-tight mb-4">Acesso Expirado</h1>
                 <p className="text-white/60 text-lg mb-12 max-w-xs mx-auto">
@@ -27,8 +30,6 @@ export const SubscriptionExpired: React.FC<SubscriptionExpiredProps> = ({ onLogo
                 <div className="w-full max-w-sm space-y-4">
                     <a
                         href="https://pay.cakto.com.br/36whx5j_805010"
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="w-full bg-[#1DA74D] hover:bg-[#158f3e] text-white font-bold py-5 rounded-2xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-xl gap-3 border border-[#1DA74D]/50"
                     >
                         Assinar Plano <ExternalLink className="w-5 h-5" />

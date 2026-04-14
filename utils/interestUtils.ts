@@ -9,6 +9,7 @@ export const processRecurringInterest = async (loans: Loan[]) => {
 
     for (const loan of loans) {
         if (loan.status === 'paid') continue;
+        if (loan.frequency === 'Diária') continue; // Daily loans don't use period-based interest — use manual fines instead
 
         const [year, month, day] = loan.due_date.split('-').map(Number);
         const originalDueDate = new Date(year, month - 1, day);
@@ -22,9 +23,7 @@ export const processRecurringInterest = async (loans: Loan[]) => {
         while (true) {
             let periodEndDate = new Date(nextDueDate);
             
-            if (loan.frequency === 'Diária') {
-                periodEndDate.setDate(nextDueDate.getDate() + installments);
-            } else if (loan.frequency === 'Semanal') {
+            if (loan.frequency === 'Semanal') {
                 periodEndDate.setDate(nextDueDate.getDate() + (installments * 7));
             } else if (loan.frequency === 'Quinzenal') {
                 periodEndDate.setDate(nextDueDate.getDate() + (installments * 15));

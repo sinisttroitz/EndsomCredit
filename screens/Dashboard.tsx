@@ -776,8 +776,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
 
                             <a
                                 href="https://pay.cakto.com.br/36whx5j_805010"
-                                target="_blank"
-                                rel="noopener noreferrer"
                                 className="w-full bg-[#1DA74D] hover:bg-[#158f3e] text-white font-bold py-3.5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors border border-[#1DA74D]"
                             >
                                 Renovar Plano <ExternalLink className="w-4 h-4" />

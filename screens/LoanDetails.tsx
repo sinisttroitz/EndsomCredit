@@ -467,7 +467,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 const data = (firstUnpaid.originalDate || firstUnpaid.date).toLocaleDateString('pt-BR');
 
                 const extras = [];
-                if (firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0) {
+                if (firstUnpaid.accumulatedInterest && firstUnpaid.accumulatedInterest > 0.01) {
                     extras.push(`R$ ${firstUnpaid.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de juros por atraso`);
                 }
                 if (firstUnpaid.fine) {
@@ -488,7 +488,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     const valor = i.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
                     const extras = [];
-                    if (i.accumulatedInterest && i.accumulatedInterest > 0) {
+                    if (i.accumulatedInterest && i.accumulatedInterest > 0.01) {
                         extras.push(`R$ ${i.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} de juros`);
                     }
                     if (i.fine) {
@@ -1201,8 +1201,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-md border border-gray-100 dark:border-gray-800 mb-6">
                     <div className="flex flex-col items-center text-center">
                         <span className="text-[10px] font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-[0.2em] mb-1">Contrato #{loan.id.substring(0, 6)}</span>
-                        <p className="text-xs text-text-sub-light dark:text-text-sub-dark mb-1">Saldo Devedor</p>
-                        <h2 className="text-4xl font-bold text-primary dark:text-white mb-2 tracking-tight">
+                        <p className="text-xs text-text-sub-light dark:text-text-sub-dark font-bold uppercase mb-1 truncate max-w-full px-2">{loan.client?.name || 'Cliente'}</p>
+                        <h2 className="text-4xl font-bold text-red-600 dark:text-red-500 mb-2 tracking-tight">
                             R$ {installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h2>
                         <div className="flex items-center gap-2 mt-2">
@@ -1364,12 +1364,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     </div>
                                     <div className="text-right">
                                         <div className="flex flex-col items-end gap-0.5 mb-1">
-                                            {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0 && inst.originalValue && Math.abs(inst.value - inst.originalValue) > 0.01) && (
+                                            {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0.01 && inst.originalValue && Math.abs(inst.value - inst.originalValue) > 0.01) && (
                                                 <span className="text-[10px] text-gray-400 line-through">
                                                     R$ {inst.originalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </span>
                                             )}
-                                            {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0) && (
+                                            {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0.01) && (
                                                 <span className="text-[10px] text-red-500/80 font-medium">
                                                     + Juros R$ {inst.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </span>
@@ -2310,7 +2310,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                         <div className="space-y-4">
                             {/* Show original value if there is interest OR fine */}
-                            {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) || selectedInstallmentForDetail.fine) && (
+                            {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0.01) || selectedInstallmentForDetail.fine) && (
                                 <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
                                     <span className="text-sm text-gray-500 dark:text-gray-400">Valor Original</span>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
@@ -2319,7 +2319,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                             )}
 
-                            {Boolean(selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) && (
+                            {Boolean(selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0.01) && (
                                 <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
                                     <span className="text-sm text-danger font-medium">Juros Acumulados</span>
                                     <span className="text-sm font-bold text-danger">
@@ -2342,7 +2342,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                             <div className="flex justify-between items-center pt-2">
                                 <span className="text-base font-bold text-gray-900 dark:text-white">
-                                    {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0) || selectedInstallmentForDetail.fine) ? 'Total Atual' : 'Valor da Parcela'}
+                                    {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0.01) || selectedInstallmentForDetail.fine) ? 'Total Atual' : 'Valor da Parcela'}
                                 </span>
                                 <span className="text-xl font-black text-primary dark:text-white">
                                     R$ {selectedInstallmentForDetail.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

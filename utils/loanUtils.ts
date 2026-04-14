@@ -107,15 +107,7 @@ export const generateInstallments = (loanData: Loan, fines: InstallmentFine[] = 
 
         if (loanData.balance <= 0) status = 'paid';
 
-        // Check if this is the FIRST unpaid installment
-        const isFirstUnpaid = status !== 'paid' && !list.some(inst => inst.status !== 'paid');
         let currentInstallmentValue = installmentValue;
-        let accumulatedInterest = 0;
-
-        if (isFirstUnpaid && accumulatedInterestTotal > 0) {
-            currentInstallmentValue = installmentValue + accumulatedInterestTotal;
-            accumulatedInterest = accumulatedInterestTotal;
-        }
 
         // Apply Fine Logic
         const fine = fines.find(f => f.installment_number === (i + 1));
@@ -135,10 +127,23 @@ export const generateInstallments = (loanData: Loan, fines: InstallmentFine[] = 
             value: finalValue,
             status: status,
             originalValue: installmentValue,
-            accumulatedInterest: accumulatedInterest,
+            accumulatedInterest: 0,
             originalDate: new Date(date), // Original date is the correctly backtracked date
             fine: fine
         });
     }
+
+    // --- Post-pass: Distribute accumulated interest evenly across overdue installments ---
+    if (accumulatedInterestTotal > 0) {
+        const overdueInstallments = list.filter(i => i.status === 'late' || i.status === 'pending');
+        if (overdueInstallments.length > 0) {
+            const interestShare = accumulatedInterestTotal / overdueInstallments.length;
+            for (const inst of overdueInstallments) {
+                inst.accumulatedInterest = interestShare;
+                inst.value += interestShare;
+            }
+        }
+    }
+
     return list;
 };
