@@ -1,83 +1,80 @@
 import React from 'react';
-import { LayoutDashboard, Users, FileText, Settings, LogOut, PieChart } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Settings, LogOut, PieChart, Calendar } from 'lucide-react';
 import { ViewState } from '../types';
 
 interface SidebarProps {
   currentView: ViewState;
   onNavigate: (view: ViewState) => void;
-  logo?: string;
-  userEmail?: string;
-  userName?: string;
   onLogout: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ 
-  currentView, 
-  onNavigate, 
-  logo, 
-  userEmail, 
-  userName,
-  onLogout 
+export const Sidebar: React.FC<SidebarProps> = ({
+  currentView,
+  onNavigate,
+  onLogout
 }) => {
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'reports', label: 'Relatórios', icon: PieChart },
+    { id: 'collection-calendar', label: 'Calendário', icon: Calendar },
     { id: 'clients', label: 'Clientes', icon: Users },
     { id: 'loans', label: 'Empréstimos', icon: FileText },
-    { id: 'collection-calendar', label: 'Relatórios', icon: PieChart }, // Mapping Reports to Calendar/Reports
-    { id: 'profile', label: 'Configurações', icon: Settings },
   ];
 
-  const displayName = userName || userEmail?.split('@')[0] || 'Admin';
-  const userInitial = displayName.charAt(0).toUpperCase();
-
   return (
-    <aside className="hidden md:flex flex-col w-64 bg-primary text-white h-screen sticky top-0">
-      {/* Logo Area */}
-      <div className="p-6 flex items-center justify-center border-b border-gray-800">
-        {logo ? (
-            <img src={logo} alt="Logo" className="h-16 w-auto object-contain" />
-        ) : (
-            <div className="h-16 w-16 bg-primary rounded-2xl flex items-center justify-center font-bold text-white text-2xl">
-                F
-            </div>
-        )}
-      </div>
+    <aside className="hidden md:flex flex-col w-30 bg-background-light dark:bg-background-dark h-screen sticky top-0 p-4 z-50">
+      <div className="flex-1 bg-[#1E1E24] dark:bg-[#121214] rounded-[20px] flex flex-col items-center py-8 px-2 shadow-2xl border border-white/5 overflow-hidden">
+        {/* Top Branding Icon */}
+        <div className="mb-12">
+          <img
+            src="https://wjltsjvdcbrbsunpsqwz.supabase.co/storage/v1/object/public/system/favicon.webp"
+            alt="AgiCred"
+            className="w-10 h-10 rounded-lg object-contain"
+          />
+        </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 py-6 px-3 space-y-1">
-        {menuItems.map((item) => {
-          const isActive = currentView === item.id || 
-                           (item.id === 'clients' && ['new-client', 'client-details', 'edit-client'].includes(currentView)) ||
-                           (item.id === 'loans' && ['new-loan', 'loan-details', 'interest-details'].includes(currentView));
-          
-          return (
-            <button
-              key={item.id}
-              onClick={() => onNavigate(item.id as ViewState)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                isActive 
-                  ? 'bg-primary text-white shadow-lg shadow-primary/20' 
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <item.icon className={`w-5 h-5 ${isActive ? 'text-white' : 'text-gray-400'}`} />
-              {item.label}
-            </button>
-          );
-        })}
-      </nav>
+        {/* Navigation Group */}
+        <nav className="flex flex-col items-center gap-3 flex-1 w-full px-2">
+          {menuItems.map((item) => {
+            const isActive = currentView === item.id ||
+              (item.id === 'clients' && ['new-client', 'client-details', 'edit-client', 'client-loans'].includes(currentView)) ||
+              (item.id === 'loans' && ['new-loan', 'loan-details', 'interest-details'].includes(currentView));
 
-      {/* User Profile */}
-      <div className="p-4 border-t border-gray-800">
-        <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors cursor-pointer group">
-          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold border border-primary/30">
-            {userInitial}
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <p className="text-sm font-bold truncate text-white group-hover:text-primary transition-colors">{displayName}</p>
-            <p className="text-xs text-gray-500 truncate">Administrador</p>
-          </div>
-          <button onClick={onLogout} className="text-gray-500 hover:text-red-400 transition-colors">
+            return (
+              <button
+                key={item.id}
+                onClick={() => onNavigate(item.id as ViewState)}
+                title={item.label}
+                className={`w-14 h-14 flex items-center justify-center rounded-2xl transition-all duration-300 relative group ${isActive
+                  ? 'bg-white text-black shadow-lg shadow-white/10'
+                  : 'text-zinc-500 hover:text-white'
+                  }`}
+              >
+                <item.icon className="w-6 h-6 relative z-10" />
+                {!isActive && (
+                  <div className="absolute inset-0 bg-white/5 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                )}
+
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Bottom Group */}
+        <div className="flex flex-col items-center gap-6 mt-auto pb-4">
+
+
+          <button
+            onClick={() => onNavigate('profile')}
+            className={`transition-colors p-2 rounded-xl hover:bg-white/5 ${currentView === 'profile' ? 'text-white' : 'text-zinc-500 hover:text-white'}`}
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={onLogout}
+            className="w-14 h-14 bg-zinc-800 hover:bg-zinc-700 text-white rounded-[20px] flex items-center justify-center transition-all shadow-lg active:scale-95 mt-2"
+            title="Sair"
+          >
             <LogOut className="w-5 h-5" />
           </button>
         </div>

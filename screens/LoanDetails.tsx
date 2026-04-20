@@ -1168,7 +1168,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-            <header className={`bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-8 pb-12 shadow-lg relative z-10 transition-colors duration-300 ${isSelectionMode ? 'bg-gray-900' : ''}`}>
+            <header className={`bg-black text-white px-6 pt-8 pb-12 rounded-b-[40px] relative z-10 transition-colors duration-300`}>
                 <div className="flex items-center justify-between mb-4">
                     {isSelectionMode ? (
                         <>
@@ -1399,25 +1399,25 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     </div>
                 </div>
 
-                <div className="space-y-3 mb-8">
+                <div className="mb-10">
                     {isSelectionMode ? (
-                        <>
+                        <div className="space-y-3">
                             <button
                                 onClick={handleBatchPayment}
                                 disabled={processing || selectedInstallments.length === 0}
                                 className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
                             >
-                                {processing ? 'Processando...' : `Marcar como pagas (${selectedInstallments.length})`}
+                                {processing ? 'Processando...' : `Confirmar Pagamentos (${selectedInstallments.length})`}
                             </button>
                             <button
                                 onClick={toggleSelectionMode}
                                 className="w-full bg-transparent border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-sm"
                             >
-                                Cancelar
+                                Cancelar Seleção
                             </button>
-                        </>
+                        </div>
                     ) : (
-                        <>
+                        <div className="grid grid-cols-2 gap-3">
                             {loan.status !== 'paid' && (
                                 <button
                                     onClick={() => {
@@ -1428,48 +1428,69 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                         }
                                     }}
                                     disabled={processing}
-                                    className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98] disabled:opacity-70"
+                                    className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-gray-900 dark:bg-white text-white dark:text-gray-900 shadow-md border border-black/5 transition-all active:scale-[0.96]"
                                 >
-                                    Registrar Pagamento
+                                    <div className="w-8 h-8 rounded-xl bg-white/10 dark:bg-gray-100 flex items-center justify-center">
+                                        <Wallet className="w-4 h-4" />
+                                    </div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                                        Registrar<br/>Pagamento
+                                    </span>
                                 </button>
                             )}
 
-                            {/* Batch Payment Button - Always visible if not paid AND not Mensal/Quinzenal */}
                             {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && (
                                 <button
                                     onClick={toggleSelectionMode}
-                                    className="w-full bg-white dark:bg-gray-800 text-primary dark:text-white border border-gray-200 dark:border-gray-700 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-sm"
+                                    className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-100 dark:border-gray-700 shadow-sm transition-all active:scale-[0.96]"
                                 >
-                                    Pagamento em lote
+                                    <div className="w-8 h-8 rounded-xl bg-gray-50 dark:bg-gray-700 flex items-center justify-center">
+                                        <Check className="w-4 h-4 text-gray-400" />
+                                    </div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                                        Pagamento<br/>em Lote
+                                    </span>
                                 </button>
                             )}
 
                             <button
                                 onClick={() => setShowReceiptModal(true)}
-                                className="w-full bg-transparent border-2 border-primary dark:border-white text-primary dark:text-white py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2"
+                                className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-100 dark:border-gray-700 shadow-sm transition-all active:scale-[0.96]"
                             >
-                                <Share2 className="w-5 h-5" />
-                                Gerar Comprovante
+                                <div className="w-8 h-8 rounded-xl bg-gray-50 dark:bg-gray-700 flex items-center justify-center">
+                                    <Share2 className="w-4 h-4 text-gray-400" />
+                                </div>
+                                <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                                    Gerar<br/>Comprovante
+                                </span>
                             </button>
 
-                            {loan.status === 'paid' && (
+                            {loan.status === 'paid' ? (
                                 <button
                                     onClick={handleNewLoan}
-                                    className="w-full bg-secondary/10 border border-secondary text-secondary py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
+                                    className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-secondary/10 dark:bg-secondary/20 border border-secondary text-secondary shadow-sm transition-all active:scale-[0.96]"
                                 >
-                                    <PlusCircle className="w-5 h-5" />
-                                    Novo Empréstimo para este Cliente
+                                    <div className="w-8 h-8 rounded-xl bg-secondary/20 flex items-center justify-center">
+                                        <PlusCircle className="w-4 h-4" />
+                                    </div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                                        Novo<br/>Empréstimo
+                                    </span>
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => setShowDeleteModal(true)}
+                                    className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-red-50/50 dark:bg-red-900/10 border border-red-100 dark:border-red-900 transition-all active:scale-[0.96]"
+                                >
+                                    <div className="w-8 h-8 rounded-xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
+                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                    </div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-red-600 text-center leading-tight">
+                                        Excluir<br/>Empréstimo
+                                    </span>
                                 </button>
                             )}
-
-                            <button
-                                onClick={() => setShowDeleteModal(true)}
-                                className="w-full bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 py-4 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
-                            >
-                                <Trash2 className="w-5 h-5" />
-                                Excluir Empréstimo
-                            </button>
-                        </>
+                        </div>
                     )}
                 </div>
 

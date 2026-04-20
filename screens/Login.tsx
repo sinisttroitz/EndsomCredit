@@ -72,60 +72,46 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
   };
 
   return (
-    <div
-      className="flex flex-col h-full bg-black relative overflow-y-auto no-scrollbar bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: 'linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.8)), url("https://wjltsjvdcbrbsunpsqwz.supabase.co/storage/v1/object/public/system/bglogin.webp")' }}
-    >
-      <main className="relative z-10 flex-1 flex flex-col items-center px-8 pt-24 pb-8 w-full max-w-[340px] mx-auto">
+    <div className="flex flex-col h-full bg-black relative overflow-y-auto no-scrollbar items-center justify-center p-4">
+      <main className="relative z-10 w-full max-w-[380px] bg-[#0a0a0a] border border-white/5 rounded-[2rem] shadow-2xl p-8 sm:p-10">
         {/* Logo and Headings */}
-        <div className="mb-2 text-center w-full">
+        <div className="mb-8 text-center w-full">
           {logo ? (
-            <img src={logo} alt="Empresta Logo" className="h-[150px] mx-auto mb-20 object-contain" />
+            <img src={logo} alt="Empresta Logo" className="h-[100px] mx-auto mb-6 object-contain" />
           ) : (
-            <div className="h-[150px] mb-6 flex items-center justify-center">
-              <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+            <div className="h-[100px] mb-6 flex items-center justify-center">
+              <div className="w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
             </div>
           )}
-          <h1 className="text-white text-2xl font-bold tracking-tight mb-2">Acesse sua conta</h1>
+          <h1 className="text-white text-xl font-semibold tracking-tight">Acesse sua conta</h1>
+          <p className="text-white/40 text-sm mt-1.5">Insira seus dados para continuar</p>
         </div>
 
         {/* Login Form */}
-        <div className="w-full space-y-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="relative">
-              <input
-                id="email"
-                name="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="block w-full px-6 py-4 bg-[#121212] border-transparent rounded-2xl text-white placeholder-white/60 focus:ring-2 focus:ring-white/10 outline-none transition-all duration-200 text-base"
-                placeholder="seu@email.com"
-                required
-              />
-            </div>
-
-            <div className="space-y-3">
+        <div className="w-full">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-1.5">
+              <label htmlFor="email" className="text-xs font-medium text-white/60 ml-1">E-mail</label>
               <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/40">
+                  <Mail className="w-4 h-4" />
+                </div>
                 <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full px-6 py-4 bg-[#121212] border-transparent rounded-2xl text-white placeholder-white/60 focus:ring-2 focus:ring-white/10 outline-none transition-all duration-200 text-base"
-                  placeholder="••••••••••••"
+                  id="email"
+                  name="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="block w-full pl-10 pr-4 py-3 bg-white/[0.03] border border-white/5 rounded-xl text-white placeholder-white/20 focus:border-white/20 focus:bg-white/[0.05] focus:ring-1 focus:ring-white/20 outline-none transition-all duration-200 text-sm"
+                  placeholder="seu@email.com"
                   required
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-6 flex items-center text-white/40 hover:text-white/60 outline-none"
-                >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
               </div>
-              <div className="text-right px-1">
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center ml-1">
+                <label htmlFor="password" className="text-xs font-medium text-white/60">Senha</label>
                 <button
                   type="button"
                   onClick={() => {
@@ -133,33 +119,56 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
                     setForgotMessage(null);
                     setShowForgotModal(true);
                   }}
-                  className="text-sm text-white/80 hover:text-white transition-colors font-medium"
+                  className="text-xs text-white/40 hover:text-white transition-colors font-medium"
                 >
                   Esqueci a senha
+                </button>
+              </div>
+              <div className="relative">
+                <input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="block w-full px-4 py-3 bg-white/[0.03] border border-white/5 rounded-xl text-white placeholder-white/20 focus:border-white/20 focus:bg-white/[0.05] focus:ring-1 focus:ring-white/20 outline-none transition-all duration-200 text-sm"
+                  placeholder="••••••••••••"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-4 flex items-center text-white/40 hover:text-white/80 outline-none transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 text-red-400 text-xs px-2 py-1">
-                <AlertCircle className="w-4 h-4" />
+              <div className="flex items-center gap-2 text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg text-xs px-3 py-2.5 animate-in fade-in zoom-in-95 duration-200">
+                <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            <div className="pt-4 space-y-4">
+            <div className="pt-2 space-y-3">
               <button
                 disabled={loading}
                 type="submit"
-                className="w-full bg-white text-[#111827] font-bold py-4 rounded-2xl shadow-xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-base disabled:opacity-70"
+                className="w-full bg-white text-black font-semibold py-3 rounded-xl shadow-lg active:scale-[0.98] hover:bg-white/90 transition-all duration-200 flex items-center justify-center text-sm disabled:opacity-70 disabled:active:scale-100"
               >
-                <span>{loading ? 'Entrando...' : 'Entrar'}</span>
+                {loading ? (
+                  <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                ) : (
+                  'Entrar'
+                )}
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowAccessModal(true)}
-                className="w-full bg-transparent border-2 border-white text-white font-bold py-4 rounded-2xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-base"
+                className="w-full bg-transparent border border-white/10 text-white/80 hover:text-white hover:bg-white/[0.02] font-medium py-3 rounded-xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-sm"
               >
                 Solicitar Acesso
               </button>
@@ -168,9 +177,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
         </div>
 
         {/* Footer Support */}
-        <footer className="mt-auto py-8 text-center text-white/40">
+        <footer className="mt-8 text-center text-white/30">
           <p className="text-xs">
-            Problemas com o acesso? <a href="https://wa.me/5564992032926" target="_blank" rel="noopener noreferrer" className="text-white/60 font-semibold underline decoration-white/20 hover:text-white transition-colors">Contate o suporte</a>
+            Problemas com o acesso? <a href="https://wa.me/5564992032926" target="_blank" rel="noopener noreferrer" className="text-white/50 hover:text-white transition-colors underline decoration-white/20 underline-offset-2">Contate o suporte</a>
           </p>
         </footer>
       </main>
@@ -179,21 +188,21 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
       {showAccessModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300"
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300"
             onClick={() => setShowAccessModal(false)}
           ></div>
-          <div className="relative bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in slide-in-from-bottom-4 duration-300 border border-gray-100">
+          <div className="relative bg-[#111] border border-white/10 rounded-[2rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in slide-in-from-bottom-4 duration-300">
             <div className="flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-primary mb-6">
+              <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center text-white mb-6 border border-white/10">
                 <ShieldCheck className="w-8 h-8" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Solicitar Acesso</h3>
-              <p className="text-gray-500 text-sm mb-8">
-                Desculpe, a criação de novas contas está <span className="text-primary font-bold">indisponível no momento</span>. Por favor, tente novamente mais tarde.
+              <h3 className="text-xl font-bold text-white mb-2">Solicitar Acesso</h3>
+              <p className="text-white/50 text-sm mb-8">
+                A criação de novas contas está <span className="text-white font-medium">indisponível</span>. Por favor, tente novamente mais tarde.
               </p>
               <button
                 onClick={() => setShowAccessModal(false)}
-                className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-[0.98] transition-all duration-200 text-lg"
+                className="w-full bg-white text-black font-semibold py-3 rounded-xl active:scale-[0.98] hover:bg-white/90 transition-all duration-200 text-sm"
               >
                 Entendido
               </button>
@@ -201,20 +210,21 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
           </div>
         </div>
       )}
+
       {/* Forgot Password Modal */}
       {showForgotModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300"
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300"
             onClick={() => !forgotLoading && setShowForgotModal(false)}
           ></div>
-          <div className="relative bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in slide-in-from-bottom-4 duration-300 border border-gray-100">
+          <div className="relative bg-[#111] border border-white/10 rounded-[2rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in slide-in-from-bottom-4 duration-300">
             <div className="flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center text-primary mb-6">
+              <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center text-white mb-6 border border-white/10">
                 <Mail className="w-8 h-8" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Recuperar Senha</h3>
-              <p className="text-gray-500 text-sm mb-6">
+              <h3 className="text-xl font-bold text-white mb-2">Recuperar Senha</h3>
+              <p className="text-white/50 text-sm mb-6">
                 Enviaremos um link de recuperação para o e-mail abaixo.
               </p>
 
@@ -223,35 +233,35 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
                   type="email"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
-                  className="block w-full px-4 py-4 bg-gray-50 border border-gray-100 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-primary/20 outline-none transition-all duration-200"
+                  className="block w-full px-4 py-3 bg-white/[0.03] border border-white/10 rounded-xl text-white placeholder-white/30 focus:border-white/20 focus:bg-white/[0.05] focus:ring-1 focus:ring-white/20 outline-none transition-all duration-200 text-sm"
                   placeholder="Seu e-mail cadastrado"
                   required
                 />
 
                 {forgotMessage && (
-                  <div className={`p-4 rounded-xl text-xs flex items-start gap-2 text-left ${forgotMessage.type === 'success'
-                    ? 'bg-green-50 text-green-700 border border-green-100'
-                    : 'bg-red-50 text-red-700 border border-red-100'
+                  <div className={`p-3 rounded-xl text-xs flex items-center gap-2 text-left animate-in fade-in zoom-in-95 duration-200 ${forgotMessage.type === 'success'
+                    ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                    : 'bg-red-500/10 text-red-400 border border-red-500/20'
                     }`}>
-                    {forgotMessage.type === 'success' ? <ShieldCheck className="w-4 h-4 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
+                    {forgotMessage.type === 'success' ? <ShieldCheck className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
                     <span>{forgotMessage.text}</span>
                   </div>
                 )}
 
-                <div className="flex flex-col gap-3 pt-2">
+                <div className="flex flex-col gap-2 pt-2">
                   <button
                     type="submit"
                     disabled={forgotLoading}
-                    className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-[0.98] transition-all duration-200 text-lg disabled:opacity-70 flex items-center justify-center gap-2"
+                    className="w-full bg-white text-black font-semibold py-3 rounded-xl active:scale-[0.98] hover:bg-white/90 transition-all duration-200 text-sm disabled:opacity-70 flex items-center justify-center gap-2"
                   >
                     {forgotLoading ? (
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
                     ) : 'Enviar Link'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowForgotModal(false)}
-                    className="w-full text-gray-500 font-bold py-2 text-sm hover:text-gray-700 transition-colors"
+                    className="w-full text-white/50 font-medium py-2 text-sm hover:text-white transition-colors"
                   >
                     Cancelar
                   </button>

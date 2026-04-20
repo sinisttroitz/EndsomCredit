@@ -206,7 +206,7 @@ export const EditClient: React.FC<EditClientProps> = ({ clientId, onBack, onSucc
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark relative">
-            <header className="sticky top-0 z-50 bg-background-dark text-white p-4 shadow-md">
+            <header className="sticky top-0 z-50 bg-black text-white px-6 pt-10 pb-12 rounded-b-[40px]">
                 <div className="max-w-md mx-auto flex items-center justify-between">
                     <button onClick={onBack} className="flex items-center justify-center p-2 hover:bg-white/10 rounded-full transition-colors">
                         <ArrowLeft className="w-5 h-5" />

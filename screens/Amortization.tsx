@@ -257,12 +257,12 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
             {/* Header */}
-            <div className="bg-white dark:bg-gray-800 px-6 py-4 flex items-center gap-4 shadow-sm sticky top-0 z-10">
+            <header className="bg-black text-white px-6 pt-8 pb-10 flex items-center gap-4 sticky top-0 z-10 rounded-b-[40px]">
                 <button onClick={onBack} className="p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
                     <ArrowLeft className="w-6 h-6 text-gray-700 dark:text-gray-200" />
                 </button>
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white">Abatimento de Capital</h1>
-            </div>
+            </header>
 
             <div className="flex-1 p-6 max-w-3xl mx-auto w-full space-y-6">
 

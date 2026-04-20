@@ -141,7 +141,7 @@ export const InterestDetails: React.FC<InterestDetailsProps> = ({ onBack, onLoan
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
             {/* Header */}
-            <header className="bg-primary dark:bg-black text-white rounded-b-[2.5rem] px-6 pt-12 pb-10 shadow-lg relative z-10">
+            <header className="bg-black text-white rounded-b-[40px] px-6 pt-12 pb-10 relative z-10">
                 <div className="flex items-center justify-between mb-8">
                     <button onClick={onBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 hover:bg-white/20 transition-colors">
                         <ArrowLeft className="w-5 h-5" />

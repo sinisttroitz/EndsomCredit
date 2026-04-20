@@ -171,7 +171,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-      <header className="bg-primary dark:bg-black text-white rounded-b-b-header px-6 pt-8 pb-5 shadow-lg relative z-10">
+      <header className="bg-black text-white px-6 pt-8 pb-8 rounded-b-[40px] relative z-10">
         <div className="flex items-center mb-4">
           <button onClick={onBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 mr-4 hover:bg-white/20 transition-colors">
             <ArrowLeft className="w-5 h-5" />
@@ -211,8 +211,12 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                         onClick={() => selectClient(client)}
                         className="p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center gap-3 border-b border-gray-50 dark:border-gray-700/50 last:border-0"
                     >
-                        <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-xs">
-                            {client.name.substring(0,2).toUpperCase()}
+                        <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+                            {client.avatar_url && !client.avatar_url.includes('ui-avatars.com') ? (
+                                <img src={client.avatar_url} alt={client.name} className="w-full h-full object-cover" />
+                            ) : (
+                                <span>{client.name.substring(0,2).toUpperCase()}</span>
+                            )}
                         </div>
                         <div>
                             <p className="font-bold text-sm text-gray-800 dark:text-gray-200">{client.name}</p>

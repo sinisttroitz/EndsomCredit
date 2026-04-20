@@ -74,7 +74,24 @@ export interface LoanAmortization {
     created_at: string;
 }
 
-export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar' | 'admin-users' | 'subscription-expired' | 'reports' | 'reset-password';
+export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar' | 'admin-users' | 'admin-notifications' | 'subscription-expired' | 'reports' | 'reset-password';
+
+export interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  created_at: string;
+  created_by: string;
+  is_global: boolean;
+  target_user_id?: string;
+}
+
+export interface NotificationRead {
+  id: string;
+  notification_id: string;
+  user_id: string;
+  read_at: string;
+}
 
 export interface Profile {
   id: string;

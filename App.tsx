@@ -15,6 +15,7 @@ import { Reports } from './screens/Reports';
 import { Login } from './screens/Login';
 import { ResetPassword } from './screens/ResetPassword';
 import { AdminUsers } from './screens/AdminUsers';
+import { AdminNotifications } from './screens/AdminNotifications';
 import { SubscriptionExpired } from './screens/SubscriptionExpired';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
@@ -159,6 +160,13 @@ const App: React.FC = () => {
     }
   }, [session]);
 
+  useEffect(() => {
+    // Auto-redirect from Dashboard on Desktop
+    if (currentView === 'dashboard' && window.innerWidth >= 768) {
+      setCurrentView('reports');
+    }
+  }, [currentView]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentView('login');
@@ -170,7 +178,7 @@ const App: React.FC = () => {
 
     switch (currentView) {
       case 'login':
-        return <Login onLogin={() => setCurrentView('dashboard')} logo={systemLogo} />;
+        return <Login onLogin={() => setCurrentView(window.innerWidth >= 768 ? 'reports' : 'dashboard')} logo={systemLogo} />;
       case 'dashboard':
         return <Dashboard
           userProfile={userProfile}
@@ -220,12 +228,33 @@ const App: React.FC = () => {
           }}
         />;
       case 'reports':
-        return <Reports onBack={() => setCurrentView('dashboard')} />;
+        return <Reports 
+          onBack={() => setCurrentView('dashboard')} 
+          onLoanSelect={(id) => {
+            setSelectedLoanId(id);
+            setPreviousView('reports');
+            setCurrentView('loan-details');
+          }}
+        />;
       case 'clients':
-        return <Clients onClientSelect={(id) => {
-          setSelectedClientId(id);
-          setCurrentView('client-details');
-        }} />;
+        return <Clients
+          onClientSelect={(id) => {
+            if (id === 'new') {
+              setCurrentView('new-client');
+            } else {
+              setSelectedClientId(id);
+              setCurrentView('client-details');
+            }
+          }}
+          onEditClient={(id) => {
+            setSelectedClientId(id);
+            setCurrentView('edit-client');
+          }}
+          onNewLoan={(id) => {
+            setSelectedClientId(id);
+            setCurrentView('new-loan');
+          }}
+        />;
       case 'loans':
         return <Loans
           onLoanSelect={(id) => {
@@ -304,6 +333,8 @@ const App: React.FC = () => {
         />;
       case 'admin-users':
         return <AdminUsers onBack={() => setCurrentView('profile')} />;
+      case 'admin-notifications':
+        return <AdminNotifications onBack={() => setCurrentView('profile')} />;
       case 'subscription-expired':
         return <SubscriptionExpired onLogout={handleLogout} logo={systemLogo} />;
       case 'reset-password':
