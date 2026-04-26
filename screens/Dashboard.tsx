@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Search, DollarSign, TrendingUp, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText, Calendar, HelpCircle, Plus, Award, ExternalLink, BarChart3, CalendarCheck, EyeOff, Eye } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Search, DollarSign, TrendingUp, TrendingDown, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText, Calendar, HelpCircle, Plus, Award, ExternalLink, BarChart3, CalendarCheck, EyeOff, Eye } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan, Client, Profile as UserProfileData } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
@@ -14,10 +14,12 @@ interface DashboardProps {
     onViewInterestDetails?: () => void;
     onViewCollectionCalendar?: () => void;
     onViewReports?: () => void;
+    onViewNotifications?: () => void;
+    onViewSubscription?: () => void;
     userProfile?: UserProfileData | null;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSelect, onViewLateLoans, onViewClients, onViewInterestDetails, onViewCollectionCalendar, onViewReports, userProfile }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSelect, onViewLateLoans, onViewClients, onViewInterestDetails, onViewCollectionCalendar, onViewReports, onViewNotifications, onViewSubscription, userProfile }) => {
     const [summary, setSummary] = useState({
         totalLent: 0,
         totalReceived: 0,
@@ -40,17 +42,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         monthlyReceived: Array(12).fill(0),
         activeLoansCount: 0,
         paidLoansCount: 0,
-        lateLoansCount: 0
+        lateLoansCount: 0,
+        totalCapital: 0,
+        totalPrincipalReceived: 0,
+        totalPrincipalOpen: 0,
+        totalInterestPending: 0,
+        totalToReceive: 0
     });
     const [performanceToggle, setPerformanceToggle] = useState<'Empréstado' | 'Recebidos'>('Empréstado');
     const [loading, setLoading] = useState(true);
     const [lateLoansList, setLateLoansList] = useState<Loan[]>([]);
+    const [nudgeCards, setNudgeCards] = useState(false);
+
+    // Nudge animation for mobile carousel (CSS based to bypass scroll-snap lock)
+    useEffect(() => {
+        if (!loading) {
+            const timer1 = setTimeout(() => setNudgeCards(true), 1000);
+            const timer2 = setTimeout(() => setNudgeCards(false), 1400);
+            return () => { clearTimeout(timer1); clearTimeout(timer2); };
+        }
+    }, [loading]);
 
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const [searchResults, setSearchResults] = useState<{ clients: Client[], loans: any[] }>({ clients: [], loans: [] });
-    const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
     const [isTotalReceivedExpanded, setIsTotalReceivedExpanded] = useState(false);
     const [isInterestReceivedExpanded, setIsInterestReceivedExpanded] = useState(false);
     const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
@@ -118,6 +134,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     };
 
     const handleBellClick = () => {
+        // On mobile, navigate to dedicated notifications page
+        if (window.innerWidth < 768 && onViewNotifications) {
+            onViewNotifications();
+            return;
+        }
+        // On desktop, toggle notification panel
         if (showNotifPanel) {
             setShowNotifPanel(false);
         } else {
@@ -243,6 +265,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             let lateClientIds = new Set<string>();
             let activeLoansCount = 0;
             let paidLoansCount = 0;
+            let totalCapital = 0;
+            let totalPrincipalReceived = 0;
+            let totalPrincipalOpen = 0;
+            let totalInterestPending = 0;
+            let totalToReceive = 0;
 
             const monthlyLent = Array(12).fill(0);
             const monthlyReceived = Array(12).fill(0);
@@ -259,6 +286,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
 
                 // Total Debt = Total Amount to be paid (Principal + Interest)
                 const totalDebt = installmentValue * installments;
+
+                totalCapital += amount;
 
                 // Nova Logica Categorica (Sync com Reports)
                 if (loan.status === 'paid') {
@@ -286,6 +315,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                     receivedFromPaidLoans += loanReceived;
                 } else {
                     receivedFromActiveLoans += loanReceived;
+
+                    const loanFines = allFines.filter(f => f.loan_id === loan.id);
+                    const totalPendingFines = loanFines.reduce((sum, f) => sum + (Number(f.fine_value) || 0), 0);
+                    totalToReceive += (loanReceived + balance + totalPendingFines);
                 }
 
                 if (loan.created_at) {
@@ -319,6 +352,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                     currentLoanInt = renewalsInt + Math.max(0, (loanReceived > amount ? (loanReceived - amount) : 0) - renewalsInt);
                 }
                 totalInterestReceived += currentLoanInt;
+
+                // Capital breakdown (sync with Reports)
+                const isCapitalCovered = loan.status === 'paid' || (loanReceived >= amount && amount > 0);
+                if (isCapitalCovered) {
+                    totalPrincipalReceived += amount;
+                } else {
+                    totalPrincipalOpen += amount;
+                }
+
+                // Juros pendentes (ativos)
+                if (loan.status !== 'paid') {
+                    const renewalsIntCalc = Number(loan.total_interest_paid) || 0;
+                    const principalAlreadyPaid = Math.max(0, loanReceived - renewalsIntCalc);
+                    const remainingPrincipal = Math.max(0, amount - principalAlreadyPaid);
+                    const loanFinesValue = allFines.filter(f => f.loan_id === loan.id).reduce((s, f) => s + (Number(f.fine_value) || 0), 0);
+                    const pendingProfit = Math.max(0, (balance + loanFinesValue) - remainingPrincipal);
+                    totalInterestPending += pendingProfit;
+                }
 
                 if (isLoanLate(loan, allFines)) {
                     lateAmount += calculateOverdueAmount(loan, allFines);
@@ -368,7 +419,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 monthlyReceived,
                 activeLoansCount,
                 paidLoansCount,
-                lateLoansCount: lateLoans.length
+                lateLoansCount: lateLoans.length,
+                totalCapital,
+                totalPrincipalReceived,
+                totalPrincipalOpen,
+                totalInterestPending,
+                totalToReceive
             });
 
             setLateLoansList(lateLoans.slice(0, 5));
@@ -399,13 +455,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     const prevMonthIdx = (currentMonthIdx - 1 + 12) % 12;
     const currentLentValue = summary.monthlyLent[currentMonthIdx];
     const prevLentValue = summary.monthlyLent[prevMonthIdx];
-    let growthBadge = "+0,0%";
+    let growthPct = 0;
     if (prevLentValue > 0) {
-        const pct = ((currentLentValue - prevLentValue) / prevLentValue) * 100;
-        growthBadge = `${pct >= 0 ? '+' : ''}${pct.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+        growthPct = ((currentLentValue - prevLentValue) / prevLentValue) * 100;
     } else if (currentLentValue > 0) {
-        growthBadge = "+100,0%";
+        growthPct = 100;
     }
+    const isGrowthPositive = growthPct >= 0;
+    const growthBadge = `${isGrowthPositive ? '+' : ''}${growthPct.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+    const growthColor = isGrowthPositive ? '#00A859' : '#EF4444';
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
@@ -454,7 +512,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                             {!userProfile?.is_admin && (
                                 <div
                                     className="flex items-center gap-1 cursor-pointer"
-                                    onClick={() => setShowSubscriptionModal(true)}
+                                    onClick={() => onViewSubscription?.()}
                                 >
                                     <Award className="w-3.5 h-3.5 text-[#00A859]" fill="currentColor" />
                                     <span className="text-[11px] font-bold text-[#00A859] tracking-wide">Premium</span>
@@ -475,26 +533,67 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                     </button>
                 </div>
 
-                {/* Dinheiro na Rua - Card Preto */}
-                <div className="w-full bg-[#1E1E24] dark:bg-card-dark rounded-3xl p-5 shadow-xl relative mt-1">
-                    <div className="flex justify-between items-end">
-                        <div className="flex flex-col z-10">
-                            <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1.5">Dinheiro na Rua</span>
-                            <div className="flex items-center gap-2">
-                                <span className="text-white text-[28px] font-manrope font-black tracking-tight leading-none">
-                                    {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
-                                </span>
-                                <button onClick={() => setHideValues(!hideValues)} className="text-white/40 hover:text-white transition-colors">
-                                    {hideValues ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
-                                </button>
+                {/* Mobile Cards Carousel (Dinheiro na Rua & Carteira Ativa) */}
+                <div className="w-full mt-1">
+                    <div className="flex overflow-x-auto snap-x snap-mandatory gap-4 no-scrollbar pb-1">
+                        {/* Dinheiro na Rua - Card Preto */}
+                        <div className={`min-w-full snap-center shrink-0 bg-[#1E1E24] dark:bg-card-dark rounded-3xl p-5 shadow-xl relative transition-transform duration-500 ease-in-out ${nudgeCards ? '-translate-x-12' : 'translate-x-0'}`}>
+                            <div className="flex justify-between items-end">
+                                <div className="flex flex-col z-10">
+                                    <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1.5">Dinheiro na Rua</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-white text-[28px] font-manrope font-black tracking-tight leading-none">
+                                            {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                        </span>
+                                        <button onClick={() => setHideValues(!hideValues)} className="text-white/40 hover:text-white transition-colors">
+                                            {hideValues ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Conteúdo de Crescimento Integrado */}
+                                <div className="flex flex-col items-center justify-center z-10 pb-0.5">
+                                    {isGrowthPositive ? (
+                                        <TrendingUp className="w-5 h-5 mb-0.5" strokeWidth={3} style={{ color: growthColor }} />
+                                    ) : (
+                                        <TrendingDown className="w-5 h-5 mb-0.5" strokeWidth={3} style={{ color: growthColor }} />
+                                    )}
+                                    <span className="font-manrope font-black text-[15px] leading-none mb-0.5" style={{ color: growthColor }}>{growthBadge}</span>
+                                    <span className="text-white/40 text-[7px] font-black uppercase tracking-tighter leading-none">este mês</span>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Conteúdo de Crescimento Integrado */}
-                        <div className="flex flex-col items-center justify-center z-10 pb-0.5">
-                            <TrendingUp className="w-5 h-5 text-[#00A859] mb-0.5" strokeWidth={3} />
-                            <span className="text-[#00A859] font-manrope font-black text-[15px] leading-none mb-0.5">{growthBadge}</span>
-                            <span className="text-white/40 text-[7px] font-black uppercase tracking-tighter leading-none">este mês</span>
+                        {/* Carteira Ativa - Card Turquesa Escuro */}
+                        <div className={`min-w-full snap-center shrink-0 bg-[#073B3D] dark:bg-[#04282B] border border-teal-900/30 rounded-3xl p-5 shadow-xl shadow-teal-900/10 relative transition-transform duration-500 ease-in-out ${nudgeCards ? '-translate-x-12' : 'translate-x-0'}`}>
+                            <div className="flex justify-between items-end">
+                                <div className="flex flex-col z-10">
+                                    <span className="text-teal-100/60 text-[10px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                        Carteira Ativa
+                                        <span className="w-1 h-1 rounded-full bg-teal-100/60"></span>
+                                        <span className="text-[10px] font-bold tracking-wider opacity-100">total emprestado + retornos</span>
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-white text-[28px] font-manrope font-black tracking-tight leading-none">
+                                            {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalToReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                        </span>
+                                        <button onClick={() => setHideValues(!hideValues)} className="text-teal-100/40 hover:text-white transition-colors">
+                                            {hideValues ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {/* Indicativo explícito para deslizar */}
+                    <div className="flex justify-between items-center pt-2 px-1 pointer-events-none">
+                        <div className="flex items-center gap-1">
+                            <div className="w-4 h-1.5 rounded-full bg-gray-900/30 dark:bg-white/30"></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-gray-900/10 dark:bg-white/10"></div>
+                        </div>
+                        <div className="flex items-center gap-0.5 text-gray-400 dark:text-gray-500">
+                            <span className="text-[9px] font-black uppercase tracking-widest">Deslize para o lado</span>
+                            <ChevronRight className="w-3.5 h-3.5 animate-pulse" />
                         </div>
                     </div>
                 </div>
@@ -510,7 +609,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                         {!userProfile?.is_admin && (
                             <div
                                 className="flex items-center bg-white dark:bg-card-dark rounded-full pl-0.5 pr-2.5 py-0.5 border border-gray-100 dark:border-gray-800 cursor-pointer active:scale-95 transition-all hover:bg-gray-50 dark:hover:bg-gray-800"
-                                onClick={() => setShowSubscriptionModal(true)}
+                                onClick={() => onViewSubscription?.()}
                             >
                                 <div className="text-[#F59E0B]">
                                     <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
@@ -525,7 +624,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 <div className="flex items-center gap-2">
 
                     <div className="relative">
-                        <button 
+                        <button
                             onClick={handleBellClick}
                             className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors relative"
                         >
@@ -603,18 +702,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                         </span>
                     </div>
 
-                    {/* Atrasados */}
-                    <div
-                        onClick={onViewLateLoans}
-                        className="bg-white dark:bg-card-dark p-3.5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm active:scale-[0.98] transition-all flex items-center justify-between"
-                    >
-                        <div className="flex items-center gap-3">
-                            <div className="w-1.5 h-6 bg-[#F28B9F] rounded-full opacity-60"></div>
-                            <span className="text-[11px] text-gray-500 font-bold uppercase tracking-wider">Atrasados</span>
+                    {/* Atrasados + Inadimplência (Side by Side) */}
+                    <div className="grid grid-cols-2 gap-2">
+                        {/* Atrasados */}
+                        <div
+                            onClick={onViewLateLoans}
+                            className="bg-white dark:bg-card-dark p-3.5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm active:scale-[0.98] transition-all flex items-center justify-between"
+                        >
+                            <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-6 bg-[#F28B9F] rounded-full opacity-60"></div>
+                                <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Atrasados</span>
+                            </div>
+                            <span className="text-sm font-manrope font-black text-[#222222] dark:text-white">
+                                {hideValues ? '••••' : (loading ? '...' : `R$ ${summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`)}
+                            </span>
                         </div>
-                        <span className="text-lg font-manrope font-black text-[#222222] dark:text-white">
-                            {hideValues ? 'R$ ••••' : (loading ? '...' : `R$ ${summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
-                        </span>
+
+                        {/* Inadimplência */}
+                        {(() => {
+                            const pct = summary.activeLoansCount > 0 ? (summary.lateLoansCount / summary.activeLoansCount) * 100 : 0;
+                            const radius = 12;
+                            const circumference = 2 * Math.PI * radius;
+                            const filled = (pct / 100) * circumference;
+                            const empty = circumference - filled;
+                            return (
+                                <div
+                                    onClick={onViewLateLoans}
+                                    className="bg-white dark:bg-card-dark p-3.5 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm active:scale-[0.98] transition-all flex items-center justify-between"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-1.5 h-6 bg-[#E85D75] rounded-full opacity-60"></div>
+                                        <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Inadimpl.</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-manrope font-black text-[#E85D75]">
+                                            {loading ? '...' : `${pct.toFixed(1)}%`}
+                                        </span>
+                                        <svg width="28" height="28" viewBox="0 0 28 28" className="shrink-0 -rotate-90">
+                                            <circle cx="14" cy="14" r={radius} fill="none" stroke="#F0F0F0" strokeWidth="3" className="dark:stroke-gray-700" />
+                                            <circle
+                                                cx="14" cy="14" r={radius} fill="none"
+                                                stroke="#E85D75" strokeWidth="3"
+                                                strokeDasharray={`${filled} ${empty}`}
+                                                strokeLinecap="round"
+                                                style={{ transition: 'stroke-dasharray 0.8s ease' }}
+                                            />
+                                        </svg>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
 
                     {/* Clientes */}
@@ -852,6 +989,71 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                     </div>
                 </div>
 
+                {/* Capital Emprestado (Mobile) */}
+                <div className="md:hidden bg-white dark:bg-card-dark rounded-3xl p-5 border border-gray-100 dark:border-white/5 mb-3">
+                    <h2 className="text-[13px] font-black text-[#222222] dark:text-white mb-4 tracking-tight">Capital Emprestado</h2>
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center pt-2 border-t border-gray-50 dark:border-white/5">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Capital Total</span>
+                            <span className="text-sm font-black text-gray-900 dark:text-white">
+                                R$ {summary.totalCapital.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Já Devolvido</span>
+                            <span className="text-sm font-black text-emerald-600">
+                                R$ {summary.totalPrincipalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Capital em Aberto</span>
+                            <span className="text-sm font-black text-blue-600">
+                                R$ {summary.totalPrincipalOpen.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Rendimentos / Juros (Mobile) */}
+                <div className="md:hidden bg-white dark:bg-card-dark rounded-3xl p-5 border border-gray-100 dark:border-white/5 mb-6">
+                    <h2 className="text-[13px] font-black text-[#222222] dark:text-white mb-4 tracking-tight">Rendimentos (Juros)</h2>
+                    <div className="space-y-3">
+                        <div className="flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-900/10 p-2.5 rounded-xl">
+                            <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400">Juros Recebidos</span>
+                            <span className="text-sm font-black text-emerald-600">
+                                R$ {summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                        <div className="pl-2 space-y-2 border-l-2 border-emerald-100 dark:border-emerald-900/30 ml-1">
+                            <div className="flex justify-between items-center text-[10px] uppercase tracking-wider">
+                                <span className="text-gray-400 font-bold">Juros de quitados</span>
+                                <span className="text-gray-600 dark:text-gray-300 font-black">
+                                    R$ {summary.interestFromPaidLoans.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px] uppercase tracking-wider">
+                                <span className="text-gray-400 font-bold">Juros de renovações</span>
+                                <span className="text-gray-600 dark:text-gray-300 font-black">
+                                    R$ {summary.interestFromRenewals.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px] uppercase tracking-wider">
+                                <span className="text-gray-400 font-bold">Lucro de ativos</span>
+                                <span className="text-gray-600 dark:text-gray-300 font-black">
+                                    R$ {summary.interestFromActiveCoveredLoans.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="w-full h-px bg-gray-50 dark:bg-white/5"></div>
+                        <div className="flex justify-between items-center bg-yellow-50/50 dark:bg-yellow-900/10 p-2.5 rounded-xl">
+                            <span className="text-[11px] font-bold text-yellow-800 dark:text-yellow-400">Juros Pendentes</span>
+                            <span className="text-sm font-black text-yellow-600">
+                                R$ {summary.totalInterestPending.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Desktop Only Grid */}
                 <div className="hidden md:grid grid-cols-3 gap-6">
                     {/* Alerts Table */}
@@ -976,7 +1178,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 {/* Página de Relatórios */}
                 <div
                     onClick={onViewReports}
-                    className="mt-4 bg-white/80 dark:bg-card-dark/80 backdrop-blur-md p-5 rounded-2xl border border-white/30 dark:border-gray-800 cursor-pointer active:scale-[0.99] transition-all"
+                    className="hidden md:block mt-4 bg-white/80 dark:bg-card-dark/80 backdrop-blur-md p-5 rounded-2xl border border-white/30 dark:border-gray-800 cursor-pointer active:scale-[0.99] transition-all"
                 >
                     <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-4 flex-1">
@@ -991,83 +1193,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                     </div>
                 </div>
             </main>
-
-            {/* Subscription Modal */}
-            {showSubscriptionModal && (
-                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
-                    <div className="bg-[#1C1A17] max-w-xs md:max-w-sm w-full rounded-3xl p-4 shadow-2xl relative overflow-hidden flex flex-col gap-4 border border-white/5 animate-fade-in-up">
-                        {/* Close Button */}
-                        <button
-                            onClick={() => setShowSubscriptionModal(false)}
-                            className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full bg-black/30 flex items-center justify-center text-white/70 hover:text-white hover:bg-black/50 transition-colors"
-                        >
-                            <X className="w-4 h-4" />
-                        </button>
-
-                        {/* Top Card: Gradient Orange */}
-                        <div className="bg-gradient-to-br from-[#D96B20] to-[#A04510] rounded-2xl p-8 pb-10 flex flex-col items-center justify-center text-center shadow-[inset_0_2px_15px_rgba(0,0,0,0.2)] relative overflow-hidden">
-                            <div className="w-20 h-20 rounded-full bg-white/10 flex items-center justify-center border-[1.5px] border-white/30 mb-5 backdrop-blur-md shadow-lg">
-                                <Award className="w-10 h-10 text-white fill-white/20" strokeWidth={1.5} />
-                            </div>
-                            <div className="flex items-center gap-2 mb-3">
-                                <h2 className="text-2xl font-bold text-white tracking-tight drop-shadow-sm">Plano Premium</h2>
-                                <svg viewBox="0 0 24 24" className="w-5 h-5 text-[#FFD700] drop-shadow-sm" fill="currentColor">
-                                    <path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.154-.435.238-.905.238-1.4 0-2.21-1.71-3.998-3.818-3.998-.47 0-.92.084-1.336.25C14.818 2.415 13.51 1.5 12 1.5s-2.816.917-3.437 2.25c-.418-.165-.866-.25-1.336-.25-2.11 0-3.818 1.79-3.818 4 0 .495.083.965.238 1.4-1.272.65-2.147 2.018-2.147 3.6 0 1.495.782 2.798 1.942 3.486-.02.17-.032.34-.032.514 0 2.21 1.708 4 3.818 4 .47 0 .92-.086 1.335-.25.62 1.334 1.926 2.25 3.437 2.25 1.512 0 2.818-.916 3.437-2.25.415.163.865.248 1.336.248 2.11 0 3.818-1.79 3.818-4 0-.174-.012-.344-.033-.513 1.158-.687 1.943-1.99 1.943-3.484zm-6.616-3.334l-4.334 6.5c-.145.217-.382.334-.625.334-.143 0-.288-.04-.416-.126l-.115-.094-2.415-2.415c-.293-.293-.293-.768 0-1.06s.768-.294 1.06 0l1.77 1.767 3.825-5.74c.23-.345.696-.436 1.04-.207.346.23.44.696.21 1.04z" />
-                                </svg>
-                            </div>
-                            <div className="bg-white/20 rounded-full px-5 py-1.5 backdrop-blur-md border border-white/10 shadow-sm">
-                                <span className="text-[13px] font-semibold text-white tracking-wide">Assinatura Ativa</span>
-                            </div>
-                        </div>
-
-                        {/* Bottom Card: Dark Info */}
-                        <div className="bg-[#2B2823] rounded-2xl p-5 shadow-inner border border-white/5">
-                            <div className="flex justify-between items-center mb-4">
-                                <span className="text-[#A3A09A] text-[13px] font-semibold tracking-wide">Status do Período Atual</span>
-                                <span className="text-[#F97316] font-bold text-sm">
-                                    {(() => {
-                                        if (!userProfile?.access_until) return '0 dias';
-                                        const d = Math.ceil((new Date(userProfile.access_until).getTime() - Date.now()) / 86400000);
-                                        return `${Math.max(d, 0)} dias`;
-                                    })()}
-                                </span>
-                            </div>
-
-                            {/* Progress bar */}
-                            <div className="h-[6px] w-full bg-[#1C1A17] rounded-full overflow-hidden mb-5">
-                                <div
-                                    className="h-full bg-[#F97316] rounded-full transition-all duration-1000 ease-out"
-                                    style={{
-                                        width: (() => {
-                                            if (!userProfile?.access_until) return '0%';
-                                            const d = Math.ceil((new Date(userProfile.access_until).getTime() - Date.now()) / 86400000);
-                                            const pct = Math.min(100, Math.max(0, (d / 30) * 100)); // Assuming a visual full bar of 30 days
-                                            return `${pct}%`;
-                                        })()
-                                    }}
-                                ></div>
-                            </div>
-
-                            <p className="text-[#7D7B75] text-[11px] text-center leading-[1.6] mb-5">
-                                {(() => {
-                                    if (!userProfile?.access_until) return 'Sua assinatura expirou.';
-                                    const dt = new Date(userProfile.access_until);
-                                    const dia = dt.getDate();
-                                    const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
-                                    return `Sua assinatura expira automaticamente em ${dia} de ${meses[dt.getMonth()]}. Voce pode renovar o plano clicando no botao abaixo.`;
-                                })()}
-                            </p>
-
-                            <a
-                                href="https://pay.cakto.com.br/36whx5j_805010"
-                                className="w-full bg-[#1DA74D] hover:bg-[#158f3e] text-white font-bold py-3.5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors border border-[#1DA74D]"
-                            >
-                                Renovar Plano <ExternalLink className="w-4 h-4" />
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

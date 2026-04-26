@@ -16,7 +16,9 @@ import { Login } from './screens/Login';
 import { ResetPassword } from './screens/ResetPassword';
 import { AdminUsers } from './screens/AdminUsers';
 import { AdminNotifications } from './screens/AdminNotifications';
+import { UserNotifications } from './screens/UserNotifications';
 import { SubscriptionExpired } from './screens/SubscriptionExpired';
+import { Subscription } from './screens/Subscription';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
 import { supabase } from './supabaseClient';
@@ -208,6 +210,12 @@ const App: React.FC = () => {
           onViewReports={() => {
             setCurrentView('reports');
           }}
+          onViewNotifications={() => {
+            setCurrentView('user-notifications');
+          }}
+          onViewSubscription={() => {
+            setCurrentView('subscription');
+          }}
         />;
       case 'interest-details':
         return <InterestDetails
@@ -335,6 +343,10 @@ const App: React.FC = () => {
         return <AdminUsers onBack={() => setCurrentView('profile')} />;
       case 'admin-notifications':
         return <AdminNotifications onBack={() => setCurrentView('profile')} />;
+      case 'user-notifications':
+        return <UserNotifications onBack={() => setCurrentView('dashboard')} />;
+      case 'subscription':
+        return <Subscription onBack={() => setCurrentView('dashboard')} userProfile={userProfile} />;
       case 'subscription-expired':
         return <SubscriptionExpired onLogout={handleLogout} logo={systemLogo} />;
       case 'reset-password':
@@ -353,6 +365,9 @@ const App: React.FC = () => {
           }}
           onViewClients={() => {
             setCurrentView('clients');
+          }}
+          onViewSubscription={() => {
+            setCurrentView('subscription');
           }}
         />;
     }

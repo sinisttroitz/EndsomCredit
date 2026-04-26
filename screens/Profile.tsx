@@ -856,48 +856,72 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
 
             {showDownloadModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowDownloadModal(false)}></div>
-                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">Baixar Relatório</h3>
-                            <button onClick={() => setShowDownloadModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
-                                <X className="w-5 h-5 text-gray-500" />
+                    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowDownloadModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden">
+                        
+                        {/* Header */}
+                        <div className="bg-gray-900 dark:bg-gray-800 px-6 py-4 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-sm font-bold text-white">Exportar Relatório</h3>
+                                <p className="text-[10px] text-gray-400 mt-0.5">Relatório completo de empréstimos</p>
+                            </div>
+                            <button onClick={() => setShowDownloadModal(false)} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+                                <X className="w-4 h-4 text-gray-400" />
                             </button>
                         </div>
 
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-                            Escolha o formato para baixar o relatório completo de seus empréstimos.
-                        </p>
-
-                        <div className="space-y-3">
+                        {/* Content */}
+                        <div className="p-5 space-y-3">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Selecione o formato</p>
+                            
+                            {/* PDF Option */}
                             <button
                                 onClick={() => handleDownloadData('pdf')}
                                 disabled={downloading}
-                                className="w-full p-4 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800 flex items-center gap-4 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors text-left group"
+                                className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center gap-4 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-750 transition-all text-left group active:scale-[0.98]"
                             >
-                                <div className="w-12 h-12 bg-red-100 dark:bg-red-800/50 rounded-full flex items-center justify-center text-red-600 dark:text-red-400 group-hover:scale-110 transition-transform">
-                                    <FileText className="w-6 h-6" />
+                                <div className="w-11 h-11 bg-white dark:bg-gray-700 rounded-xl flex items-center justify-center border border-gray-200 dark:border-gray-600 shadow-sm group-hover:shadow-md transition-shadow">
+                                    <span className="text-[10px] font-black text-red-500 uppercase tracking-wide">.PDF</span>
                                 </div>
-                                <div>
-                                    <h4 className="font-bold text-gray-900 dark:text-white">PDF</h4>
-                                    <p className="text-xs text-gray-500">Documento para impressão</p>
+                                <div className="flex-1">
+                                    <h4 className="font-bold text-sm text-gray-900 dark:text-white">Documento PDF</h4>
+                                    <p className="text-[11px] text-gray-400 mt-0.5">Ideal para impressão e arquivamento</p>
                                 </div>
-                                {downloading && <Loader2 className="w-5 h-5 animate-spin ml-auto text-red-500" />}
+                                {downloading ? (
+                                    <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                                ) : (
+                                    <Download className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors" />
+                                )}
                             </button>
 
+                            {/* CSV Option */}
                             <button
                                 onClick={() => handleDownloadData('csv')}
                                 disabled={downloading}
-                                className="w-full p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800 flex items-center gap-4 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors text-left group"
+                                className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 flex items-center gap-4 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-750 transition-all text-left group active:scale-[0.98]"
                             >
-                                <div className="w-12 h-12 bg-green-100 dark:bg-green-800/50 rounded-full flex items-center justify-center text-green-600 dark:text-green-400 group-hover:scale-110 transition-transform">
-                                    <FileText className="w-6 h-6" />
+                                <div className="w-11 h-11 bg-white dark:bg-gray-700 rounded-xl flex items-center justify-center border border-gray-200 dark:border-gray-600 shadow-sm group-hover:shadow-md transition-shadow">
+                                    <span className="text-[10px] font-black text-green-600 uppercase tracking-wide">.CSV</span>
                                 </div>
-                                <div>
-                                    <h4 className="font-bold text-gray-900 dark:text-white">CSV</h4>
-                                    <p className="text-xs text-gray-500">Planilha (Excel)</p>
+                                <div className="flex-1">
+                                    <h4 className="font-bold text-sm text-gray-900 dark:text-white">Planilha CSV</h4>
+                                    <p className="text-[11px] text-gray-400 mt-0.5">Compatível com Excel e Google Sheets</p>
                                 </div>
-                                {downloading && <Loader2 className="w-5 h-5 animate-spin ml-auto text-green-500" />}
+                                {downloading ? (
+                                    <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                                ) : (
+                                    <Download className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors" />
+                                )}
+                            </button>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="px-5 pb-5 pt-1">
+                            <button 
+                                onClick={() => setShowDownloadModal(false)}
+                                className="w-full py-3 rounded-xl bg-gray-100 dark:bg-gray-800 text-sm font-bold text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                Cancelar
                             </button>
                         </div>
                     </div>
