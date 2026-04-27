@@ -13,7 +13,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showAccessModal, setShowAccessModal] = useState(false);
+
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
@@ -178,7 +178,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
                 </button>
 
                 <button
-                  onClick={() => setShowAccessModal(true)}
+                  onClick={() => window.open('https://wa.me/5564992032926?text=Ol%C3%A1%2C%20preciso%20de%20um%20acesso%20no%20Agicred%21', '_blank')}
                   className="w-full bg-white text-black font-bold py-4 rounded-2xl shadow-2xl active:scale-[0.98] transition-all text-sm"
                 >
                   Solicitar Acesso
@@ -289,7 +289,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
 
                 <button
                   type="button"
-                  onClick={() => setShowAccessModal(true)}
+                  onClick={() => window.open('https://wa.me/5564992032926?text=Ol%C3%A1%2C%20preciso%20de%20um%20acesso%20no%20Agicred%21', '_blank')}
                   className="w-full bg-transparent border border-white/10 text-white/80 hover:text-white hover:bg-white/[0.02] font-medium py-3 rounded-xl active:scale-[0.98] transition-all duration-200 flex items-center justify-center text-sm"
                 >
                   Solicitar Acesso
@@ -307,32 +307,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
         </main>
       </div>
 
-      {/* Access Request Modal */}
-      {showAccessModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300"
-            onClick={() => setShowAccessModal(false)}
-          ></div>
-          <div className="relative bg-[#111] border border-white/10 rounded-[2rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in slide-in-from-bottom-4 duration-300">
-            <div className="flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center text-white mb-6 border border-white/10">
-                <ShieldCheck className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-bold text-white mb-2">Solicitar Acesso</h3>
-              <p className="text-white/50 text-sm mb-8">
-                A criação de novas contas está <span className="text-white font-medium">indisponível</span>. Por favor, tente novamente mais tarde.
-              </p>
-              <button
-                onClick={() => setShowAccessModal(false)}
-                className="w-full bg-white text-black font-semibold py-3 rounded-xl active:scale-[0.98] hover:bg-white/90 transition-all duration-200 text-sm"
-              >
-                Entendido
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Forgot Password Modal */}
       {showForgotModal && (

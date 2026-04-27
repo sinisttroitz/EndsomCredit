@@ -6,11 +6,12 @@ import { generateInstallments } from '../utils/loanUtils';
 
 interface LoansProps {
     onLoanSelect?: (loanId: string) => void;
+    onNewLoan?: () => void;
     initialFilter?: 'active' | 'late' | 'paid';
     onFilterChange?: (filter: 'active' | 'late' | 'paid') => void;
 }
 
-export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'active', onFilterChange }) => {
+export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFilter = 'active', onFilterChange }) => {
     const [filter, setFilter] = useState<'active' | 'late' | 'paid'>(initialFilter);
     const [loans, setLoans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -138,6 +139,14 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, initialFilter = 'act
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
+                    {onNewLoan && (
+                        <button
+                            onClick={onNewLoan}
+                            className="hidden md:flex items-center gap-2 px-4 py-2 bg-black dark:bg-white text-white dark:text-black text-sm font-bold rounded-full hover:bg-black/80 dark:hover:bg-gray-100 transition-all shadow-md active:scale-95 mr-2"
+                        >
+                            <Plus className="w-4 h-4" /> Novo Empréstimo
+                        </button>
+                    )}
                     <div className="relative group mr-2">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                             <Search className="w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />

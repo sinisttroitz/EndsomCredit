@@ -47,6 +47,7 @@ const App: React.FC = () => {
   const [systemLogo, setSystemLogo] = useState<string>('');
   const [sidebarLogo, setSidebarLogo] = useState<string>('');
   const [userProfile, setUserProfile] = useState<UserProfileData | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // Save state to localStorage whenever it changes
   useEffect(() => {
@@ -169,10 +170,15 @@ const App: React.FC = () => {
     }
   }, [currentView]);
 
-  const handleLogout = async () => {
+  const confirmLogout = async () => {
     await supabase.auth.signOut();
     setCurrentView('login');
     setUserProfile(null);
+    setShowLogoutConfirm(false);
+  };
+
+  const handleLogout = () => {
+    setShowLogoutConfirm(true);
   };
 
   const renderView = () => {
@@ -270,6 +276,7 @@ const App: React.FC = () => {
             setPreviousView(null);
             setCurrentView('loan-details');
           }}
+          onNewLoan={() => setCurrentView('new-loan')}
           initialFilter={initialLoansFilter}
           onFilterChange={setInitialLoansFilter}
         />;
@@ -413,6 +420,42 @@ const App: React.FC = () => {
             isMenuOpen={isMenuOpen}
             setIsMenuOpen={setIsMenuOpen}
           />
+        </div>
+      )}
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300"
+            onClick={() => setShowLogoutConfirm(false)}
+          ></div>
+          <div className="relative bg-white dark:bg-[#111] border border-gray-200 dark:border-white/10 rounded-[2rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in slide-in-from-bottom-4 duration-300">
+            <div className="flex flex-col items-center text-center">
+              <div className="w-16 h-16 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 mb-6 border border-red-100 dark:border-red-500/20">
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Sair da Conta</h3>
+              <p className="text-gray-500 dark:text-white/50 text-sm mb-8">
+                Tem certeza que deseja sair do sistema?
+              </p>
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className="flex-1 bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-white font-semibold py-3 rounded-xl active:scale-[0.98] transition-all duration-200 text-sm border border-transparent dark:border-white/5"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmLogout}
+                  className="flex-1 bg-red-500 text-white font-semibold py-3 rounded-xl active:scale-[0.98] hover:bg-red-600 transition-all duration-200 text-sm shadow-lg shadow-red-500/20"
+                >
+                  Sair
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

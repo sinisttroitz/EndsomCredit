@@ -169,8 +169,281 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
     }
   };
 
+  // Shared search results dropdown component
+  const SearchResultsDropdown = () => (
+    searchResults.length > 0 && !clientId ? (
+      <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-800 rounded-xl shadow-xl mt-2 z-50 border border-gray-100 dark:border-gray-700 overflow-hidden">
+        {searchResults.map(client => (
+          <div 
+            key={client.id}
+            onClick={() => selectClient(client)}
+            className="p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center gap-3 border-b border-gray-50 dark:border-gray-700/50 last:border-0"
+          >
+            <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+              {client.avatar_url && !client.avatar_url.includes('ui-avatars.com') ? (
+                <img src={client.avatar_url} alt={client.name} className="w-full h-full object-cover" />
+              ) : (
+                <span>{client.name.substring(0,2).toUpperCase()}</span>
+              )}
+            </div>
+            <div>
+              <p className="font-bold text-sm text-gray-800 dark:text-gray-200">{client.name}</p>
+              <p className="text-xs text-gray-400">{client.cpf || 'Sem CPF'}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : null
+  );
+
   return (
-    <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
+    <>
+    {/* ===== DESKTOP VIEW ===== */}
+    <div className="hidden md:flex flex-col h-full bg-gray-50 dark:bg-[#0B0B0F] overflow-y-auto no-scrollbar">
+      {/* Desktop Header */}
+      <header className="bg-white dark:bg-[#111] border-b border-gray-100 dark:border-gray-800 px-8 py-5 flex items-center justify-between sticky top-0 z-20">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <ArrowLeft className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Novo Empréstimo</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Preencha os dados para gerar um novo contrato</p>
+          </div>
+        </div>
+        <button 
+          onClick={handleSave}
+          disabled={loading}
+          className="px-8 py-3 bg-black dark:bg-white text-white dark:text-black font-bold rounded-xl hover:bg-black/80 dark:hover:bg-gray-100 transition-all shadow-md active:scale-95 disabled:opacity-60 flex items-center gap-2 text-sm"
+        >
+          {loading ? <div className="w-4 h-4 border-2 border-white/30 dark:border-black/30 border-t-white dark:border-t-black rounded-full animate-spin"></div> : <Check className="w-4 h-4" />}
+          {loading ? 'Processando...' : 'Gerar Empréstimo'}
+        </button>
+      </header>
+
+      {/* Two-column layout */}
+      <div className="flex-1 p-8">
+        <div className="max-w-[1200px] mx-auto grid grid-cols-5 gap-8">
+          {/* LEFT COLUMN - Form (3 cols) */}
+          <div className="col-span-3 space-y-6">
+            {/* Client Search Card */}
+            <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm">
+              <h2 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.15em] mb-4">Cliente</h2>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  {clientId ? <Check className="text-green-500 w-5 h-5" /> : <Search className="text-gray-400 w-5 h-5" />}
+                </div>
+                <input 
+                  className={`w-full pl-12 pr-4 py-3.5 rounded-xl bg-gray-50 dark:bg-gray-900 border focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10 focus:border-transparent outline-none transition-all text-sm font-medium ${clientId ? 'border-green-500 text-green-700 dark:text-green-400 font-bold' : 'border-gray-200 dark:border-gray-700'}`}
+                  placeholder="Buscar cliente por nome..." 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => {
+                    if(clientId) clearClient();
+                    setSearchQuery(e.target.value);
+                  }}
+                />
+                <SearchResultsDropdown />
+              </div>
+            </div>
+
+            {/* Value + Interest + Installments Grid */}
+            <div className="grid grid-cols-3 gap-4">
+              {/* Amount */}
+              <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm col-span-1">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 bg-blue-50 dark:bg-blue-900/20 rounded-lg flex items-center justify-center">
+                    <DollarSign className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.1em]">Valor</span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-lg font-bold text-gray-400 dark:text-gray-500">R$</span>
+                  <input 
+                    className="w-full bg-transparent text-3xl font-black text-gray-900 dark:text-white tracking-tight outline-none placeholder-gray-300 dark:placeholder-gray-600 caret-blue-500 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
+                    type="number" 
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              {/* Interest Rate */}
+              <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm col-span-1">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 bg-amber-50 dark:bg-amber-900/20 rounded-lg flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.1em]">Juros %</span>
+                </div>
+                <input 
+                  className="w-full bg-transparent text-3xl font-black text-gray-900 dark:text-white outline-none placeholder-gray-300 dark:placeholder-gray-600 caret-amber-500 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
+                  type="number" 
+                  value={interestRate}
+                  onChange={e => setInterestRate(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+
+              {/* Installments */}
+              <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm col-span-1">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 bg-violet-50 dark:bg-violet-900/20 rounded-lg flex items-center justify-center">
+                    <Layers className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                  </div>
+                  <span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.1em]">Parcelas</span>
+                </div>
+                {(frequency === 'Mensal' || frequency === 'Quinzenal') ? (
+                  <p className="text-3xl font-black text-gray-900 dark:text-white">1</p>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setInstallments(Math.max(1, installments - 1))} className="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white hover:border-gray-300 active:scale-95 transition-all">
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <input 
+                      className="w-full bg-transparent text-3xl font-black text-gray-900 dark:text-white text-center outline-none caret-violet-500 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
+                      type="number" 
+                      value={installments}
+                      onChange={e => setInstallments(parseInt(e.target.value) || 1)}
+                    />
+                    <button onClick={() => setInstallments(installments + 1)} className="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white hover:border-gray-300 active:scale-95 transition-all">
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Frequency + Date Row */}
+            <div className="grid grid-cols-2 gap-4">
+              {/* Frequency */}
+              <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm">
+                <h2 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.15em] mb-4">Frequência</h2>
+                <div className="flex p-1 bg-gray-100 dark:bg-gray-800 rounded-xl gap-1">
+                  {['Diária', 'Semanal', 'Quinzenal', 'Mensal'].map((freq) => (
+                    <button 
+                      key={freq} 
+                      onClick={() => {
+                        setFrequency(freq);
+                        if (freq === 'Mensal' || freq === 'Quinzenal') setInstallments(1);
+                        setDueDate(getDueDateByFrequency(freq));
+                      }}
+                      className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all duration-200 
+                        ${frequency === freq ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                    >
+                      {freq}
+                    </button>
+                  ))}
+                </div>
+                {frequency === 'Diária' && (
+                  <div className="mt-4 flex gap-3">
+                    <div className="flex-1 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Pular Sábado</span>
+                      <div onClick={() => setSkipSaturday(!skipSaturday)} className={`w-10 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipSaturday ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <div className={`bg-white dark:bg-gray-900 w-4 h-4 rounded-full shadow-md transform duration-300 ease-in-out ${skipSaturday ? 'translate-x-[18px]' : 'translate-x-0'}`}></div>
+                      </div>
+                    </div>
+                    <div className="flex-1 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Pular Domingo</span>
+                      <div onClick={() => setSkipSunday(!skipSunday)} className={`w-10 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipSunday ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <div className={`bg-white dark:bg-gray-900 w-4 h-4 rounded-full shadow-md transform duration-300 ease-in-out ${skipSunday ? 'translate-x-[18px]' : 'translate-x-0'}`}></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Due Date */}
+              <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm">
+                <h2 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.15em] mb-4">Primeiro Vencimento</h2>
+                <div className="relative">
+                  <input 
+                    className="w-full pl-4 pr-12 py-3.5 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10 outline-none transition-all font-bold text-gray-900 dark:text-white text-sm" 
+                    type="date" 
+                    value={dueDate}
+                    onChange={e => setDueDate(e.target.value)}
+                  />
+                  <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none">
+                    <Calendar className="w-4 h-4 text-gray-400" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT COLUMN - Live Preview (2 cols) */}
+          <div className="col-span-2">
+            <div className="sticky top-28 space-y-6">
+              {/* Contract Preview Card */}
+              <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
+                {/* Header strip */}
+                <div className="bg-gray-900 dark:bg-gray-800 px-6 py-4 flex items-center justify-between">
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Prévia do Contrato</span>
+                  <span className="text-[10px] font-mono text-gray-500">#{Date.now().toString().slice(-6)}</span>
+                </div>
+
+                {/* Hero value */}
+                <div className="px-6 pt-8 pb-6 text-center">
+                  <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-widest mb-2">Valor da Parcela</p>
+                  <p className="text-5xl font-black text-gray-900 dark:text-white tracking-tight">
+                    R$ {monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                  </p>
+                  <p className="text-sm text-gray-400 mt-2 font-semibold">{installments}x de R$ {monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                </div>
+
+                {/* Tear line */}
+                <div className="relative flex items-center my-1">
+                  <div className="w-5 h-10 bg-gray-50 dark:bg-[#0B0B0F] rounded-r-full -ml-[1px] border-r border-y border-gray-100 dark:border-gray-800"></div>
+                  <div className="flex-1 border-t-2 border-dashed border-gray-200 dark:border-gray-700 mx-1"></div>
+                  <div className="w-5 h-10 bg-gray-50 dark:bg-[#0B0B0F] rounded-l-full -mr-[1px] border-l border-y border-gray-100 dark:border-gray-800"></div>
+                </div>
+
+                {/* Detail rows */}
+                <div className="px-6 pb-6 pt-3 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-400 font-medium">Capital</span>
+                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300 font-mono">
+                      R$ {principal.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-400 font-medium">Juros ({interestRate}%)</span>
+                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300 font-mono">
+                      + R$ {totalInterest.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-400 font-medium">Frequência</span>
+                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300">{frequency}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-400 font-medium">Parcelas</span>
+                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300">{installments}x</span>
+                  </div>
+                  {selectedClientName && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-400 font-medium">Cliente</span>
+                      <span className="text-sm font-bold text-gray-700 dark:text-gray-300">{selectedClientName}</span>
+                    </div>
+                  )}
+                  <div className="h-px bg-gray-100 dark:bg-gray-800"></div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wide">Total</span>
+                    <span className="text-2xl font-black text-gray-900 dark:text-white font-mono">
+                      R$ {totalAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* ===== MOBILE VIEW (unchanged) ===== */}
+    <div className="md:hidden flex flex-col h-full bg-background-light dark:bg-background-dark">
       <header className="bg-black text-white px-6 pt-8 pb-8 rounded-b-[40px] relative z-10">
         <div className="flex items-center mb-4">
           <button onClick={onBack} className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 mr-4 hover:bg-white/20 transition-colors">
@@ -431,8 +704,9 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
             </button>
         </div>
       </main>
+    </div>
 
-      {/* Alert Modal */}
+      {/* Alert Modal (shared) */}
       {alertModal.open && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}></div>
@@ -465,6 +739,6 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
               </div>
           </div>
       )}
-    </div>
+    </>
   );
 };
