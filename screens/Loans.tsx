@@ -52,16 +52,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
     };
 
 
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            const target = event.target as HTMLElement;
-            if (!target.closest('.freq-dropdown-container')) {
-                setShowFreqDropdown(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+
 
     const isLoanLate = (loan: Loan): boolean => {
         if (loan.status === 'paid') return false;

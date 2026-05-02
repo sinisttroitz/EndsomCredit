@@ -233,7 +233,7 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
             setPhotoFile(file);
-            setPhotoPreview(URL.createObjectURL(file as Blob));
+            setPhotoPreview(URL.createObjectURL(file));
         }
     };
 
