@@ -76,6 +76,60 @@ export interface LoanAmortization {
 
 export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar' | 'admin-users' | 'admin-notifications' | 'user-notifications' | 'subscription-expired' | 'reports' | 'reset-password' | 'subscription';
 
+export interface ClientPortalLink {
+  id: string;
+  token: string;
+  loan_id: string;
+  lender_id: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ClientPaymentRequest {
+  id: string;
+  loan_id: string;
+  lender_id: string;
+  installment_number: number;
+  amount: number;
+  status: 'pending' | 'confirmed' | 'rejected';
+  client_name?: string;
+  portal_token: string;
+  created_at: string;
+  resolved_at?: string;
+}
+
+export interface ClientRegistrationLink {
+  id: string;
+  token: string;
+  lender_id: string;
+  is_active: boolean;
+  max_pending: number;
+  created_at: string;
+}
+
+export interface ClientRegistration {
+  id: string;
+  lender_id: string;
+  registration_token: string;
+  name: string;
+  cpf?: string;
+  phone?: string;
+  email?: string;
+  birthdate?: string;
+  cep?: string;
+  city?: string;
+  state?: string;
+  address?: string;
+  number?: string;
+  complement?: string;
+  avatar_url?: string;
+  documents?: string[];
+  status: 'pending' | 'approved' | 'rejected';
+  reviewed_at?: string;
+  rejection_reason?: string;
+  created_at: string;
+}
+
 export interface Notification {
   id: string;
   title: string;

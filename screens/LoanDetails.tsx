@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle } from 'lucide-react';
+import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle, Link2, ExternalLink } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
+import { createPortalLink } from '../utils/portalUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment, InstallmentFine } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
@@ -64,6 +65,18 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     // Amortization State
     const [showAmortizationPage, setShowAmortizationPage] = useState(false);
+
+    // Portal Link State
+    const [showPortalLinkModal, setShowPortalLinkModal] = useState(false);
+    const [portalLink, setPortalLink] = useState('');
+    const [portalLinkLoading, setPortalLinkLoading] = useState(false);
+    const [portalLinkCopied, setPortalLinkCopied] = useState(false);
+
+    // Payment Request Alerts
+    const [pendingPaymentRequests, setPendingPaymentRequests] = useState<any[]>([]);
+    const [showPaymentRequestModal, setShowPaymentRequestModal] = useState(false);
+    const [selectedPaymentRequest, setSelectedPaymentRequest] = useState<any>(null);
+    const [processingRequest, setProcessingRequest] = useState(false);
 
     const handleConfirmAmortization = async (amountPaid: number, preview: any) => {
         if (!loan) return;
@@ -169,8 +182,109 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         if (loanId) {
             fetchLoanData();
             fetchUserSettings();
+            fetchPendingPaymentRequests();
         }
     }, [loanId]);
+
+    const fetchPendingPaymentRequests = async () => {
+        if (!loanId) return;
+        try {
+            const { data } = await supabase
+                .from('client_payment_requests')
+                .select('*')
+                .eq('loan_id', loanId)
+                .eq('status', 'pending')
+                .order('created_at', { ascending: false });
+            setPendingPaymentRequests(data || []);
+        } catch (e) { console.error(e); }
+    };
+
+    const handleConfirmPaymentRequest = async (request: any) => {
+        if (!loan) return;
+        setProcessingRequest(true);
+        try {
+            // 1. Mark the request as confirmed
+            await supabase
+                .from('client_payment_requests')
+                .update({ status: 'confirmed', resolved_at: new Date().toISOString() })
+                .eq('id', request.id);
+
+            // 2. Process the actual payment on the loan (same logic as executeBatchPayment)
+            const instNumber = request.installment_number;
+            const targetInst = installmentsList.find(i => i.number === instNumber);
+            
+            if (targetInst) {
+                const paidValue = targetInst.value;
+                const baseValue = targetInst.originalValue || paidValue;
+                const extraProfit = Math.max(0, paidValue - baseValue);
+
+                const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+                let newBalance = Number(loan.balance) - baseValue;
+                if (newBalance < 0.01) newBalance = 0;
+
+                const newProgress = totalDebt > 0 
+                    ? Math.max(0, Math.min(100, Math.round(((totalDebt - newBalance) / totalDebt) * 100)))
+                    : 100;
+                const newStatus = newBalance === 0 ? 'paid' : 'active';
+
+                const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
+                const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null
+                    ? Number(loan.amount_paid)
+                    : Math.max(0, totalDebt - Number(loan.balance)) + currentTotalInterestPaid;
+
+                await supabase
+                    .from('loans')
+                    .update({
+                        balance: newBalance,
+                        progress: newProgress,
+                        status: newStatus,
+                        amount_paid: currentAmountPaid + paidValue,
+                        total_interest_paid: currentTotalInterestPaid + extraProfit
+                    })
+                    .eq('id', loan.id);
+
+                // Delete fine for this installment if exists
+                if (targetInst.fine) {
+                    await supabase.from('installment_fines').delete().eq('id', targetInst.fine.id);
+                }
+            }
+
+            // 3. Remove from pending list, close modal, refresh loan data
+            setPendingPaymentRequests(prev => prev.filter(r => r.id !== request.id));
+            setShowPaymentRequestModal(false);
+            setSelectedPaymentRequest(null);
+            await fetchLoanData();
+
+            setAlertModal({
+                open: true,
+                title: 'Pagamento Confirmado ✓',
+                message: `Parcela #${String(request.installment_number).padStart(2, '0')} no valor de R$ ${Number(request.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} foi confirmada e registrada com sucesso.`,
+            });
+        } catch (e) { 
+            console.error(e);
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao processar pagamento. Tente novamente.',
+            });
+        }
+        finally { setProcessingRequest(false); }
+    };
+
+    const handleRejectPaymentRequest = async (request: any) => {
+        setProcessingRequest(true);
+        try {
+            await supabase
+                .from('client_payment_requests')
+                .update({ status: 'rejected', resolved_at: new Date().toISOString() })
+                .eq('id', request.id);
+            
+            setPendingPaymentRequests(prev => prev.filter(r => r.id !== request.id));
+            setShowPaymentRequestModal(false);
+            setSelectedPaymentRequest(null);
+        } catch (e) { console.error(e); }
+        finally { setProcessingRequest(false); }
+    };
 
     const fetchUserSettings = async () => {
         const { data: { user } } = await supabase.auth.getUser();
@@ -1197,6 +1311,43 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
             <main className="flex-1 px-5 -mt-6 pb-32 relative z-20 overflow-y-auto no-scrollbar">
 
+                {/* Payment Request Alert Banner */}
+                {pendingPaymentRequests.length > 0 && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 mb-4 animate-in slide-in-from-top duration-300">
+                        <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center flex-shrink-0">
+                                <AlertTriangle className="w-5 h-5 text-amber-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                                    {pendingPaymentRequests.length} pagamento{pendingPaymentRequests.length > 1 ? 's' : ''} pendente{pendingPaymentRequests.length > 1 ? 's' : ''}
+                                </p>
+                                <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+                                    O cliente informou que realizou pagamento{pendingPaymentRequests.length > 1 ? 's' : ''}. Verifique e confirme.
+                                </p>
+                                <div className="mt-3 space-y-2">
+                                    {pendingPaymentRequests.map(req => (
+                                        <button
+                                            key={req.id}
+                                            onClick={() => { setSelectedPaymentRequest(req); setShowPaymentRequestModal(true); }}
+                                            className="w-full flex items-center justify-between bg-white dark:bg-gray-800 px-3 py-2.5 rounded-xl border border-amber-100 dark:border-amber-900 active:scale-[0.98] transition-all"
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-bold text-gray-900 dark:text-white">Parcela #{String(req.installment_number).padStart(2, '0')}</span>
+                                                <span className="text-[10px] text-gray-400">{new Date(req.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-bold text-amber-700">R$ {Number(req.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                <ChevronRight className="w-4 h-4 text-gray-400" />
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Summary Card */}
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-md border border-gray-100 dark:border-gray-800 mb-6">
                     <div className="flex flex-col items-center text-center">
@@ -1464,6 +1615,32 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     Gerar<br/>Comprovante
                                 </span>
                             </button>
+
+                            {loan.status !== 'paid' && (
+                                <button
+                                    onClick={async () => {
+                                        setShowPortalLinkModal(true);
+                                        setPortalLinkLoading(true);
+                                        try {
+                                            const { data: { user } } = await supabase.auth.getUser();
+                                            if (!user) return;
+                                            const tk = await createPortalLink(loan.id, user.id);
+                                            if (tk) {
+                                                setPortalLink(`${window.location.origin}/acompanhar/${tk}`);
+                                            }
+                                        } catch (e) { console.error(e); }
+                                        finally { setPortalLinkLoading(false); }
+                                    }}
+                                    className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 shadow-sm transition-all active:scale-[0.96]"
+                                >
+                                    <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                                        <Link2 className="w-4 h-4" />
+                                    </div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                                        Link do<br/>Cliente
+                                    </span>
+                                </button>
+                            )}
 
                             {loan.status === 'paid' ? (
                                 <button
@@ -2422,6 +2599,140 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     onClose={() => setShowExtractImageModal(false)}
                     data={extractData}
                 />
+            )}
+
+            {/* Payment Request Review Modal */}
+            {showPaymentRequestModal && selectedPaymentRequest && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPaymentRequestModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl">
+                        <div className="flex justify-between items-center mb-5">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Verificar Pagamento</h3>
+                            <button onClick={() => setShowPaymentRequestModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-4 h-4 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-2xl border border-amber-100 dark:border-amber-800 mb-4">
+                            <div className="flex items-center gap-3 mb-3">
+                                <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                                    <Clock className="w-5 h-5 text-amber-600" />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                                        Parcela #{String(selectedPaymentRequest.installment_number).padStart(2, '0')}
+                                    </p>
+                                    <p className="text-[10px] text-amber-600">
+                                        {selectedPaymentRequest.client_name || 'Cliente'} informou pagamento
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs text-amber-700">Valor informado:</span>
+                                <span className="text-xl font-black text-amber-900 dark:text-amber-200">
+                                    R$ {Number(selectedPaymentRequest.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                            <p className="text-[10px] text-amber-500 mt-2">
+                                Informado em {new Date(selectedPaymentRequest.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                        </div>
+
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-5">
+                            Verifique em seu banco se o PIX foi recebido. Ao confirmar, você poderá registrar o pagamento. Ao rejeitar, o cliente será notificado.
+                        </p>
+
+                        <div className="space-y-2.5">
+                            <button
+                                onClick={() => handleConfirmPaymentRequest(selectedPaymentRequest)}
+                                disabled={processingRequest}
+                                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm bg-green-600 text-white active:scale-[0.98] transition-all disabled:opacity-60"
+                            >
+                                {processingRequest ? 'Processando...' : <><Check className="w-4 h-4" /> Confirmar Recebimento</>}
+                            </button>
+                            <button
+                                onClick={() => handleRejectPaymentRequest(selectedPaymentRequest)}
+                                disabled={processingRequest}
+                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm text-red-500 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900 active:scale-[0.98] transition-all disabled:opacity-60"
+                            >
+                                <X className="w-4 h-4" /> Rejeitar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Portal Link Modal */}
+            {showPortalLinkModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPortalLinkModal(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl">
+                        <div className="flex justify-between items-center mb-5">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Link do Cliente</h3>
+                            <button onClick={() => setShowPortalLinkModal(false)} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full">
+                                <X className="w-4 h-4 text-gray-500" />
+                            </button>
+                        </div>
+
+                        {portalLinkLoading ? (
+                            <div className="flex items-center justify-center py-10">
+                                <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin"></div>
+                            </div>
+                        ) : portalLink ? (
+                            <div className="space-y-4">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Compartilhe este link com <strong>{loan.client?.name || 'o cliente'}</strong> para que acompanhe o empréstimo e realize pagamentos.
+                                </p>
+
+                                {/* Link Display */}
+                                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl border border-gray-200 dark:border-gray-700 break-all">
+                                    <p className="text-xs font-mono text-blue-600 dark:text-blue-400">{portalLink}</p>
+                                </div>
+
+                                {/* Actions */}
+                                <div className="space-y-2.5">
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                await navigator.clipboard.writeText(portalLink);
+                                                setPortalLinkCopied(true);
+                                                setTimeout(() => setPortalLinkCopied(false), 3000);
+                                            } catch {}
+                                        }}
+                                        className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm transition-all ${
+                                            portalLinkCopied
+                                                ? 'bg-green-100 text-green-700 border border-green-200'
+                                                : 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 active:scale-[0.98]'
+                                        }`}
+                                    >
+                                        {portalLinkCopied ? <><Check className="w-4 h-4" /> Link Copiado!</> : <><Copy className="w-4 h-4" /> Copiar Link</>}
+                                    </button>
+
+                                    <button
+                                        onClick={() => {
+                                            const message = `Olá, ${loan.client?.name || ''}!\n\nAcompanhe seu empréstimo pelo link abaixo:\n\n${portalLink}\n\nPor lá você pode ver suas parcelas e realizar pagamentos.`;
+                                            const phone = loan.client?.phone?.replace(/\D/g, '') || '';
+                                            window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(message)}`, '_blank');
+                                        }}
+                                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm bg-green-600 text-white active:scale-[0.98] transition-all"
+                                    >
+                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                                        Enviar via WhatsApp
+                                    </button>
+
+                                    <button
+                                        onClick={() => window.open(portalLink, '_blank')}
+                                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                                    >
+                                        <ExternalLink className="w-3.5 h-3.5" /> Visualizar Portal
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <p className="text-sm text-red-500 text-center py-6">Erro ao gerar link. Tente novamente.</p>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
     );

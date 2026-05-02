@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Search, SlidersHorizontal, ChevronRight, RefreshCw, Plus, Filter, MoreVertical, Mail, Phone, MessageSquare, MapPin, X, ChevronLeft, Calendar as CalendarIcon, DollarSign, User, MessageCircle, CreditCard, FileText, ExternalLink, Bell } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronRight, RefreshCw, Plus, Filter, MoreVertical, Mail, Phone, MessageSquare, MapPin, X, ChevronLeft, Calendar as CalendarIcon, DollarSign, User, MessageCircle, CreditCard, FileText, ExternalLink, Bell, Link2, UserPlus, Check, XCircle, Copy, Share2, Eye, Clock } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { Client, Loan } from '../types';
+import { Client, Loan, ClientRegistration } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
+import { getOrCreateRegistrationLink, fetchPendingRegistrations, approveRegistration, rejectRegistration } from '../utils/registrationUtils';
 
 interface ClientsProps {
     onClientSelect: (clientId: string) => void;
@@ -30,9 +31,86 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
     // Desktop specific state
     const [selectedClientDesktop, setSelectedClientDesktop] = useState<ExtendedClient | null>(null);
 
+    // Pre-registration state
+    const [pendingRegistrations, setPendingRegistrations] = useState<ClientRegistration[]>([]);
+    const [showRegistrationLink, setShowRegistrationLink] = useState(false);
+    const [registrationLink, setRegistrationLink] = useState('');
+    const [linkCopied, setLinkCopied] = useState(false);
+    const [showRegModal, setShowRegModal] = useState(false);
+    const [selectedRegistration, setSelectedRegistration] = useState<ClientRegistration | null>(null);
+    const [processingReg, setProcessingReg] = useState(false);
+    const [showRejectReason, setShowRejectReason] = useState(false);
+    const [rejectReason, setRejectReason] = useState('');
+
     useEffect(() => {
         fetchClients();
+        loadPendingRegistrations();
     }, []);
+
+    const loadPendingRegistrations = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const regs = await fetchPendingRegistrations(user.id);
+            setPendingRegistrations(regs);
+        }
+    };
+
+    const handleGenerateLink = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const token = await getOrCreateRegistrationLink(user.id);
+        if (token) {
+            const url = `${window.location.origin}/cadastro/${token}`;
+            setRegistrationLink(url);
+            setShowRegistrationLink(true);
+            setLinkCopied(false);
+        }
+    };
+
+    const handleCopyLink = () => {
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = registrationLink;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 2000);
+        } catch { }
+    };
+
+    const handleShareWhatsApp = () => {
+        const text = `Olá! Use este link para fazer seu pré-cadastro:\n${registrationLink}`;
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    };
+
+    const handleApprove = async (reg: ClientRegistration) => {
+        setProcessingReg(true);
+        const success = await approveRegistration(reg);
+        if (success) {
+            setPendingRegistrations(prev => prev.filter(r => r.id !== reg.id));
+            setShowRegModal(false);
+            setSelectedRegistration(null);
+            fetchClients(); // Refresh to show new client
+        }
+        setProcessingReg(false);
+    };
+
+    const handleReject = async (regId: string) => {
+        setProcessingReg(true);
+        const success = await rejectRegistration(regId, rejectReason);
+        if (success) {
+            setPendingRegistrations(prev => prev.filter(r => r.id !== regId));
+            setShowRegModal(false);
+            setSelectedRegistration(null);
+            setShowRejectReason(false);
+            setRejectReason('');
+        }
+        setProcessingReg(false);
+    };
 
     const isLoanLate = (loan: Loan): boolean => {
         if (loan.status === 'paid') return false;
@@ -347,6 +425,38 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                 </div>
 
                 <main className="flex-1 px-5 pt-2 pb-32 overflow-y-auto no-scrollbar">
+                    {/* Pending Registrations Banner */}
+                    {pendingRegistrations.length > 0 && (
+                        <div
+                            onClick={() => setShowRegModal(true)}
+                            className="mb-4 bg-amber-50 dark:bg-amber-900/20 p-4 rounded-2xl border border-amber-200 dark:border-amber-800 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-all"
+                        >
+                            <div className="w-10 h-10 bg-amber-200 dark:bg-amber-800 rounded-xl flex items-center justify-center flex-shrink-0">
+                                <UserPlus className="w-5 h-5 text-amber-700 dark:text-amber-300" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">{pendingRegistrations.length} pré-cadastro{pendingRegistrations.length > 1 ? 's' : ''} pendente{pendingRegistrations.length > 1 ? 's' : ''}</p>
+                                <p className="text-[10px] text-amber-600 dark:text-amber-400">Toque para analisar</p>
+                            </div>
+                            <ChevronRight className="w-5 h-5 text-amber-400" />
+                        </div>
+                    )}
+
+                    {/* Registration Link Button */}
+                    <button
+                        onClick={handleGenerateLink}
+                        className="w-full mb-4 flex items-center gap-3 p-3.5 bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 active:scale-[0.98] transition-all"
+                    >
+                        <div className="w-9 h-9 bg-blue-50 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
+                            <Link2 className="w-4 h-4 text-blue-500" />
+                        </div>
+                        <div className="text-left flex-1">
+                            <p className="text-xs font-bold text-gray-900 dark:text-white">Link de Pré-Cadastro</p>
+                            <p className="text-[10px] text-gray-400">Compartilhe para captar novos clientes</p>
+                        </div>
+                        <Share2 className="w-4 h-4 text-gray-300" />
+                    </button>
+
                     <div className="space-y-4">
                         {filteredClients.length === 0 && !loading && (
                             <div className="text-center text-gray-400 mt-10">
@@ -491,20 +601,18 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                         <div
                                             key={client.id}
                                             onClick={() => setSelectedClientDesktop(client)}
-                                            className={`group bg-white dark:bg-card-dark rounded-2xl border overflow-hidden cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 flex items-center gap-5 p-5 ${
-                                                selectedClientDesktop?.id === client.id 
-                                                    ? 'border-primary shadow-md shadow-primary/10 ring-1 ring-primary/20' 
+                                            className={`group bg-white dark:bg-card-dark rounded-2xl border overflow-hidden cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 flex items-center gap-5 p-5 ${selectedClientDesktop?.id === client.id
+                                                    ? 'border-primary shadow-md shadow-primary/10 ring-1 ring-primary/20'
                                                     : 'border-gray-100 dark:border-gray-800 shadow-sm hover:border-gray-200 dark:hover:border-gray-700'
-                                            }`}
+                                                }`}
                                         >
                                             {/* Status indicator bar (left) */}
-                                            <div className={`w-1 self-stretch rounded-full shrink-0 ${
-                                                client.isLate 
-                                                    ? 'bg-rose-400' 
-                                                    : client.status === 'active' 
-                                                        ? 'bg-emerald-400' 
+                                            <div className={`w-1 self-stretch rounded-full shrink-0 ${client.isLate
+                                                    ? 'bg-rose-400'
+                                                    : client.status === 'active'
+                                                        ? 'bg-emerald-400'
                                                         : 'bg-gray-200 dark:bg-gray-700'
-                                            }`}></div>
+                                                }`}></div>
 
                                             {/* Avatar */}
                                             <div className="w-11 h-11 rounded-xl flex-shrink-0 flex items-center justify-center bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-black text-sm overflow-hidden border border-gray-100 dark:border-gray-700">
@@ -752,6 +860,167 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                     </div>
                 )}
             </div>
+
+            {/* Registration Link Modal */}
+            {showRegistrationLink && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4" onClick={() => setShowRegistrationLink(false)}>
+                    <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="text-center mb-5">
+                            <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                                <Link2 className="w-7 h-7 text-blue-500" />
+                            </div>
+                            <h3 className="text-lg font-black text-gray-900 dark:text-white">Link de Pré-Cadastro</h3>
+                            <p className="text-xs text-gray-500 mt-1">Compartilhe este link com seus clientes em potencial</p>
+                        </div>
+                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl mb-4 flex items-center gap-2">
+                            <p className="text-xs text-gray-600 dark:text-gray-300 truncate flex-1 font-mono">{registrationLink}</p>
+                            <button onClick={handleCopyLink} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 transition-all ${linkCopied ? 'bg-green-500 text-white' : 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'}`}>
+                                {linkCopied ? <><Check className="w-3 h-3" />Copiado</> : <><Copy className="w-3 h-3" />Copiar</>}
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button onClick={handleShareWhatsApp} className="py-3 bg-green-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-all">
+                                <MessageCircle className="w-4 h-4" /> WhatsApp
+                            </button>
+                            <button onClick={() => setShowRegistrationLink(false)} className="py-3 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-bold active:scale-[0.98] transition-all">
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Pending Registrations Modal */}
+            {showRegModal && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4 pb-24 md:pb-0" onClick={() => { setShowRegModal(false); setSelectedRegistration(null); setShowRejectReason(false); }}>
+                    <div className="bg-white dark:bg-zinc-900 rounded-3xl w-full max-w-lg max-h-[75vh] overflow-hidden flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="px-6 pt-6 pb-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                {selectedRegistration && (
+                                    <button onClick={() => { setSelectedRegistration(null); setShowRejectReason(false); }} className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                                        <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                                    </button>
+                                )}
+                                <h3 className="text-lg font-black text-gray-900 dark:text-white">
+                                    {selectedRegistration ? selectedRegistration.name : 'Pré-Cadastros Pendentes'}
+                                </h3>
+                            </div>
+                            <button onClick={() => { setShowRegModal(false); setSelectedRegistration(null); }} className="text-gray-400"><X className="w-5 h-5" /></button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6 no-scrollbar">
+                            {!selectedRegistration ? (
+                                /* Registration List */
+                                <div className="space-y-3">
+                                    {pendingRegistrations.map(reg => (
+                                        <div key={reg.id} onClick={() => setSelectedRegistration(reg)}
+                                            className="bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl flex items-center gap-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-all active:scale-[0.98]">
+                                            <div className="w-12 h-12 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center flex-shrink-0">
+                                                {reg.avatar_url ? <img src={reg.avatar_url} className="w-full h-full object-cover rounded-xl" /> : <User className="w-6 h-6 text-amber-600" />}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{reg.name}</p>
+                                                <p className="text-[10px] text-gray-400">{reg.phone || 'Sem telefone'} • {new Date(reg.created_at).toLocaleDateString('pt-BR')}</p>
+                                            </div>
+                                            <div className="flex items-center gap-1 px-2 py-1 bg-amber-200 dark:bg-amber-800 rounded-lg">
+                                                <Clock className="w-3 h-3 text-amber-700 dark:text-amber-300" />
+                                                <span className="text-[9px] font-bold text-amber-700 dark:text-amber-300 uppercase">Pendente</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                /* Registration Detail */
+                                <div className="space-y-4">
+                                    {/* Avatar + Name */}
+                                    <div className="text-center">
+                                        <div className="w-20 h-20 mx-auto rounded-2xl bg-gray-100 dark:bg-gray-800 overflow-hidden mb-3 border border-gray-200 dark:border-gray-700">
+                                            {selectedRegistration.avatar_url ? <img src={selectedRegistration.avatar_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><User className="w-10 h-10 text-gray-300" /></div>}
+                                        </div>
+                                        <h4 className="text-xl font-black text-gray-900 dark:text-white">{selectedRegistration.name}</h4>
+                                        <p className="text-xs text-gray-400">Enviado em {new Date(selectedRegistration.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                                    </div>
+
+                                    {/* Info Cards */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl">
+                                            <span className="text-[9px] text-gray-400 uppercase font-bold">CPF</span>
+                                            <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedRegistration.cpf || '-'}</p>
+                                        </div>
+                                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl">
+                                            <span className="text-[9px] text-gray-400 uppercase font-bold">Telefone</span>
+                                            <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedRegistration.phone || '-'}</p>
+                                        </div>
+                                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl">
+                                            <span className="text-[9px] text-gray-400 uppercase font-bold">E-mail</span>
+                                            <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{selectedRegistration.email || '-'}</p>
+                                        </div>
+                                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl">
+                                            <span className="text-[9px] text-gray-400 uppercase font-bold">Nascimento</span>
+                                            <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedRegistration.birthdate ? new Date(selectedRegistration.birthdate).toLocaleDateString('pt-BR') : '-'}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Address */}
+                                    {selectedRegistration.address && (
+                                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl">
+                                            <span className="text-[9px] text-gray-400 uppercase font-bold">Endereço</span>
+                                            <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedRegistration.address}{selectedRegistration.number ? `, ${selectedRegistration.number}` : ''}</p>
+                                            <p className="text-xs text-gray-500">{selectedRegistration.city}{selectedRegistration.state ? ` - ${selectedRegistration.state}` : ''} {selectedRegistration.cep ? `• ${selectedRegistration.cep}` : ''}</p>
+                                            {selectedRegistration.complement && <p className="text-xs text-gray-400 mt-1">{selectedRegistration.complement}</p>}
+                                        </div>
+                                    )}
+
+                                    {/* Documents */}
+                                    {selectedRegistration.documents && selectedRegistration.documents.length > 0 && (
+                                        <div>
+                                            <span className="text-[9px] text-gray-400 uppercase font-bold block mb-2">Documentos</span>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {selectedRegistration.documents.map((url, i) => (
+                                                    <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="aspect-square rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 group relative">
+                                                        <img src={url} className="w-full h-full object-cover" />
+                                                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><ExternalLink className="text-white w-5 h-5" /></div>
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Reject Reason */}
+                                    {showRejectReason && (
+                                        <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-xl border border-red-200 dark:border-red-800 animate-fadeIn">
+                                            <p className="text-xs font-bold text-red-700 dark:text-red-300 mb-2">Motivo da rejeição (opcional)</p>
+                                            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={2} placeholder="Ex: Documentos ilegíveis..."
+                                                className="w-full bg-white dark:bg-gray-800 border border-red-200 dark:border-red-700 rounded-lg p-2 text-sm text-gray-900 dark:text-white focus:outline-none resize-none" />
+                                            <div className="flex gap-2 mt-2">
+                                                <button onClick={() => handleReject(selectedRegistration!.id)} disabled={processingReg}
+                                                    className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-xs font-bold active:scale-[0.98] transition-all">
+                                                    {processingReg ? 'Rejeitando...' : 'Confirmar Rejeição'}
+                                                </button>
+                                                <button onClick={() => setShowRejectReason(false)} className="py-2.5 px-4 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300">Cancelar</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Action Buttons */}
+                        {selectedRegistration && !showRejectReason && (
+                            <div className="p-4 border-t border-gray-100 dark:border-gray-800 flex gap-2">
+                                <button onClick={() => setShowRejectReason(true)} disabled={processingReg}
+                                    className="flex-1 py-3.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-all border border-red-200 dark:border-red-800">
+                                    <XCircle className="w-4 h-4" /> Rejeitar
+                                </button>
+                                <button onClick={() => handleApprove(selectedRegistration)} disabled={processingReg}
+                                    className="flex-1 py-3.5 bg-green-600 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-lg shadow-green-600/20">
+                                    {processingReg ? 'Processando...' : <><Check className="w-4 h-4" /> Aprovar</>}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
