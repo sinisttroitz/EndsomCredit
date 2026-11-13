@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, MoreVertical, ShieldCheck, CreditCard, Phone, Mail, PlusCircle, Edit, AlertCircle, FileText, ExternalLink, MapPin, Navigation } from 'lucide-react';
+import { ArrowLeft, MoreVertical, ShieldCheck, CreditCard, Phone, Mail, PlusCircle, Edit, AlertCircle, FileText, ExternalLink, MapPin, Navigation, Users } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Client, Loan } from '../types';
+import { AdditionalContactsList } from '../components/AdditionalContactsInput';
+import { formatAddressSummary } from '../utils/clientUtils';
+import { isNationalHoliday } from '../utils/loanUtils';
 
 interface ClientDetailsProps {
     clientId: string | null;
@@ -64,6 +67,10 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                             continue;
                         }
                         if (loan.skip_sunday && day === 0) {
+                            date.setDate(date.getDate() + 1);
+                            continue;
+                        }
+                        if (loan.skip_holidays && isNationalHoliday(date)) {
                             date.setDate(date.getDate() + 1);
                             continue;
                         }
@@ -170,6 +177,10 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                             date.setDate(date.getDate() + 1);
                             continue;
                         }
+                        if (loan.skip_holidays && isNationalHoliday(date)) {
+                            date.setDate(date.getDate() + 1);
+                            continue;
+                        }
                         break;
                     }
                 }
@@ -244,6 +255,15 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                             <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium mb-1">Total Devido</span>
                             <span className="text-xl font-bold text-primary dark:text-white">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
+                        {Number(client.credit_balance) > 0 && (
+                            <>
+                                <div className="h-10 w-px bg-gray-100 dark:bg-gray-800"></div>
+                                <div className="flex flex-col items-center">
+                                    <span className="text-xs text-blue-500 font-medium mb-1">Saldo / Troco</span>
+                                    <span className="text-xl font-bold text-blue-600 dark:text-blue-400">R$ {Number(client.credit_balance).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                </div>
+                            </>
+                        )}
                         <div className="h-10 w-px bg-gray-100 dark:bg-gray-800"></div>
                         <div className="flex flex-col items-end">
                             <span className="text-xs text-text-sub-light dark:text-text-sub-dark font-medium mb-1">Status Geral</span>
@@ -297,6 +317,21 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                     )}
                                 </div>
                             </div>
+                            {client.additional_contacts && client.additional_contacts.length > 0 && (
+                                <div className="flex items-start gap-4">
+                                    <div className="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-primary dark:text-white flex-shrink-0">
+                                        <Users className="w-5 h-5" />
+                                    </div>
+                                    <div className="flex-1 space-y-2">
+                                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-tight">Contatos Adicionais</p>
+                                        <AdditionalContactsList
+                                            contacts={client.additional_contacts}
+                                            interactiveLinks
+                                            itemClassName="bg-gray-50 dark:bg-gray-800/60 px-3 py-2 rounded-xl"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                             <div className="flex items-center gap-4">
                                 <div className="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-primary dark:text-white">
                                     <MapPin className="w-5 h-5" />
@@ -304,7 +339,9 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                 <div className="flex-1">
                                     <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-tight">Endereço</p>
                                     <p className="text-sm font-semibold text-gray-800 dark:text-white">
-                                        {client.address ? `${client.address}, ${client.number || 'S/N'}${client.city ? ` - ${client.city}/${client.state}` : ''}` : 'Não informado'}
+                                        {client.address
+                                            ? `${formatAddressSummary(client)}${client.city ? ` - ${client.city}/${client.state}` : ''}`
+                                            : 'Não informado'}
                                     </p>
                                 </div>
                             </div>
@@ -468,6 +505,21 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                             </a>
                                         </div>
                                     </div>
+                                    {client.additional_contacts && client.additional_contacts.length > 0 && (
+                                        <div className="flex items-start gap-4">
+                                            <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center text-amber-600 flex-shrink-0">
+                                                <Users className="w-5 h-5" />
+                                            </div>
+                                            <div className="flex-1 space-y-2">
+                                                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Contatos Adicionais</p>
+                                                <AdditionalContactsList
+                                                    contacts={client.additional_contacts}
+                                                    interactiveLinks
+                                                    itemClassName="bg-gray-50 dark:bg-gray-800/70 px-3 py-2 rounded-xl"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="flex items-start gap-4">
                                         <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600">
                                             <MapPin className="w-5 h-5" />
@@ -475,7 +527,7 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                         <div className="flex-1">
                                             <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mb-1">Endereço</p>
                                             <p className="text-sm font-bold text-gray-900 dark:text-white leading-relaxed">
-                                                {client.address ? `${client.address}, ${client.number || 'S/N'}` : '-'}
+                                                {client.address ? formatAddressSummary(client) : '-'}
                                                 {client.city && <span className="block text-xs text-gray-400">{client.city}/{client.state}</span>}
                                             </p>
                                         </div>
@@ -496,13 +548,21 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                         {/* Main Content Column */}
                         <div className="flex-1 flex flex-col gap-8">
                             {/* Stats Summary */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className={`grid grid-cols-1 ${Number(client.credit_balance) > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-6`}>
                                 <div className="bg-white dark:bg-card-dark rounded-3xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
                                     <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mb-3">Total Devido</p>
                                     <div className="flex items-baseline gap-2">
                                         <span className="text-2xl font-black text-gray-900 dark:text-white">R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                     </div>
                                 </div>
+                                {Number(client.credit_balance) > 0 && (
+                                    <div className="bg-white dark:bg-card-dark rounded-3xl p-6 border border-blue-100 dark:border-blue-900/30 shadow-sm">
+                                        <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest mb-3">Saldo / Troco Disponível</p>
+                                        <div className="flex items-baseline gap-2">
+                                            <span className="text-2xl font-black text-blue-600 dark:text-blue-400">R$ {Number(client.credit_balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="bg-white dark:bg-card-dark rounded-3xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
                                     <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mb-3">Parcelas em Atraso</p>
                                     <div className="flex items-center gap-3">

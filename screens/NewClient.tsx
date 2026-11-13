@@ -8,11 +8,20 @@ interface NewClientProps {
     onSuccess: () => void;
 }
 
+import { ClientContact } from '../types';
+import { AdditionalContactsInput, AdditionalContactsList } from '../components/AdditionalContactsInput';
+import {
+    executeWithClientColumnsFallback,
+    sanitizeAdditionalContacts,
+    validateAdditionalContacts,
+} from '../utils/clientUtils';
+
 export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
     // Dados Pessoais
     const [name, setName] = useState('');
     const [cpf, setCpf] = useState('');
     const [phone, setPhone] = useState('');
+    const [additionalContacts, setAdditionalContacts] = useState<ClientContact[]>([]);
     const [birthDay, setBirthDay] = useState('');
     const [birthMonth, setBirthMonth] = useState('');
     const [birthYear, setBirthYear] = useState('');
@@ -23,6 +32,7 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
     const [cep, setCep] = useState('');
     const [city, setCity] = useState('');
     const [state, setState] = useState('');
+    const [neighborhood, setNeighborhood] = useState('');
     const [address, setAddress] = useState(''); // Logradouro
     const [number, setNumber] = useState('');
     const [complement, setComplement] = useState('');
@@ -56,9 +66,16 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
             setError("Por favor, informe um CPF válido.");
             return;
         }
-        if (currentStep === 3 && phone.length < 14) {
-            setError("Por favor, informe um telefone válido.");
-            return;
+        if (currentStep === 3) {
+            if (phone.length < 14) {
+                setError("Por favor, informe um telefone válido.");
+                return;
+            }
+            const additionalError = validateAdditionalContacts(additionalContacts);
+            if (additionalError) {
+                setError(additionalError);
+                return;
+            }
         }
         if (currentStep === 4 && (birthDay || birthMonth || birthYear)) {
             if (!birthDay || !birthMonth || !birthYear || birthYear.length < 4) {
@@ -73,6 +90,10 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
             }
             if (!address) {
                 setError("Por favor, informe a rua/logradouro.");
+                return;
+            }
+            if (!neighborhood.trim()) {
+                setError("Por favor, informe o bairro.");
                 return;
             }
             if (!city) {
@@ -216,9 +237,10 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
                 const data = await response.json();
 
                 if (!data.erro) {
-                    setCity(data.localidade);
-                    setState(data.uf);
-                    setAddress(data.logradouro);
+                    setCity(data.localidade || '');
+                    setState(data.uf || '');
+                    setAddress(data.logradouro || '');
+                    setNeighborhood(data.bairro || '');
                 }
             } catch (error) {
                 console.error("Erro ao buscar CEP", error);
@@ -323,12 +345,29 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
                 }
             }
 
-            const { error: insertError } = await supabase
-                .from('clients')
-                .insert([{
-                    name, cpf, phone, email, birthdate: formattedBirthdate, cep, city, state, address, number, complement,
-                    user_id: user.id, status: 'active', avatar_url: avatarUrl, documents: documentUrls
-                }]);
+            const cleanAdditionalContacts = sanitizeAdditionalContacts(additionalContacts);
+            const { error: insertError } = await executeWithClientColumnsFallback(
+                {
+                    name,
+                    cpf,
+                    phone,
+                    additional_contacts: cleanAdditionalContacts,
+                    email,
+                    birthdate: formattedBirthdate,
+                    cep,
+                    city,
+                    state,
+                    neighborhood: neighborhood.trim(),
+                    address,
+                    number,
+                    complement,
+                    user_id: user.id,
+                    status: 'active',
+                    avatar_url: avatarUrl,
+                    documents: documentUrls,
+                },
+                async (payload) => await supabase.from('clients').insert([payload])
+            );
 
             if (insertError) throw insertError;
             onSuccess();
@@ -386,6 +425,13 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
                             className="w-full bg-transparent border-b-2 border-gray-200 dark:border-gray-800 py-4 text-3xl font-bold text-primary dark:text-white focus:outline-none focus:border-black dark:focus:border-white transition-colors tracking-wider"
                             placeholder="(00) 00000-0000"
                         />
+                        <div className="pt-2">
+                            <AdditionalContactsInput
+                                contacts={additionalContacts}
+                                onChange={setAdditionalContacts}
+                                variant="wizard"
+                            />
+                        </div>
                     </div>
                 );
             case 4:
@@ -474,6 +520,16 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
                                             className="w-full bg-transparent text-lg font-bold text-primary dark:text-white focus:outline-none"
                                         />
                                     </div>
+                                </div>
+
+                                <div className="border-b border-gray-100 dark:border-gray-800 pb-1">
+                                    <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Bairro</span>
+                                    <input
+                                        value={neighborhood}
+                                        onChange={(e) => setNeighborhood(e.target.value)}
+                                        placeholder="Ex: Centro"
+                                        className="w-full bg-transparent text-lg font-bold text-primary dark:text-white focus:outline-none"
+                                    />
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
@@ -642,6 +698,12 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
                                         <p className="text-sm font-bold text-gray-700 dark:text-gray-300 truncate">{email || '-'}</p>
                                     </div>
                                 </div>
+                                {sanitizeAdditionalContacts(additionalContacts).length > 0 && (
+                                    <div className="mt-3 pt-3 border-t border-gray-200/70 dark:border-gray-700/70 space-y-1.5">
+                                        <p className="text-[9px] text-gray-400 uppercase font-bold">Contatos Adicionais</p>
+                                        <AdditionalContactsList contacts={sanitizeAdditionalContacts(additionalContacts)} />
+                                    </div>
+                                )}
                             </button>
 
                             {/* Bloco Endereço */}
@@ -658,7 +720,9 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
                                     </div>
                                     <span className="text-[10px] font-bold text-gray-900 dark:text-white opacity-0 group-hover:opacity-100 transition-opacity">EDITAR</span>
                                 </div>
-                                <p className="font-bold text-gray-900 dark:text-white">{address}{number ? `, ${number}` : ''}</p>
+                                <p className="font-bold text-gray-900 dark:text-white">
+                                    {address}{number ? `, ${number}` : ''}{neighborhood ? ` - ${neighborhood}` : ''}
+                                </p>
                                 <div className="grid grid-cols-2 gap-4 mt-2">
                                     <div>
                                         <p className="text-[9px] text-gray-400 uppercase font-bold">Cidade</p>

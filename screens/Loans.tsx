@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Search, SlidersHorizontal, ChevronRight, AlertTriangle, Calendar, Hourglass, RefreshCw, X, Plus, Bell } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronRight, AlertTriangle, Calendar, Hourglass, RefreshCw, X, Plus, Bell, Share2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
+import { ShareReportModal } from '../components/ShareReportModal';
 
 interface LoansProps {
     onLoanSelect?: (loanId: string) => void;
@@ -18,6 +19,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
     const [searchTerm, setSearchTerm] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const [frequencyFilter, setFrequencyFilter] = useState<'all' | 'Diária' | 'Semanal' | 'Quinzenal' | 'Mensal'>('all');
+    const [showReportModal, setShowReportModal] = useState(false);
 
     useEffect(() => {
         fetchLoans();
@@ -117,6 +119,13 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                         >
                             <Search className={`w-5 h-5 ${isSearching ? 'text-white dark:text-black' : 'text-gray-600 dark:text-gray-300'}`} />
                         </button>
+                        <button
+                            onClick={() => setShowReportModal(true)}
+                            title="Relatório WhatsApp"
+                            className="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center transition-all border border-emerald-200 dark:border-emerald-800 active:scale-95 shadow-sm"
+                        >
+                            <Share2 className="w-4 h-4" />
+                        </button>
                     </div>
                 </div>
             </header>
@@ -130,6 +139,12 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setShowReportModal(true)}
+                        className="hidden md:flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-full transition-all shadow-md active:scale-95 mr-2"
+                    >
+                        <Share2 className="w-4 h-4" /> Relatório WhatsApp
+                    </button>
                     {onNewLoan && (
                         <button
                             onClick={onNewLoan}
@@ -449,6 +464,12 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                     </div>
                 </div>
             </main>
+
+            {/* Modal de Compartilhamento / Relatório WhatsApp */}
+            <ShareReportModal
+                isOpen={showReportModal}
+                onClose={() => setShowReportModal(false)}
+            />
         </div>
     );
 };

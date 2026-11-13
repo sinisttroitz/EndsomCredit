@@ -28,6 +28,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
     const [pixPayload, setPixPayload] = useState('');
     const [pixCopied, setPixCopied] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [paymentError, setPaymentError] = useState<string | null>(null);
 
     // Batch selection
     const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -75,6 +76,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
         );
         setPixPayload(payload);
         setPixCopied(false);
+        setPaymentError(null);
         setView('payment');
     };
 
@@ -87,13 +89,21 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
     };
 
     const handleConfirmPayment = async () => {
-        if (!loan || !portalLink) return;
+        if (!loan || !portalLink || submitting) return;
         setSubmitting(true);
+        setPaymentError(null);
         try {
-            const targets = selectedBatch.length > 0 ? selectedBatch : (selectedInstallment ? [selectedInstallment] : []);
-            let allSuccess = true;
+            const rawTargets = selectedBatch.length > 0 ? selectedBatch : (selectedInstallment ? [selectedInstallment] : []);
+            const targets = rawTargets.filter(t => !pendingRequests.includes(t.number));
+            if (targets.length === 0) {
+                setView('confirmation');
+                return;
+            }
+
+            let firstError: string | undefined;
+            const confirmedNumbers: number[] = [];
             for (const inst of targets) {
-                const success = await createPaymentRequest(
+                const res = await createPaymentRequest(
                     loan.id,
                     portalLink.lender_id,
                     inst.number,
@@ -101,14 +111,27 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                     loan.client?.name || 'Cliente',
                     token
                 );
-                if (!success) allSuccess = false;
+                if (res.success) {
+                    confirmedNumbers.push(inst.number);
+                } else if (!firstError) {
+                    firstError = res.error;
+                }
             }
-            if (allSuccess) {
-                setPendingRequests(prev => [...prev, ...targets.map(t => t.number)]);
+
+            if (confirmedNumbers.length > 0) {
+                setPendingRequests(prev => Array.from(new Set([...prev, ...confirmedNumbers])));
+            }
+
+            if (!firstError && confirmedNumbers.length === targets.length) {
                 setView('confirmation');
+            } else {
+                setPaymentError(firstError || 'Não foi possível enviar a confirmação. Tente novamente.');
             }
-        } catch { /* ignore */ }
-        finally { setSubmitting(false); }
+        } catch {
+            setPaymentError('Erro inesperado ao registrar pagamento. Tente novamente.');
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const toggleBatchSelect = (inst: Installment) => {
@@ -132,6 +155,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
         );
         setPixPayload(payload);
         setPixCopied(false);
+        setPaymentError(null);
         setSelectedInstallment(null); // Using batch mode
         setView('payment');
     };
@@ -186,7 +210,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                     {/* Payment Summary */}
                     <div className="bg-white p-6 rounded-3xl shadow-md border border-gray-100 mb-5">
                         <h3 className="text-sm font-bold text-gray-900 mb-4">{isBatch ? 'Parcelas Selecionadas' : 'Resumo do Pagamento'}</h3>
-                        
+
                         {isBatch ? (
                             <div className="space-y-2 mb-3">
                                 {paymentItems.map(inst => (
@@ -218,7 +242,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                                 )}
                             </>
                         )}
-                        
+
                         <div className="border-t border-gray-100 mt-3 pt-3 flex justify-between items-center">
                             <span className="font-bold text-gray-900">Total a pagar</span>
                             <span className="text-2xl font-black text-green-600">R$ {paymentTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
@@ -258,6 +282,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                         </div>
                     </div>
 
+                    {paymentError && (
+                        <div className="mb-4 p-4 rounded-2xl bg-red-50 border border-red-200 flex items-center gap-3 text-red-700 text-xs font-bold">
+                            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                            <span>{paymentError}</span>
+                        </div>
+                    )}
+
                     {/* Confirm Button */}
                     <button
                         onClick={handleConfirmPayment}
@@ -286,7 +317,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                     </div>
                     <h2 className="text-2xl font-black text-gray-900 mb-2">Aguardando Verificação</h2>
                     <p className="text-sm text-gray-500 mb-6">
-                        {isBatchConfirm 
+                        {isBatchConfirm
                             ? <>Você informou o pagamento de <strong>{confirmedItems.length} parcelas</strong> no valor total de <strong>R$ {confirmedTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></>
                             : <>Você informou o pagamento da <strong>Parcela #{String(confirmedItems[0]?.number || 0).padStart(2, '0')}</strong> no valor de <strong>R$ {confirmedTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></>
                         }
@@ -331,12 +362,11 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                             <span className="px-3 py-1 rounded text-[10px] font-bold border border-gray-200 bg-gray-50 text-gray-600 uppercase">
                                 {loan.frequency || 'N/A'}
                             </span>
-                            <span className={`px-3 py-1 rounded text-[10px] font-bold border uppercase ${
-                                displayStatus === 'active' ? 'bg-green-100 text-green-700 border-green-200' :
+                            <span className={`px-3 py-1 rounded text-[10px] font-bold border uppercase ${displayStatus === 'active' ? 'bg-green-100 text-green-700 border-green-200' :
                                 displayStatus === 'late' ? 'bg-red-100 text-red-700 border-red-200' :
-                                displayStatus === 'paid' ? 'bg-gray-100 text-gray-500 border-gray-200' :
-                                'bg-orange-100 text-orange-700 border-orange-200'
-                            }`}>
+                                    displayStatus === 'paid' ? 'bg-gray-100 text-gray-500 border-gray-200' :
+                                        'bg-orange-100 text-orange-700 border-orange-200'
+                                }`}>
                                 {displayStatus === 'active' ? 'EM DIA' : displayStatus === 'late' ? 'ATRASADO' : displayStatus === 'paid' ? 'QUITADO' : 'PENDENTE'}
                             </span>
                         </div>
@@ -346,23 +376,35 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                 {/* Progress Card */}
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 mb-5">
                     <h3 className="text-sm font-bold text-gray-900 mb-5">Status do Pagamento</h3>
-                    <div className="flex items-center justify-between gap-6">
+                    <div className="flex items-center gap-5">
                         <div
-                            className="w-24 h-24 rounded-full flex items-center justify-center relative shadow-inner"
+                            className="w-24 h-24 rounded-full flex items-center justify-center relative shadow-inner shrink-0"
                             style={{ background: `conic-gradient(${isLate ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)` } as React.CSSProperties}
                         >
-                            <div className="absolute inset-3 rounded-full bg-white flex items-center justify-center shadow-sm">
+                            <div className="absolute inset-2.5 rounded-full bg-white flex items-center justify-center shadow-xs">
                                 <span className="text-xl font-bold text-gray-900">{percentage}%</span>
                             </div>
                         </div>
-                        <div className="flex-1 space-y-3">
-                            <div>
-                                <p className="text-[10px] text-gray-400 uppercase font-semibold">Total Amortizado</p>
-                                <p className="text-lg font-bold text-gray-900">R$ {totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                        <div className="flex-1 space-y-2.5 min-w-0">
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="p-2.5 rounded-2xl bg-gray-50 border border-gray-100">
+                                    <p className="text-[9px] text-gray-400 uppercase font-bold tracking-wider truncate">Total Dívida</p>
+                                    <p className="text-sm font-black text-gray-900 mt-0.5 truncate">
+                                        R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </p>
+                                </div>
+                                <div className="p-2.5 rounded-2xl bg-emerald-50/60 border border-emerald-100">
+                                    <p className="text-[9px] text-emerald-600 uppercase font-bold tracking-wider truncate">Amortizado</p>
+                                    <p className="text-sm font-black text-emerald-600 mt-0.5 truncate">
+                                        R$ {totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </p>
+                                </div>
                             </div>
-                            <div>
-                                <p className="text-[10px] text-gray-400 uppercase font-semibold">Parcelas Pagas</p>
-                                <p className="text-lg font-bold text-gray-900">{paidCount}/{totalCount}</p>
+                            <div className="p-2 px-3 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-between">
+                                <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider">Parcelas Pagas</span>
+                                <span className="text-xs font-bold text-gray-900">
+                                    {paidCount} de {totalCount} ({percentage}%)
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -385,11 +427,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                                             setShowAllInstallments(true);
                                         }
                                     }}
-                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                                        isSelectionMode
-                                            ? 'bg-gray-900 text-white'
-                                            : 'bg-gray-100 text-gray-600 border border-gray-200'
-                                    }`}
+                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${isSelectionMode
+                                        ? 'bg-gray-900 text-white'
+                                        : 'bg-gray-100 text-gray-600 border border-gray-200'
+                                        }`}
                                 >
                                     {isSelectionMode ? 'Cancelar' : 'Selecionar'}
                                 </button>
@@ -438,16 +479,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
 
                                     {/* Status Icon */}
                                     {(!isSelectionMode || !isPayable) && (
-                                        <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white ${
-                                            st === 'paid' ? 'bg-green-500' :
+                                        <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white ${st === 'paid' ? 'bg-green-500' :
                                             st === 'pending_verification' ? 'bg-amber-400' :
-                                            st === 'late' ? 'bg-red-500' :
-                                            st === 'pending' ? 'bg-blue-500' : 'bg-gray-200 text-gray-500'
-                                        }`}>
+                                                st === 'late' ? 'bg-red-500' :
+                                                    st === 'pending' ? 'bg-blue-500' : 'bg-gray-200 text-gray-500'
+                                            }`}>
                                             {st === 'paid' ? <Check className="w-4 h-4" /> :
-                                             st === 'pending_verification' ? <Clock className="w-4 h-4" /> :
-                                             st === 'future' ? <Circle className="w-4 h-4" /> :
-                                             <Clock className="w-4 h-4" />}
+                                                st === 'pending_verification' ? <Clock className="w-4 h-4" /> :
+                                                    st === 'future' ? <Circle className="w-4 h-4" /> :
+                                                        <Clock className="w-4 h-4" />}
                                         </div>
                                     )}
 
@@ -457,19 +497,18 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                                             <p className="text-sm font-bold text-gray-900">Parcela #{String(inst.number).padStart(2, '0')}</p>
                                             <p className="text-[10px] text-gray-400">
                                                 {st === 'paid' ? 'Paga' :
-                                                 st === 'pending_verification' ? 'Pendente de verificação' :
-                                                 st === 'late' ? `Vencida em ${(inst.originalDate || inst.date).toLocaleDateString('pt-BR')}` :
-                                                 st === 'pending' ? `Vence em ${inst.date.toLocaleDateString('pt-BR')}` :
-                                                 `Prevista ${inst.date.toLocaleDateString('pt-BR')}`}
+                                                    st === 'pending_verification' ? 'Pendente de verificação' :
+                                                        st === 'late' ? `Vencida em ${(inst.originalDate || inst.date).toLocaleDateString('pt-BR')}` :
+                                                            st === 'pending' ? `Vence em ${inst.date.toLocaleDateString('pt-BR')}` :
+                                                                `Prevista ${inst.date.toLocaleDateString('pt-BR')}`}
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <div className={`text-right ${
-                                                st === 'paid' ? 'text-green-500' :
+                                            <div className={`text-right ${st === 'paid' ? 'text-green-500' :
                                                 st === 'pending_verification' ? 'text-amber-500' :
-                                                st === 'late' ? 'text-red-500' :
-                                                st === 'pending' ? 'text-blue-500' : 'text-gray-400'
-                                            }`}>
+                                                    st === 'late' ? 'text-red-500' :
+                                                        st === 'pending' ? 'text-blue-500' : 'text-gray-400'
+                                                }`}>
                                                 <span className="text-xs font-medium opacity-70">R$ </span>
                                                 <span className="text-base font-bold">{inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                             </div>

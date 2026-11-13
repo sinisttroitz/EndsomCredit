@@ -13,18 +13,18 @@ if (!rootElement) {
 const path = window.location.pathname;
 
 // Client Portal: /acompanhar/{token}
-const portalMatch = path.match(/^\/acompanhar\/([a-zA-Z0-9]+)$/);
+const portalMatch = path.match(/^\/acompanhar\/([a-zA-Z0-9_-]+)\/?$/);
 const portalToken = portalMatch ? portalMatch[1] : null;
 
 // Client Registration: /cadastro/{token}
-const registrationMatch = path.match(/^\/cadastro\/([a-zA-Z0-9]+)$/);
+const registrationMatch = path.match(/^\/cadastro\/([a-zA-Z0-9_-]+)\/?$/);
 const registrationToken = registrationMatch ? registrationMatch[1] : null;
 
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     {portalToken ? <ClientPortal token={portalToken} /> :
-     registrationToken ? <ClientRegistration token={registrationToken} /> :
-     <App />}
+      registrationToken ? <ClientRegistration token={registrationToken} /> :
+        <App />}
   </React.StrictMode>
 );

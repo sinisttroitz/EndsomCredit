@@ -88,6 +88,9 @@ export const fetchRegistrationData = async (token: string) => {
     }
 };
 
+import { ClientContact } from '../types';
+import { executeWithClientColumnsFallback } from './clientUtils';
+
 /**
  * Submits a client pre-registration (public access).
  */
@@ -98,11 +101,13 @@ export const submitRegistration = async (
         name: string;
         cpf?: string;
         phone?: string;
+        additional_contacts?: ClientContact[];
         email?: string;
         birthdate?: string;
         cep?: string;
         city?: string;
         state?: string;
+        neighborhood?: string;
         address?: string;
         number?: string;
         complement?: string;
@@ -126,14 +131,15 @@ export const submitRegistration = async (
             }
         }
 
-        const { error } = await supabase
-            .from('client_registrations')
-            .insert({
+        const { error } = await executeWithClientColumnsFallback(
+            {
                 lender_id: lenderId,
                 registration_token: registrationToken,
                 ...clientData,
                 status: 'pending',
-            });
+            },
+            async (payload) => await supabase.from('client_registrations').insert(payload)
+        );
 
         if (error) throw error;
         return { success: true };
@@ -169,17 +175,20 @@ export const fetchPendingRegistrations = async (lenderId: string) => {
 export const approveRegistration = async (registration: any): Promise<boolean> => {
     try {
         // 1. Create the actual client
-        const { error: insertError } = await supabase
-            .from('clients')
-            .insert({
+        const { error: insertError } = await executeWithClientColumnsFallback(
+            {
                 name: registration.name,
                 cpf: registration.cpf,
                 phone: registration.phone,
+                additional_contacts: Array.isArray(registration.additional_contacts)
+                    ? registration.additional_contacts
+                    : [],
                 email: registration.email,
                 birthdate: registration.birthdate,
                 cep: registration.cep,
                 city: registration.city,
                 state: registration.state,
+                neighborhood: registration.neighborhood,
                 address: registration.address,
                 number: registration.number,
                 complement: registration.complement,
@@ -187,7 +196,9 @@ export const approveRegistration = async (registration: any): Promise<boolean> =
                 documents: registration.documents || [],
                 user_id: registration.lender_id,
                 status: 'active',
-            });
+            },
+            async (payload) => await supabase.from('clients').insert(payload)
+        );
 
         if (insertError) throw insertError;
 

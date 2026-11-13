@@ -19,10 +19,11 @@ import { AdminNotifications } from './screens/AdminNotifications';
 import { UserNotifications } from './screens/UserNotifications';
 import { SubscriptionExpired } from './screens/SubscriptionExpired';
 import { Subscription } from './screens/Subscription';
+import { PixKeyForm } from './screens/PixKeyForm';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
 import { supabase } from './supabaseClient';
-import { Profile as UserProfileData } from './types';
+import { Profile as UserProfileData, PixKeyItem } from './types';
 
 const App: React.FC = () => {
   // Helper to load state from localStorage
@@ -40,6 +41,7 @@ const App: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(() => loadState('selectedClientId', null));
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(() => loadState('selectedLoanId', null));
+  const [selectedPixKey, setSelectedPixKey] = useState<PixKeyItem | null>(() => loadState('selectedPixKey', null));
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [initialLoansFilter, setInitialLoansFilter] = useState<'all' | 'pending' | 'late'>(() => loadState('initialLoansFilter', 'all'));
@@ -57,8 +59,9 @@ const App: React.FC = () => {
     localStorage.setItem('previousView', JSON.stringify(previousView));
     localStorage.setItem('selectedClientId', JSON.stringify(selectedClientId));
     localStorage.setItem('selectedLoanId', JSON.stringify(selectedLoanId));
+    localStorage.setItem('selectedPixKey', JSON.stringify(selectedPixKey));
     localStorage.setItem('initialLoansFilter', JSON.stringify(initialLoansFilter));
-  }, [currentView, previousView, selectedClientId, selectedLoanId, initialLoansFilter]);
+  }, [currentView, previousView, selectedClientId, selectedLoanId, selectedPixKey, initialLoansFilter]);
 
   const fetchSystemLogo = async () => {
     try {
@@ -268,6 +271,11 @@ const App: React.FC = () => {
             setSelectedClientId(id);
             setCurrentView('new-loan');
           }}
+          onLoanSelect={(id) => {
+            setSelectedLoanId(id);
+            setPreviousView('clients');
+            setCurrentView('loan-details');
+          }}
         />;
       case 'loans':
         return <Loans
@@ -281,7 +289,33 @@ const App: React.FC = () => {
           onFilterChange={setInitialLoansFilter}
         />;
       case 'profile':
-        return <Profile onLogout={handleLogout} userEmail={session?.user?.email} onNavigate={setCurrentView} />;
+        return <Profile
+          onLogout={handleLogout}
+          userEmail={session?.user?.email}
+          onNavigate={setCurrentView}
+          onAddPixKey={() => {
+            setSelectedPixKey(null);
+            setPreviousView('profile');
+            setCurrentView('pix-key-form');
+          }}
+          onEditPixKey={(item) => {
+            setSelectedPixKey(item);
+            setPreviousView('profile');
+            setCurrentView('pix-key-form');
+          }}
+        />;
+      case 'pix-key-form':
+        return <PixKeyForm
+          initialData={selectedPixKey}
+          onBack={() => {
+            setSelectedPixKey(null);
+            setCurrentView('profile');
+          }}
+          onSuccess={() => {
+            setSelectedPixKey(null);
+            setCurrentView('profile');
+          }}
+        />;
       case 'new-loan':
         return <NewLoan
           onBack={() => setCurrentView('dashboard')}

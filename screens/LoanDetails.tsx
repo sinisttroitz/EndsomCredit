@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle, Link2, ExternalLink } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle, Link2, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { createPortalLink } from '../utils/portalUtils';
 import { supabase } from '../supabaseClient';
@@ -176,7 +176,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         pix_key: string;
         pix_beneficiary: string;
         city: string;
+        pix_keys?: any[];
     } | null>(null);
+    const [selectedPixKeyId, setSelectedPixKeyId] = useState<string>('');
 
     useEffect(() => {
         if (loanId) {
@@ -289,13 +291,35 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const fetchUserSettings = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
+            let userPixKeys: any[] = [];
+            try {
+                const { data: dbKeys } = await supabase
+                    .from('pix_keys')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('is_default', { ascending: false });
+                if (dbKeys && dbKeys.length > 0) userPixKeys = dbKeys;
+            } catch (e) { /* ignore */ }
+
             const { data } = await supabase
                 .from('user_settings')
                 .select('*')
                 .eq('user_id', user.id)
                 .single();
+
             if (data) {
-                setUserSettings(data);
+                if (userPixKeys.length === 0 && data.pix_keys) {
+                    userPixKeys = data.pix_keys;
+                }
+                setUserSettings({
+                    ...data,
+                    pix_keys: userPixKeys
+                });
+
+                if (userPixKeys.length > 0) {
+                    const def = userPixKeys.find((k: any) => k.is_default) || userPixKeys[0];
+                    setSelectedPixKeyId(def.id);
+                }
             }
         }
     };
@@ -330,20 +354,65 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const handleBatchPayment = () => {
         if (!loan || selectedInstallments.length === 0) return;
 
-        setConfirmationModal({
-            open: true,
-            title: 'Confirmar Pagamento em Lote',
-            message: `Confirma o pagamento de ${selectedInstallments.length} parcela(s)?`,
-            action: executeBatchPayment
-        });
+        // 1. Obter todas as parcelas pendentes (não pagas) em ordem cronológica
+        const pendingInstallments = installmentsList.filter(i => i.status !== 'paid');
+        if (pendingInstallments.length === 0) return;
+
+        const count = selectedInstallments.length;
+
+        // 2. As N primeiras parcelas pendentes que DEVEM ser pagas prioritariamente
+        const targetInstallments = pendingInstallments.slice(0, count);
+        const targetNumbers = targetInstallments.map(i => i.number);
+
+        // 3. Verificar se o usuário pulou alguma parcela mais antiga
+        const selectedSorted = [...selectedInstallments].sort((a, b) => a - b);
+        const targetSorted = [...targetNumbers].sort((a, b) => a - b);
+        const hasSkipped = selectedSorted.some((num, idx) => num !== targetSorted[idx]);
+
+        // 4. Calcular o total a pagar da seleção reorganizada
+        const totalPaidNow = targetInstallments.reduce((acc, curr) => acc + curr.value, 0);
+
+        if (hasSkipped) {
+            // Atualiza a seleção visualmente para as parcelas corretas
+            setSelectedInstallments(targetNumbers);
+
+            // Identificar quais parcelas mais antigas tinham ficado para trás
+            const skippedNumbers = targetNumbers.filter(n => !selectedInstallments.includes(n));
+            const skippedStr = skippedNumbers.map(n => `#${String(n).padStart(2, '0')}`).join(', ');
+
+            const rangeStr = targetNumbers.length === 1
+                ? `Parcela #${String(targetNumbers[0]).padStart(2, '0')}`
+                : `Parcelas #${String(targetNumbers[0]).padStart(2, '0')} a #${String(targetNumbers[targetNumbers.length - 1]).padStart(2, '0')}`;
+
+            setConfirmationModal({
+                open: true,
+                title: 'Seleção Reorganizada',
+                message: `As parcelas mais antigas têm prioridade obrigatória de quitação.\n\nComo a(s) parcela(s) ${skippedStr} não haviam sido marcadas, sua seleção de ${count} parcela(s) foi reorganizada para quitar em ordem cronológica (${rangeStr}).\n\nValor Total: R$ ${totalPaidNow.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\nDeseja confirmar o pagamento?`,
+                action: () => executeBatchPayment(targetNumbers)
+            });
+        } else {
+            const rangeStr = targetNumbers.length === 1
+                ? `parcela #${String(targetNumbers[0]).padStart(2, '0')}`
+                : `${count} parcelas (#${String(targetNumbers[0]).padStart(2, '0')} a #${String(targetNumbers[targetNumbers.length - 1]).padStart(2, '0')})`;
+
+            setConfirmationModal({
+                open: true,
+                title: 'Confirmar Pagamento em Lote',
+                message: `Confirma o pagamento de ${rangeStr}?\n\nValor Total: R$ ${totalPaidNow.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                action: () => executeBatchPayment(targetNumbers)
+            });
+        }
     };
 
-    const executeBatchPayment = async () => {
+    const executeBatchPayment = async (targetNumbers?: number[]) => {
         if (!loan) return;
         setConfirmationModal(prev => ({ ...prev, open: false }));
         setProcessing(true);
         try {
-            const selectedInsts = installmentsList.filter(i => selectedInstallments.includes(i.number));
+            const numbersToPay = targetNumbers && targetNumbers.length > 0 ? targetNumbers : selectedInstallments;
+            if (numbersToPay.length === 0) return;
+
+            const selectedInsts = installmentsList.filter(i => numbersToPay.includes(i.number));
             const totalPaidNow = selectedInsts.reduce((acc, curr) => acc + curr.value, 0);
             const baseValueToAbate = selectedInsts.reduce((acc, curr) => acc + curr.originalValue, 0);
             const extraProfit = Math.max(0, totalPaidNow - baseValueToAbate);
@@ -690,8 +759,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         generatePix(amount.toFixed(2));
     };
 
-    const generatePix = (amountStr: string) => {
-        if (!userSettings?.pix_key) return;
+    const generatePix = (amountStr: string, customKey?: string, customBeneficiary?: string) => {
+        const chosenItem = selectedPixKeyId && userSettings?.pix_keys
+            ? userSettings.pix_keys.find(k => k.id === selectedPixKeyId)
+            : null;
+
+        const keyToUse = customKey || chosenItem?.pix_key || chosenItem?.key || userSettings?.pix_key;
+        if (!keyToUse) return;
+
+        const beneficiaryToUse = customBeneficiary || chosenItem?.holder_name || chosenItem?.beneficiary || userSettings?.pix_beneficiary || 'Recebedor';
 
         const amount = parseFloat(amountStr.replace(',', '.'));
         if (isNaN(amount) || amount <= 0) {
@@ -700,9 +776,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         }
 
         const payload = generatePixPayload(
-            userSettings.pix_key,
-            userSettings.pix_beneficiary || 'Recebedor',
-            userSettings.city || 'Cidade',
+            keyToUse,
+            beneficiaryToUse,
+            userSettings?.city || 'Cidade',
             amount,
             loan?.id.substring(0, 20) // Transaction ID
         );
@@ -1210,6 +1286,29 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
         const currentBalance = installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0);
 
+        const formatDate = (d: any) => {
+            if (!d) return undefined;
+            if (d instanceof Date) return d.toLocaleDateString('pt-BR');
+            return new Date(d).toLocaleDateString('pt-BR');
+        };
+
+        const pendingInstallments = installmentsList.filter(i => i.status !== 'paid');
+        const lateInstallments = pendingInstallments.filter(i => i.status === 'late');
+        const nextPending = pendingInstallments[0];
+        const lastPending = pendingInstallments[pendingInstallments.length - 1];
+
+        const remainingSummary = {
+            remainingCount: pendingInstallments.length,
+            totalCount: loan.installments || installmentsList.length,
+            paidCount: paidInstallments.length,
+            installmentValue: loan.installment_value || (nextPending?.value ?? 0),
+            nextInstallmentNumber: nextPending?.number,
+            nextDueDate: formatDate(nextPending?.date),
+            finalDueDate: formatDate(lastPending?.date),
+            lateCount: lateInstallments.length,
+            lateAmount: lateInstallments.reduce((sum, i) => sum + i.value, 0)
+        };
+
         const data = {
             emissionDate: now,
             clientName: loan.client?.name || 'Cliente',
@@ -1217,9 +1316,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             totalPaid: displayTotalPaid,
             balance: currentBalance,
             creditAvailable: loan.client?.credit_balance,
+            remainingSummary,
             installments: paidInstallments.map(i => ({
                 number: i.number,
-                date: i.date.toLocaleDateString('pt-BR'),
+                date: formatDate(i.date) || '',
                 value: i.value
             })),
             authenticationCode: Math.random().toString(36).substring(2, 15).toUpperCase().match(/.{1,4}/g)?.join('-') || 'AUTH-CODE'
@@ -1282,7 +1382,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-            <header className={`bg-black text-white px-6 pt-8 pb-12 rounded-b-[40px] relative z-10 transition-colors duration-300`}>
+            {/* ==================== MOBILE VIEW (Preserved) ==================== */}
+            <div className="md:hidden flex flex-col h-full overflow-hidden">
+                <header className={`bg-black text-white px-6 pt-8 pb-12 rounded-b-[40px] relative z-10 transition-colors duration-300`}>
                 <div className="flex items-center justify-between mb-4">
                     {isSelectionMode ? (
                         <>
@@ -1352,11 +1454,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-md border border-gray-100 dark:border-gray-800 mb-6">
                     <div className="flex flex-col items-center text-center">
                         <span className="text-[10px] font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-[0.2em] mb-1">Contrato #{loan.id.substring(0, 6)}</span>
-                        <p className="text-xs text-text-sub-light dark:text-text-sub-dark font-bold uppercase mb-1 truncate max-w-full px-2">{loan.client?.name || 'Cliente'}</p>
-                        <h2 className="text-4xl font-bold text-red-600 dark:text-red-500 mb-2 tracking-tight">
+                        <p className="text-xs text-text-sub-light dark:text-text-sub-dark font-bold uppercase mb-2 truncate max-w-full px-2">{loan.client?.name || 'Cliente'}</p>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Saldo Devedor Restante</span>
+                        <h2 className="text-4xl font-bold text-red-600 dark:text-red-500 mb-1 tracking-tight">
                             R$ {installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h2>
-                        <div className="flex items-center gap-2 mt-2">
+                        <p className="text-[11px] text-gray-400 font-medium mb-3">
+                            de R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} da dívida total
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
                             <span className="px-3 py-1 rounded text-[10px] font-bold border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase">
                                 {loan.frequency || 'N/A'}
                             </span>
@@ -1387,26 +1493,38 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                 {/* Progress Card */}
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 mb-6">
-                    <h3 className="text-sm font-bold text-primary dark:text-white mb-6">Status do Pagamento</h3>
-                    <div className="flex items-center justify-between gap-6">
+                    <h3 className="text-sm font-bold text-primary dark:text-white mb-5">Status do Pagamento</h3>
+                    <div className="flex items-center gap-5">
                         <div
-                            className="w-28 h-28 rounded-full flex items-center justify-center relative shadow-inner"
+                            className="w-24 h-24 rounded-full flex items-center justify-center relative shadow-inner shrink-0"
                             style={{
                                 background: `conic-gradient(${displayStatus === 'late' ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)`
                             } as React.CSSProperties}
                         >
-                            <div className="absolute inset-3 rounded-full bg-card-light dark:bg-card-dark flex items-center justify-center shadow-sm">
-                                <span className="text-2xl font-bold text-primary dark:text-white">{percentage}%</span>
+                            <div className="absolute inset-2.5 rounded-full bg-card-light dark:bg-card-dark flex items-center justify-center shadow-xs">
+                                <span className="text-xl font-black text-primary dark:text-white">{percentage}%</span>
                             </div>
                         </div>
-                        <div className="flex-1 space-y-3">
-                            <div>
-                                <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-semibold">Total Amortizado</p>
-                                <p className="text-lg font-bold text-primary dark:text-white">R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        <div className="flex-1 space-y-2.5 min-w-0">
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="p-2.5 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800">
+                                    <p className="text-[9px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider truncate">Total Dívida</p>
+                                    <p className="text-sm font-black text-gray-900 dark:text-white mt-0.5 truncate">
+                                        R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </p>
+                                </div>
+                                <div className="p-2.5 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
+                                    <p className="text-[9px] text-emerald-600 dark:text-emerald-400 uppercase font-bold tracking-wider truncate">Amortizado</p>
+                                    <p className="text-sm font-black text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
+                                        R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </p>
+                                </div>
                             </div>
-                            <div>
-                                <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-semibold">Parcelas Pagas</p>
-                                <p className="text-lg font-bold text-primary dark:text-white">{paidCount}/{totalCount}</p>
+                            <div className="p-2 px-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                                <span className="text-[9px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider">Parcelas Pagas</span>
+                                <span className="text-xs font-black text-gray-900 dark:text-white">
+                                    {paidCount} de {totalCount} ({percentage}%)
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -1419,8 +1537,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         <p className="font-bold text-gray-900 dark:text-white">R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Total Pago</p>
-                        <p className="font-bold text-secondary">R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Valor da Parcela</p>
+                        <p className="font-bold text-gray-900 dark:text-white">
+                            {loan.installments}x de R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Taxa de Juros</p>
@@ -1672,8 +1792,553 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 </div>
 
             </main>
+        </div>
 
-            {/* Payment Confirmation Modal */}
+        {/* ==================== DESKTOP VIEW (Redesigned) ==================== */}
+        <div className="hidden md:flex flex-col h-full bg-gray-50/60 dark:bg-[#0B0B0F] overflow-hidden">
+            {/* Desktop Sticky Header */}
+            <header className="px-8 py-4 bg-white dark:bg-[#111] border-b border-gray-100 dark:border-gray-800 flex items-center justify-between sticky top-0 z-30 shadow-2xs">
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={onBack}
+                        className="p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-2xs cursor-pointer"
+                        title="Voltar"
+                    >
+                        <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <div>
+                        <div className="flex items-center gap-2.5">
+                            <h1 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">
+                                Contrato #{loan.id.substring(0, 6)}
+                            </h1>
+                            <span className={`px-2.5 py-0.5 rounded-md text-[11px] font-black uppercase tracking-wider ${
+                                displayStatus === 'active' ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' :
+                                displayStatus === 'late' ? 'bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800' :
+                                displayStatus === 'paid' ? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700' :
+                                'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                            }`}>
+                                {displayStatus === 'active' ? 'EM DIA' : displayStatus === 'late' ? 'ATRASADO' : displayStatus === 'paid' ? 'QUITADO' : 'PENDENTE'}
+                            </span>
+                            <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700">
+                                {loan.frequency || 'N/A'}
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-2">
+                            <span>Cliente: <strong className="text-gray-800 dark:text-gray-200 font-bold">{loan.client?.name || 'Cliente'}</strong></span>
+                            {loan.client?.phone && <span className="text-gray-400">• {loan.client.phone}</span>}
+                            {loan.due_date && <span className="text-gray-400">• Vencimento: {new Date(loan.due_date).toLocaleDateString('pt-BR')}</span>}
+                        </p>
+                    </div>
+                </div>
+
+                {isSelectionMode ? (
+                    <div className="flex items-center gap-3">
+                        <span className="text-xs font-bold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-3 py-1.5 rounded-xl">
+                            {selectedInstallments.length} selecionada(s)
+                        </span>
+                        <button
+                            onClick={selectAllOverdue}
+                            className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer"
+                        >
+                            Selecionar vencidas
+                        </button>
+                        <button
+                            onClick={toggleSelectionMode}
+                            className="text-xs font-bold text-gray-500 hover:text-gray-700 dark:text-gray-400 px-3 py-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={handleBatchPayment}
+                            disabled={processing || selectedInstallments.length === 0}
+                            className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black font-bold text-xs rounded-xl shadow-sm hover:opacity-90 active:scale-95 disabled:opacity-50 transition-all flex items-center gap-2 cursor-pointer"
+                        >
+                            {processing ? 'Processando...' : `Confirmar Pagamentos (${selectedInstallments.length})`}
+                        </button>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2.5">
+                        <button
+                            onClick={handleCharge}
+                            disabled={loan.status === 'paid'}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-2xs cursor-pointer ${
+                                loan.status === 'paid'
+                                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-50'
+                                    : isLate
+                                        ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800 hover:bg-rose-100'
+                                        : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
+                            }`}
+                        >
+                            <Banknote className="w-3.5 h-3.5" />
+                            Cobrar
+                        </button>
+
+                        {loan.status !== 'paid' && (
+                            <button
+                                onClick={() => {
+                                    if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
+                                        setShowMensalPaymentModal(true);
+                                    } else {
+                                        setShowPaymentModal(true);
+                                    }
+                                }}
+                                disabled={processing}
+                                className="px-4 py-2 rounded-xl bg-black dark:bg-white text-white dark:text-black text-xs font-bold hover:bg-black/85 dark:hover:bg-gray-100 transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                            >
+                                <Wallet className="w-3.5 h-3.5" />
+                                Registrar Pagamento
+                            </button>
+                        )}
+
+                        <button
+                            onClick={() => setShowReceiptModal(true)}
+                            className="p-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-2xs cursor-pointer"
+                            title="Gerar Comprovante / Extrato"
+                        >
+                            <Share2 className="w-4 h-4" />
+                        </button>
+
+                        {loan.status !== 'paid' ? (
+                            <button
+                                onClick={() => setShowDeleteModal(true)}
+                                className="p-2 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100 transition-colors shadow-2xs cursor-pointer"
+                                title="Excluir este Empréstimo"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleNewLoan}
+                                className="px-3.5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                            >
+                                <PlusCircle className="w-3.5 h-3.5" />
+                                Novo Empréstimo
+                            </button>
+                        )}
+                    </div>
+                )}
+            </header>
+
+            {/* Desktop 2-Column Content Layout */}
+            <main className="flex-1 overflow-y-auto px-8 py-8 no-scrollbar">
+                <div className="max-w-7xl mx-auto grid grid-cols-12 gap-8 items-start pb-16">
+                    {/* LEFT COLUMN: Resumo Financeiro, Progresso, Ficha Técnica e Ações (5 colunas) */}
+                    <div className="col-span-5 space-y-6">
+                        {/* Card 1: Saldo Devedor Restante */}
+                        <div className="bg-white dark:bg-card-dark rounded-3xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Saldo Restante</span>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                    displayStatus === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                                    displayStatus === 'late' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                                    'bg-gray-100 dark:bg-gray-800 text-gray-500'
+                                }`}>
+                                    {displayStatus === 'active' ? 'Em Dia' : displayStatus === 'late' ? 'Atrasado' : 'Quitado'}
+                                </span>
+                            </div>
+                            <div className="text-3xl lg:text-4xl font-black text-red-600 dark:text-red-500 tracking-tight">
+                                R$ {installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+                                <span>{paidCount === totalCount ? 'Todos os pagamentos foram quitados' : `${totalCount - paidCount} parcela(s) pendente(s)`}</span>
+                                <span className="font-semibold text-gray-600 dark:text-gray-400">
+                                    {loan.installment_value ? `Parcelas de R$ ${(loan.installment_value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
+                                </span>
+                            </div>
+
+                            <div className="mt-6 pt-5 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
+                                <button
+                                    onClick={handleCharge}
+                                    disabled={loan.status === 'paid'}
+                                    className="flex-1 py-3 px-4 rounded-xl bg-black dark:bg-white text-white dark:text-black font-bold text-xs hover:bg-black/85 dark:hover:bg-gray-100 transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+                                >
+                                    <Banknote className="w-4 h-4" />
+                                    Opções de Cobrança
+                                </button>
+                                {loan.status !== 'paid' && (
+                                    <button
+                                        onClick={async () => {
+                                            setShowPortalLinkModal(true);
+                                            setPortalLinkLoading(true);
+                                            try {
+                                                const { data: { user } } = await supabase.auth.getUser();
+                                                if (!user) return;
+                                                const tk = await createPortalLink(loan.id, user.id);
+                                                if (tk) {
+                                                    setPortalLink(`${window.location.origin}/acompanhar/${tk}`);
+                                                }
+                                            } catch (e) { console.error(e); }
+                                            finally { setPortalLinkLoading(false); }
+                                        }}
+                                        className="py-3 px-4 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 font-bold text-xs hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                                        title="Gerar link de acompanhamento sem login para o cliente"
+                                    >
+                                        <Link2 className="w-4 h-4" />
+                                        Link do Cliente
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Card 2: Progresso do Pagamento */}
+                        <div className="bg-white dark:bg-card-dark rounded-3xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+                            <h3 className="text-xs font-black uppercase tracking-[0.18em] text-gray-400 mb-5">Status do Pagamento</h3>
+                            <div className="flex items-center gap-6">
+                                <div
+                                    className="w-24 h-24 rounded-full flex items-center justify-center relative shadow-inner shrink-0"
+                                    style={{
+                                        background: `conic-gradient(${displayStatus === 'late' ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)`
+                                    } as React.CSSProperties}
+                                >
+                                    <div className="absolute inset-2.5 rounded-full bg-white dark:bg-card-dark flex items-center justify-center shadow-xs">
+                                        <span className="text-xl font-black text-gray-900 dark:text-white">{percentage}%</span>
+                                    </div>
+                                </div>
+                                <div className="flex-1 space-y-2.5 min-w-0">
+                                    <div className="grid grid-cols-2 gap-2.5">
+                                        <div className="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800">
+                                            <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider truncate">Total da Dívida</p>
+                                            <p className="text-sm xl:text-base font-black text-gray-900 dark:text-white mt-0.5 truncate">
+                                                R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                        </div>
+                                        <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
+                                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-black tracking-wider truncate">Total Amortizado</p>
+                                            <p className="text-sm xl:text-base font-black text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
+                                                R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="p-2.5 px-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                                        <span className="text-[10px] text-gray-400 uppercase font-black tracking-wider">Parcelas Pagas</span>
+                                        <span className="text-xs font-black text-gray-900 dark:text-white">
+                                            {paidCount} de {totalCount} parcelas ({percentage}%)
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Card 3: Ficha Técnica (Grid 2x2) */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-white dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
+                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">Valor Solicitado</p>
+                                <p className="text-base font-black text-gray-900 dark:text-white">
+                                    R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                            </div>
+                            <div className="bg-white dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
+                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">Valor da Parcela</p>
+                                <p className="text-base font-black text-gray-900 dark:text-white">
+                                    {loan.installments}x de R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                            </div>
+                            <div className="bg-white dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
+                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">Taxa de Juros</p>
+                                <p className="text-base font-black text-gray-900 dark:text-white">
+                                    {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : loan.frequency === 'Quinzenal' ? 'a.q.' : 'a.m.'}
+                                </p>
+                            </div>
+                            <div
+                                className={`bg-white dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm ${loan.status === 'paid' ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors' : ''}`}
+                                onClick={() => {
+                                    if (loan.status === 'paid') {
+                                        setShowInterestBreakdownModal(true);
+                                    }
+                                }}
+                            >
+                                {loan.status === 'paid' ? (
+                                    <>
+                                        <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1 flex items-center gap-1">
+                                            Juros Pagos
+                                            <ChevronRight className="w-3 h-3 opacity-50" />
+                                        </p>
+                                        <p className="text-base font-black text-emerald-600 dark:text-emerald-400">
+                                            R$ {(Number(loan.total_interest_paid) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">Crédito Disponível</p>
+                                        <p className="text-base font-black text-blue-600 dark:text-blue-400">
+                                            R$ {(Number(loan.client?.credit_balance) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Card 4: Ações Rápidas */}
+                        <div className="bg-white dark:bg-card-dark rounded-3xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+                            <h3 className="text-xs font-black uppercase tracking-[0.18em] text-gray-400 mb-4">Ações do Contrato</h3>
+                            <div className="space-y-2.5">
+                                {loan.status !== 'paid' && (
+                                    <button
+                                        onClick={() => {
+                                            if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
+                                                setShowMensalPaymentModal(true);
+                                            } else {
+                                                setShowPaymentModal(true);
+                                            }
+                                        }}
+                                        disabled={processing}
+                                        className="w-full py-3 px-4 rounded-2xl bg-black dark:bg-white text-white dark:text-black font-bold text-xs hover:bg-black/85 dark:hover:bg-gray-100 transition-all flex items-center justify-between shadow-sm active:scale-[0.99] cursor-pointer"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-7 h-7 rounded-xl bg-white/20 dark:bg-black/10 flex items-center justify-center">
+                                                <Wallet className="w-4 h-4" />
+                                            </div>
+                                            <span>Registrar Pagamento / Baixa</span>
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 opacity-60" />
+                                    </button>
+                                )}
+
+                                {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && (
+                                    <button
+                                        onClick={toggleSelectionMode}
+                                        className="w-full py-3 px-4 rounded-2xl bg-gray-50 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-800 dark:text-gray-200 font-bold text-xs border border-gray-200 dark:border-gray-700 transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-7 h-7 rounded-xl bg-gray-200/60 dark:bg-gray-700 flex items-center justify-center">
+                                                <Check className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                            </div>
+                                            <span>{isSelectionMode ? 'Cancelar Seleção em Lote' : 'Pagamento em Lote'}</span>
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 opacity-60" />
+                                    </button>
+                                )}
+
+                                <button
+                                    onClick={() => setShowReceiptModal(true)}
+                                    className="w-full py-3 px-4 rounded-2xl bg-gray-50 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-800 dark:text-gray-200 font-bold text-xs border border-gray-200 dark:border-gray-700 transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-7 h-7 rounded-xl bg-gray-200/60 dark:bg-gray-700 flex items-center justify-center">
+                                            <Share2 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                        </div>
+                                        <span>Gerar Comprovante / Extrato</span>
+                                    </div>
+                                    <ChevronRight className="w-4 h-4 opacity-60" />
+                                </button>
+
+                                {loan.status === 'paid' ? (
+                                    <button
+                                        onClick={handleNewLoan}
+                                        className="w-full py-3 px-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 font-bold text-xs border border-emerald-200 dark:border-emerald-800 transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-7 h-7 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center">
+                                                <PlusCircle className="w-4 h-4" />
+                                            </div>
+                                            <span>Gerar Novo Empréstimo</span>
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 opacity-60" />
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowDeleteModal(true)}
+                                        className="w-full py-3 px-4 rounded-2xl bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100/60 text-red-600 dark:text-red-400 font-bold text-xs border border-red-100 dark:border-red-900/30 transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-7 h-7 rounded-xl bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
+                                                <Trash2 className="w-4 h-4 text-red-500" />
+                                            </div>
+                                            <span>Excluir este Empréstimo</span>
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 opacity-60" />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* RIGHT COLUMN: Alertas de Pagamento e Cronograma Completo de Parcelas (7 colunas) */}
+                    <div className="col-span-7 space-y-6">
+                        {/* Payment Request Alert Banner (Desktop) */}
+                        {pendingPaymentRequests.length > 0 && (
+                            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-3xl p-5 shadow-sm animate-in slide-in-from-top duration-300">
+                                <div className="flex items-start gap-3.5">
+                                    <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+                                        <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-black text-amber-950 dark:text-amber-200">
+                                            {pendingPaymentRequests.length} solicitação{pendingPaymentRequests.length > 1 ? 'ões' : ''} de pagamento pendente{pendingPaymentRequests.length > 1 ? 's' : ''}
+                                        </p>
+                                        <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                                            O cliente informou que realizou o pagamento pelo portal. Clique para analisar e dar baixa.
+                                        </p>
+                                        <div className="mt-3.5 space-y-2">
+                                            {pendingPaymentRequests.map(req => (
+                                                <button
+                                                    key={req.id}
+                                                    onClick={() => { setSelectedPaymentRequest(req); setShowPaymentRequestModal(true); }}
+                                                    className="w-full flex items-center justify-between bg-white dark:bg-gray-800/90 px-4 py-3 rounded-2xl border border-amber-200/80 dark:border-amber-800/60 hover:shadow-xs active:scale-[0.99] transition-all cursor-pointer"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-xs font-black text-gray-900 dark:text-white">Parcela #{String(req.installment_number).padStart(2, '0')}</span>
+                                                        <span className="text-[11px] text-gray-400">{new Date(req.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs font-black text-amber-700 dark:text-amber-400">R$ {Number(req.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Cronograma de Parcelas */}
+                        <div className="bg-white dark:bg-card-dark rounded-3xl p-6 lg:p-7 border border-gray-100 dark:border-gray-800 shadow-sm">
+                            <div className="flex items-center justify-between mb-6">
+                                <div>
+                                    <h3 className="text-base font-black text-gray-900 dark:text-white tracking-tight">Cronograma de Parcelas</h3>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                        {installmentsList.length} parcela{installmentsList.length > 1 ? 's' : ''} no total • {paidCount} liquidada{paidCount !== 1 ? 's' : ''}
+                                    </p>
+                                </div>
+                                {!isSelectionMode && installmentsList.length > 6 && (
+                                    <button
+                                        onClick={() => setShowAllInstallments(!showAllInstallments)}
+                                        className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer"
+                                    >
+                                        {showAllInstallments ? 'Ver menos' : `Ver todas (${installmentsList.length})`}
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="relative space-y-3.5">
+                                <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-100 dark:bg-gray-800"></div>
+
+                                {(showAllInstallments || isSelectionMode ? installmentsList : installmentsList.slice(0, 8)).map((inst) => (
+                                    <div
+                                        key={inst.number}
+                                        className={`relative flex items-center gap-4 p-3.5 rounded-2xl transition-all duration-150 ${
+                                            inst.status === 'paid' ? 'bg-gray-50/60 dark:bg-gray-800/25 border border-transparent opacity-80' :
+                                            inst.status === 'late' ? 'bg-rose-50/40 dark:bg-rose-950/15 border border-rose-100 dark:border-rose-900/30' :
+                                            'bg-white dark:bg-gray-800/40 border border-gray-100 dark:border-gray-700/60'
+                                        } cursor-pointer hover:border-gray-300 dark:hover:border-gray-600 active:scale-[0.99]`}
+                                        onClick={() => {
+                                            if (isSelectionMode && inst.status !== 'paid') {
+                                                toggleInstallmentSelection(inst.number);
+                                            } else if (!isSelectionMode) {
+                                                setSelectedInstallmentForDetail(inst);
+                                            }
+                                        }}
+                                        title="Clique para ver os detalhes desta parcela"
+                                    >
+                                        {isSelectionMode ? (
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors shrink-0 z-10 ${
+                                                inst.status === 'paid' ? 'border-gray-200 bg-gray-100 opacity-50' :
+                                                selectedInstallments.includes(inst.number) ? 'border-primary bg-primary text-white' : 'border-gray-300 bg-white dark:bg-gray-800'
+                                            }`}>
+                                                {inst.status === 'paid' ? <Check className="w-4 h-4 text-gray-400" /> :
+                                                    selectedInstallments.includes(inst.number) && <Check className="w-4 h-4" />}
+                                            </div>
+                                        ) : (
+                                            <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center text-white ring-4 ring-white dark:ring-card-dark shrink-0 ${
+                                                inst.status === 'paid' ? 'bg-emerald-500' :
+                                                inst.status === 'late' ? 'bg-rose-500' :
+                                                inst.status === 'pending' ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-700 text-gray-600'
+                                            }`}>
+                                                {inst.status === 'paid' ? <Check className="w-4 h-4" /> :
+                                                    inst.status === 'future' ? <Circle className="w-4 h-4" /> :
+                                                        <Clock className="w-4 h-4" />}
+                                            </div>
+                                        )}
+
+                                        <div className="flex-1 flex justify-between items-center min-w-0">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <p className="text-sm font-black text-gray-900 dark:text-white">
+                                                        Parcela #{String(inst.number).padStart(2, '0')}
+                                                    </p>
+                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                                        inst.status === 'paid' ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400' :
+                                                        inst.status === 'late' ? 'bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400' :
+                                                        inst.status === 'pending' ? 'bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400' :
+                                                        'bg-gray-100 dark:bg-gray-800 text-gray-500'
+                                                    }`}>
+                                                        {inst.status === 'paid' ? 'Paga' :
+                                                            inst.status === 'late' ? 'Vencida' :
+                                                            inst.status === 'pending' ? 'Próxima' : 'Futura'}
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-gray-400 dark:text-gray-400 mt-0.5">
+                                                    {inst.status === 'paid' ? `Quitada` :
+                                                        inst.status === 'late' ? `Venceu em ${(inst.originalDate || inst.date).toLocaleDateString('pt-BR')}` :
+                                                        inst.status === 'pending' ? `Vencimento em ${inst.date.toLocaleDateString('pt-BR')}` :
+                                                        `Prevista para ${inst.date.toLocaleDateString('pt-BR')}`}
+                                                </p>
+                                            </div>
+
+                                            <div className="text-right">
+                                                <div className="flex flex-col items-end gap-0.5 mb-0.5">
+                                                    {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0.01 && inst.originalValue && Math.abs(inst.value - inst.originalValue) > 0.01) && (
+                                                        <span className="text-[10px] text-gray-400 line-through">
+                                                            R$ {inst.originalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </span>
+                                                    )}
+                                                    {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0.01) && (
+                                                        <span className="text-[10px] text-red-500 font-semibold">
+                                                            + Juros R$ {inst.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </span>
+                                                    )}
+                                                    {inst.fine && (
+                                                        <span className="text-[10px] text-red-500 font-semibold">
+                                                            + Multa {inst.fine.fine_type === 'percent' ? `${inst.fine.fine_value}%` : `R$ ${inst.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className={`flex items-baseline justify-end gap-1 ${
+                                                    inst.status === 'paid' ? 'text-emerald-600 dark:text-emerald-400' :
+                                                    inst.status === 'late' ? 'text-rose-600 dark:text-rose-400' :
+                                                    'text-gray-900 dark:text-white'
+                                                }`}>
+                                                    <span className="text-xs font-semibold opacity-70">R$</span>
+                                                    <span className="text-lg font-black">
+                                                        {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {isSelectionMode && (
+                                <div className="mt-6 pt-5 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-4">
+                                    <span className="text-xs font-bold text-gray-500">
+                                        {selectedInstallments.length} parcela(s) selecionada(s)
+                                    </span>
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            onClick={toggleSelectionMode}
+                                            className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                                        >
+                                            Cancelar
+                                        </button>
+                                        <button
+                                            onClick={handleBatchPayment}
+                                            disabled={processing || selectedInstallments.length === 0}
+                                            className="px-5 py-2.5 rounded-xl bg-black dark:bg-white text-white dark:text-black text-xs font-bold shadow-sm hover:opacity-90 active:scale-95 disabled:opacity-50 transition-all cursor-pointer"
+                                        >
+                                            {processing ? 'Processando...' : `Confirmar Pagamentos (${selectedInstallments.length})`}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        {/* Payment Confirmation Modal */}
             {showPaymentModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPaymentModal(false)}></div>
@@ -2323,14 +2988,57 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                             )}
 
-                            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800">
-                                <p className="text-xs text-blue-700 dark:text-blue-300">
-                                    <span className="font-bold">Chave PIX:</span> {userSettings?.pix_key}
-                                </p>
-                                <p className="text-xs text-blue-700 dark:text-blue-300">
-                                    <span className="font-bold">Beneficiário:</span> {userSettings?.pix_beneficiary || 'Não informado'}
-                                </p>
-                            </div>
+                            {userSettings?.pix_keys && userSettings.pix_keys.length > 1 && (
+                                <div className="mb-3 text-left">
+                                    <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">
+                                        Receber na Chave / Conta:
+                                    </label>
+                                    <select
+                                        value={selectedPixKeyId}
+                                        onChange={(e) => {
+                                            const chosenId = e.target.value;
+                                            setSelectedPixKeyId(chosenId);
+                                            const chosen = userSettings.pix_keys?.find((k: any) => k.id === chosenId);
+                                            if (chosen) {
+                                                generatePix(pixAmount, chosen.pix_key || chosen.key, chosen.holder_name || chosen.beneficiary);
+                                            }
+                                        }}
+                                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs font-bold text-gray-800 dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
+                                    >
+                                        {userSettings.pix_keys.map((k: any) => (
+                                            <option key={k.id} value={k.id}>
+                                                {k.financial_institution ? `${k.financial_institution.split('(')[0].trim()} - ` : ''}
+                                                {(k.key_type || k.type || 'PIX').toUpperCase()}: {k.pix_key || k.key} {k.is_default ? '(Principal)' : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {(() => {
+                                const currentItem = selectedPixKeyId && userSettings?.pix_keys
+                                    ? userSettings.pix_keys.find((k: any) => k.id === selectedPixKeyId)
+                                    : null;
+                                const displayKey = currentItem?.pix_key || currentItem?.key || userSettings?.pix_key;
+                                const displayBeneficiary = currentItem?.holder_name || currentItem?.beneficiary || userSettings?.pix_beneficiary || 'Não informado';
+                                const displayBank = currentItem?.financial_institution;
+
+                                return (
+                                    <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800 text-left space-y-1">
+                                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                                            <span className="font-bold">Chave PIX:</span> {displayKey}
+                                        </p>
+                                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                                            <span className="font-bold">Beneficiário:</span> {displayBeneficiary}
+                                        </p>
+                                        {displayBank && (
+                                            <p className="text-xs text-blue-700 dark:text-blue-300">
+                                                <span className="font-bold">Banco:</span> {displayBank}
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -2495,93 +3203,214 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             )}
 
             {/* Installment Detail Modal */}
-            {selectedInstallmentForDetail && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedInstallmentForDetail(null)}></div>
-                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200 border border-gray-100 dark:border-gray-800">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Detalhes da Parcela #{String(selectedInstallmentForDetail.number).padStart(2, '0')}</h3>
-                            <button onClick={() => setSelectedInstallmentForDetail(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
-                                <X className="w-5 h-5 text-gray-500" />
-                            </button>
-                        </div>
+            {selectedInstallmentForDetail && (() => {
+                const inst = selectedInstallmentForDetail;
+                const dueDate = inst.originalDate || inst.date;
+                const today = new Date();
+                const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                const dueDateZero = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+                const diffTime = todayZero.getTime() - dueDateZero.getTime();
+                const daysLate = Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
 
-                        <div className="space-y-4">
-                            {/* Show original value if there is interest OR fine */}
-                            {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0.01) || selectedInstallmentForDetail.fine) && (
-                                <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
-                                    <span className="text-sm text-gray-500 dark:text-gray-400">Valor Original</span>
-                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                        R$ {selectedInstallmentForDetail.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
+                const pendingInsts = installmentsList.filter(i => i.status !== 'paid');
+                const isNextPending = pendingInsts.length > 0 && pendingInsts[0].number === inst.number;
+
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedInstallmentForDetail(null)}></div>
+                        <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200 border border-gray-100 dark:border-gray-800">
+                            {/* Modal Header */}
+                            <div className="flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                                        Parcela #{String(inst.number).padStart(2, '0')}
+                                    </h3>
+                                    <div className="mt-1">
+                                        {inst.status === 'paid' ? (
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/40 text-[11px] font-bold">
+                                                <CheckCircle2 className="w-3.5 h-3.5" /> Paga e Confirmada
+                                            </span>
+                                        ) : inst.status === 'late' ? (
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 border border-rose-200/50 dark:border-rose-800/40 text-[11px] font-bold">
+                                                <AlertTriangle className="w-3.5 h-3.5" /> Em Atraso ({daysLate} dia{daysLate > 1 ? 's' : ''})
+                                            </span>
+                                        ) : inst.status === 'pending' ? (
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-800/40 text-[11px] font-bold">
+                                                <Clock className="w-3.5 h-3.5" /> Vence Hoje
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 text-[11px] font-bold">
+                                                <Calendar className="w-3.5 h-3.5" /> A Vencer
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
-                            )}
-
-                            {Boolean(selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0.01) && (
-                                <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
-                                    <span className="text-sm text-danger font-medium">Juros Acumulados</span>
-                                    <span className="text-sm font-bold text-danger">
-                                        + R$ {selectedInstallmentForDetail.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                </div>
-                            )}
-
-                            {selectedInstallmentForDetail.fine && (
-                                <div className="flex justify-between items-center py-3 border-b border-gray-50 dark:border-gray-800/50">
-                                    <span className="text-sm text-red-500 font-medium">Multa Manual ({selectedInstallmentForDetail.fine.fine_type === 'percent' ? `${selectedInstallmentForDetail.fine.fine_value}%` : 'Fixa'})</span>
-                                    <span className="text-sm font-bold text-red-500">
-                                        + R$ {selectedInstallmentForDetail.fine.fine_type === 'percent'
-                                            ? ((selectedInstallmentForDetail.originalValue || 0) * (selectedInstallmentForDetail.fine.fine_value / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                            : selectedInstallmentForDetail.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                        }
-                                    </span>
-                                </div>
-                            )}
-
-                            <div className="flex justify-between items-center pt-2">
-                                <span className="text-base font-bold text-gray-900 dark:text-white">
-                                    {Boolean((selectedInstallmentForDetail.accumulatedInterest && selectedInstallmentForDetail.accumulatedInterest > 0.01) || selectedInstallmentForDetail.fine) ? 'Total Atual' : 'Valor da Parcela'}
-                                </span>
-                                <span className="text-xl font-black text-primary dark:text-white">
-                                    R$ {selectedInstallmentForDetail.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
+                                <button onClick={() => setSelectedInstallmentForDetail(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
+                                    <X className="w-5 h-5 text-gray-500" />
+                                </button>
                             </div>
 
-                            <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700">
-                                <div className="flex items-center gap-3 mb-2">
-                                    <Calendar className="w-4 h-4 text-gray-400" />
-                                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Vencimento</span>
+                            {/* Financial Breakdown */}
+                            <div className="space-y-3">
+                                {Boolean((inst.accumulatedInterest && inst.accumulatedInterest > 0.01) || inst.fine) && (
+                                    <div className="flex justify-between items-center py-2 border-b border-gray-50 dark:border-gray-800/50">
+                                        <span className="text-xs text-gray-500 dark:text-gray-400">Valor Original</span>
+                                        <span className="text-xs font-semibold text-gray-900 dark:text-white">
+                                            R$ {inst.originalValue?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {Boolean(inst.accumulatedInterest && inst.accumulatedInterest > 0.01) && (
+                                    <div className="flex justify-between items-center py-2 border-b border-gray-50 dark:border-gray-800/50">
+                                        <span className="text-xs text-danger font-medium">Juros Acumulados</span>
+                                        <span className="text-xs font-bold text-danger">
+                                            + R$ {inst.accumulatedInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {inst.fine && (
+                                    <div className="flex justify-between items-center py-2 border-b border-gray-50 dark:border-gray-800/50">
+                                        <span className="text-xs text-red-500 font-medium">Multa Manual ({inst.fine.fine_type === 'percent' ? `${inst.fine.fine_value}%` : 'Fixa'})</span>
+                                        <span className="text-xs font-bold text-red-500">
+                                            + R$ {inst.fine.fine_type === 'percent'
+                                                ? ((inst.originalValue || 0) * (inst.fine.fine_value / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                                : inst.fine.fine_value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                            }
+                                        </span>
+                                    </div>
+                                )}
+
+                                <div className="flex justify-between items-center pt-2">
+                                    <span className="text-sm font-bold text-gray-900 dark:text-white">
+                                        {Boolean((inst.accumulatedInterest && inst.accumulatedInterest > 0.01) || inst.fine) ? 'Total Atual' : 'Valor da Parcela'}
+                                    </span>
+                                    <span className="text-xl font-black text-primary dark:text-white">
+                                        R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
                                 </div>
-                                <p className="text-sm font-bold text-gray-800 dark:text-gray-200">
-                                    {(selectedInstallmentForDetail.originalDate || selectedInstallmentForDetail.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
-                                </p>
+
+                                {/* Dates Section: Vencimento & Pagamento */}
+                                <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-3">
+                                    {/* Data de Vencimento */}
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <Calendar className="w-4 h-4 text-gray-400" />
+                                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Vencimento</span>
+                                        </div>
+                                        <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                                            {dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                        </span>
+                                    </div>
+
+                                    {/* Data de Pagamento */}
+                                    <div className="flex items-center justify-between pt-2.5 border-t border-gray-100 dark:border-gray-700/60">
+                                        <div className="flex items-center gap-2">
+                                            {inst.status === 'paid' ? (
+                                                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                            ) : (
+                                                <Clock className="w-4 h-4 text-gray-400" />
+                                            )}
+                                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                {inst.status === 'paid' ? 'Data do Pagamento' : 'Pagamento'}
+                                            </span>
+                                        </div>
+                                        {inst.status === 'paid' ? (
+                                            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                                                {inst.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
+                                                Hoje ({today.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })})
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="space-y-2.5 mt-5">
+                                {/* Botão Pagar Agora (se for a próxima pendente) */}
+                                {inst.status !== 'paid' && isNextPending && (
+                                    <button
+                                        onClick={() => {
+                                            setSelectedInstallmentForDetail(null);
+                                            setShowSinglePaymentConfirmModal(true);
+                                        }}
+                                        className="w-full bg-[#5AAB22] hover:bg-[#4E961D] text-white py-3.5 rounded-2xl font-bold shadow-md shadow-emerald-600/20 transition active:scale-[0.98] flex items-center justify-center gap-2 text-sm"
+                                    >
+                                        <Check className="w-4 h-4 stroke-[3]" />
+                                        Pagar esta Parcela Agora
+                                    </button>
+                                )}
+
+                                {/* Aviso se tentar pagar parcela futura pulando anteriores */}
+                                {inst.status !== 'paid' && !isNextPending && pendingInsts.length > 0 && (
+                                    <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200/50 dark:border-amber-800/40 rounded-xl text-xs text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                                        <Info className="w-4 h-4 shrink-0" />
+                                        <span>A parcela #{String(pendingInsts[0].number).padStart(2, '0')} deve ser quitada antes desta.</span>
+                                    </div>
+                                )}
+
+                                {/* Botão Recibo (se já estiver paga) */}
+                                {inst.status === 'paid' && (
+                                    <button
+                                        onClick={() => {
+                                            const data = {
+                                                amount: inst.value,
+                                                date: inst.date.toLocaleDateString('pt-BR'),
+                                                clientName: loan.client?.name || 'Cliente',
+                                                contractId: loan.id.substring(0, 6).toUpperCase(),
+                                                installmentNumber: inst.number,
+                                                dueDate: (inst.originalDate || inst.date).toLocaleDateString('pt-BR'),
+                                                status: 'paid',
+                                                originalValue: inst.originalValue,
+                                                interest: inst.accumulatedInterest,
+                                                fine: inst.fine?.fine_value,
+                                                fineType: inst.fine?.fine_type,
+                                                totalPaid: inst.value,
+                                                creditBalance: loan.client?.credit_balance,
+                                                authenticationCode: Math.random().toString(36).substring(2, 15).toUpperCase().match(/.{1,4}/g)?.join('-') || 'AUTH-CODE'
+                                            };
+                                            setReceiptData(data);
+                                            setSelectedInstallmentForDetail(null);
+                                            setShowReceiptImageModal(true);
+                                        }}
+                                        className="w-full bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 py-3 rounded-2xl font-bold transition active:scale-[0.98] flex items-center justify-center gap-2 text-xs border border-gray-200 dark:border-gray-700"
+                                    >
+                                        <FileText className="w-4 h-4" />
+                                        Visualizar Recibo
+                                    </button>
+                                )}
+
+                                {/* Botão Gerenciar / Aplicar Multa */}
+                                {(inst.status === 'late' || inst.fine) && inst.status !== 'paid' && (
+                                    <button
+                                        onClick={() => {
+                                            setFineInstallment(inst);
+                                            setFineFixed(inst.fine ? String(inst.fine.fine_value) : '');
+                                            setShowFineModal(true);
+                                            setSelectedInstallmentForDetail(null);
+                                        }}
+                                        className="w-full bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 py-3 rounded-2xl font-bold border border-red-100 dark:border-red-800 transition active:scale-[0.98] flex items-center justify-center gap-2 text-xs"
+                                    >
+                                        <AlertTriangle className="w-4 h-4" />
+                                        {inst.fine ? 'Gerenciar Multa' : 'Aplicar Multa'}
+                                    </button>
+                                )}
+
+                                <button
+                                    onClick={() => setSelectedInstallmentForDetail(null)}
+                                    className="w-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 py-3 rounded-2xl font-bold transition active:scale-[0.98] text-xs"
+                                >
+                                    Fechar
+                                </button>
                             </div>
                         </div>
-
-                        {(selectedInstallmentForDetail.status === 'late' || selectedInstallmentForDetail.fine) && selectedInstallmentForDetail.status !== 'paid' && (
-                            <button
-                                onClick={() => {
-                                    setFineInstallment(selectedInstallmentForDetail);
-                                    setFineFixed(selectedInstallmentForDetail.fine ? String(selectedInstallmentForDetail.fine.fine_value) : '');
-                                    setShowFineModal(true);
-                                    setSelectedInstallmentForDetail(null);
-                                }}
-                                className="w-full mt-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 py-3 rounded-2xl font-bold border border-red-100 dark:border-red-800 transition active:scale-[0.98] flex items-center justify-center gap-2"
-                            >
-                                <AlertTriangle className="w-4 h-4" />
-                                {selectedInstallmentForDetail.fine ? 'Gerenciar Multa' : 'Aplicar Multa'}
-                            </button>
-                        )}
-
-                        <button
-                            onClick={() => setSelectedInstallmentForDetail(null)}
-                            className="w-full mt-3 bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 transition active:scale-[0.98]"
-                        >
-                            Fechar
-                        </button>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Receipt Image Modal */}
             {showReceiptImageModal && receiptData && (

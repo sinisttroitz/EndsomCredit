@@ -65,7 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           <button
             onClick={() => onNavigate('profile')}
-            className={`transition-colors p-2 rounded-xl hover:bg-white/5 ${currentView === 'profile' ? 'text-white' : 'text-zinc-500 hover:text-white'}`}
+            className={`transition-colors p-2 rounded-xl hover:bg-white/5 ${(currentView === 'profile' || currentView === 'pix-key-form') ? 'text-white' : 'text-zinc-500 hover:text-white'}`}
           >
             <Settings className="w-5 h-5" />
           </button>

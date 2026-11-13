@@ -1,3 +1,9 @@
+export interface ClientContact {
+  id: string;
+  phone: string;
+  description: string;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -6,11 +12,13 @@ export interface Client {
   status: 'active' | 'late' | 'paid';
   email?: string;
   phone?: string;
+  additional_contacts?: ClientContact[];
   cpf?: string;
   birthdate?: string;
   cep?: string;
   city?: string;
   state?: string;
+  neighborhood?: string;
   address?: string;
   number?: string;
   complement?: string;
@@ -35,6 +43,7 @@ export interface Loan {
   frequency?: 'Diária' | 'Semanal' | 'Quinzenal' | 'Mensal';
   skip_saturday?: boolean;
   skip_sunday?: boolean;
+  skip_holidays?: boolean;
   total_interest_paid?: number;
   amount_paid?: number;
   installment_fines?: InstallmentFine[];
@@ -74,7 +83,7 @@ export interface LoanAmortization {
     created_at: string;
 }
 
-export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar' | 'admin-users' | 'admin-notifications' | 'user-notifications' | 'subscription-expired' | 'reports' | 'reset-password' | 'subscription';
+export type ViewState = 'login' | 'dashboard' | 'clients' | 'loans' | 'profile' | 'new-loan' | 'new-client' | 'client-details' | 'loan-details' | 'edit-client' | 'interest-details' | 'collection-calendar' | 'admin-users' | 'admin-notifications' | 'user-notifications' | 'subscription-expired' | 'reports' | 'reset-password' | 'subscription' | 'pix-key-form';
 
 export interface ClientPortalLink {
   id: string;
@@ -114,11 +123,13 @@ export interface ClientRegistration {
   name: string;
   cpf?: string;
   phone?: string;
+  additional_contacts?: ClientContact[];
   email?: string;
   birthdate?: string;
   cep?: string;
   city?: string;
   state?: string;
+  neighborhood?: string;
   address?: string;
   number?: string;
   complement?: string;
@@ -165,10 +176,31 @@ export interface UserProfile {
   totalReceived?: number;
 }
 
+export interface PixKeyItem {
+  id: string;
+  user_id?: string;
+  key_type: 'cpf' | 'cnpj' | 'email' | 'phone' | 'random' | 'outro';
+  pix_key: string;
+  holder_name?: string;
+  holder_document?: string;
+  financial_institution?: string;
+  account_type?: 'corrente' | 'poupanca' | 'pagamento' | 'salario' | '';
+  is_default?: boolean;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+
+  // Aliases for compatibility
+  key?: string;
+  type?: 'cpf' | 'cnpj' | 'email' | 'phone' | 'random' | 'outro';
+  beneficiary?: string;
+}
+
 export interface UserSettings {
   user_id?: string;
   pix_key: string;
   pix_beneficiary: string;
   city: string;
   state: string;
+  pix_keys?: PixKeyItem[];
 }

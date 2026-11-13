@@ -1,5 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ArrowLeft, User, Camera, Upload, X, Loader2, AlertCircle, CheckCircle2, Shield, FileText } from 'lucide-react';
+import { ClientContact } from '../types';
+import { AdditionalContactsInput, AdditionalContactsList } from '../components/AdditionalContactsInput';
+import { sanitizeAdditionalContacts, validateAdditionalContacts } from '../utils/clientUtils';
 import { fetchRegistrationData, submitRegistration, uploadRegistrationFile } from '../utils/registrationUtils';
 import { compressImage } from '../utils/imageUtils';
 
@@ -21,11 +24,13 @@ export const ClientRegistration: React.FC<Props> = ({ token }) => {
     const [name, setName] = useState('');
     const [cpf, setCpf] = useState('');
     const [phone, setPhone] = useState('');
+    const [additionalContacts, setAdditionalContacts] = useState<ClientContact[]>([]);
     const [birthdate, setBirthdate] = useState('');
     const [email, setEmail] = useState('');
     const [cep, setCep] = useState('');
     const [city, setCity] = useState('');
     const [state, setState] = useState('');
+    const [neighborhood, setNeighborhood] = useState('');
     const [address, setAddress] = useState('');
     const [number, setNumber] = useState('');
     const [complement, setComplement] = useState('');
@@ -65,7 +70,12 @@ export const ClientRegistration: React.FC<Props> = ({ token }) => {
             try {
                 const res = await fetch(`https://viacep.com.br/ws/${numeric}/json/`);
                 const data = await res.json();
-                if (!data.erro) { setCity(data.localidade); setState(data.uf); setAddress(data.logradouro); }
+                if (!data.erro) {
+                    setCity(data.localidade || '');
+                    setState(data.uf || '');
+                    setAddress(data.logradouro || '');
+                    setNeighborhood(data.bairro || '');
+                }
             } catch { } finally { setLoadingCep(false); }
         }
     };
@@ -85,7 +95,11 @@ export const ClientRegistration: React.FC<Props> = ({ token }) => {
     const nextStep = () => {
         if (step === 1 && !name) { setFormError('Informe seu nome completo.'); return; }
         if (step === 2 && cpf.length < 14) { setFormError('Informe um CPF válido.'); return; }
-        if (step === 3 && phone.length < 14) { setFormError('Informe um telefone válido.'); return; }
+        if (step === 3) {
+            if (phone.length < 14) { setFormError('Informe um telefone válido.'); return; }
+            const additionalErr = validateAdditionalContacts(additionalContacts);
+            if (additionalErr) { setFormError(additionalErr); return; }
+        }
         setFormError(null);
         setStep(s => Math.min(s + 1, totalSteps));
     };
@@ -115,11 +129,23 @@ export const ClientRegistration: React.FC<Props> = ({ token }) => {
                 formattedBirth = `${y}-${m}-${d}`;
             }
 
+            const cleanAdditionalContacts = sanitizeAdditionalContacts(additionalContacts);
             const result = await submitRegistration(lenderId, token, {
-                name, cpf, phone, email: email || undefined, birthdate: formattedBirth,
-                cep: cep || undefined, city: city || undefined, state: state || undefined,
-                address: address || undefined, number: number || undefined, complement: complement || undefined,
-                avatar_url: avatarUrl || undefined, documents: documentUrls.length > 0 ? documentUrls : undefined,
+                name,
+                cpf,
+                phone,
+                additional_contacts: cleanAdditionalContacts.length > 0 ? cleanAdditionalContacts : undefined,
+                email: email || undefined,
+                birthdate: formattedBirth,
+                cep: cep || undefined,
+                city: city || undefined,
+                state: state || undefined,
+                neighborhood: neighborhood.trim() || undefined,
+                address: address || undefined,
+                number: number || undefined,
+                complement: complement || undefined,
+                avatar_url: avatarUrl || undefined,
+                documents: documentUrls.length > 0 ? documentUrls : undefined,
             });
 
             if (result.success) { setView('success'); }
@@ -195,6 +221,14 @@ export const ClientRegistration: React.FC<Props> = ({ token }) => {
                     <p className="text-gray-500 text-sm mt-1">Para que o credor entre em contato.</p></div>
                     <input autoFocus value={phone} onChange={e => setPhone(maskPhone(e.target.value))} maxLength={15}
                         className="w-full bg-transparent border-b-2 border-gray-200 py-4 text-3xl font-bold text-gray-900 focus:outline-none focus:border-black transition-colors tracking-wider" placeholder="(00) 00000-0000" />
+                    <div className="pt-2">
+                        <AdditionalContactsInput
+                            contacts={additionalContacts}
+                            onChange={setAdditionalContacts}
+                            variant="wizard"
+                            darkSupport={false}
+                        />
+                    </div>
                 </div>
             );
             case 4: return (
@@ -219,7 +253,7 @@ export const ClientRegistration: React.FC<Props> = ({ token }) => {
                             className="w-full bg-transparent border-b-2 border-gray-200 py-4 text-3xl font-bold text-gray-900 focus:outline-none focus:border-black transition-colors tracking-widest" placeholder="00000-000" />
                         {loadingCep && <Loader2 className="absolute right-0 top-6 w-6 h-6 animate-spin text-gray-400" />}
                     </div>
-                    {(city || address) && (
+                    {(city || address || cep.length === 9) && (
                         <div className="space-y-3 pt-2 animate-slideIn">
                             <div className="grid grid-cols-4 gap-3">
                                 <div className="col-span-3 border-b border-gray-100 pb-1">
@@ -230,6 +264,10 @@ export const ClientRegistration: React.FC<Props> = ({ token }) => {
                                     <span className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Nº</span>
                                     <input value={number} onChange={e => setNumber(e.target.value)} className="w-full bg-transparent text-lg font-bold text-gray-900 focus:outline-none" placeholder="S/N" />
                                 </div>
+                            </div>
+                            <div className="border-b border-gray-100 pb-1">
+                                <span className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Bairro</span>
+                                <input value={neighborhood} onChange={e => setNeighborhood(e.target.value)} className="w-full bg-transparent text-lg font-bold text-gray-900 focus:outline-none" placeholder="Bairro" />
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="border-b border-gray-100 pb-1">
@@ -307,15 +345,26 @@ export const ClientRegistration: React.FC<Props> = ({ token }) => {
                                 <div><p className="text-[9px] text-gray-400 uppercase font-bold">Telefone</p><p className="text-sm font-bold text-gray-700">{phone}</p></div>
                                 <div><p className="text-[9px] text-gray-400 uppercase font-bold">E-mail</p><p className="text-sm font-bold text-gray-700 truncate">{email || '-'}</p></div>
                             </div>
+                            {sanitizeAdditionalContacts(additionalContacts).length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-gray-200/70 space-y-1.5">
+                                    <p className="text-[9px] text-gray-400 uppercase font-bold">Contatos Adicionais</p>
+                                    <AdditionalContactsList
+                                        contacts={sanitizeAdditionalContacts(additionalContacts)}
+                                        darkSupport={false}
+                                    />
+                                </div>
+                            )}
                         </button>
-                        {(address || city) && (
+                        {(address || city || neighborhood) && (
                             <button onClick={() => setStep(5)} className="w-full text-left p-4 bg-gray-50 rounded-2xl hover:bg-gray-100 transition-all group">
                                 <div className="flex items-center justify-between mb-2">
                                     <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Endereço</span>
                                     <span className="text-[10px] font-bold text-gray-900 opacity-0 group-hover:opacity-100 transition-opacity">EDITAR</span>
                                 </div>
-                                <p className="font-bold text-gray-900">{address}{number ? `, ${number}` : ''}</p>
-                                <p className="text-sm text-gray-500">{city}{state ? ` - ${state}` : ''} • {cep}</p>
+                                <p className="font-bold text-gray-900">
+                                    {address}{number ? `, ${number}` : ''}{neighborhood ? ` - ${neighborhood}` : ''}
+                                </p>
+                                <p className="text-sm text-gray-500">{city}{state ? ` - ${state}` : ''}{cep ? ` • ${cep}` : ''}</p>
                             </button>
                         )}
                         {(photoPreview || docPreviews.length > 0) && (

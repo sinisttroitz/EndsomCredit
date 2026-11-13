@@ -1,6 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Share2, X, Check } from 'lucide-react';
+import { Share2, X, Check, Calendar, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import html2canvas from 'html2canvas';
+
+export interface RemainingSummary {
+    remainingCount: number;
+    totalCount: number;
+    paidCount: number;
+    installmentValue?: number;
+    nextInstallmentNumber?: number;
+    nextDueDate?: string;
+    finalDueDate?: string;
+    lateCount?: number;
+    lateAmount?: number;
+}
 
 interface ExtractModalProps {
     isOpen: boolean;
@@ -12,6 +24,7 @@ interface ExtractModalProps {
         totalPaid: number;
         balance: number;
         creditAvailable?: number;
+        remainingSummary?: RemainingSummary;
         installments: Array<{
             number: number;
             date: string;
@@ -130,7 +143,7 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                         </div>
 
                         {/* Summary Cards */}
-                        <div className="space-y-3 mb-8">
+                        <div className="space-y-3 mb-6">
                             {/* Total Paid */}
                             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-2xl p-4 border border-blue-100 dark:border-blue-800">
                                 <p className="text-xs text-blue-600 dark:text-blue-300 mb-1">Total Pago Acumulado</p>
@@ -148,7 +161,7 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                             </div>
 
                             {/* Credit Available (Optional) */}
-                            {data.creditAvailable !== undefined && (
+                            {data.creditAvailable !== undefined && data.creditAvailable > 0 && (
                                 <div className="bg-green-50 dark:bg-green-900/20 rounded-2xl p-4 border border-green-100 dark:border-green-800">
                                     <p className="text-xs text-green-600 dark:text-green-300 mb-1">Crédito Disponível</p>
                                     <p className="text-2xl font-bold text-green-700 dark:text-green-400">
@@ -157,6 +170,82 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                                 </div>
                             )}
                         </div>
+
+                        {/* Remaining Installments Smart Summary */}
+                        {data.remainingSummary && (
+                            <div className="mb-6">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">
+                                    {data.remainingSummary.remainingCount > 0 ? 'Previsão das Parcelas Faltantes' : 'Status do Contrato'}
+                                </h3>
+
+                                {data.remainingSummary.remainingCount > 0 ? (
+                                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
+                                        <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-700">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300">
+                                                    <Calendar className="w-5 h-5" />
+                                                </div>
+                                                <div>
+                                                    <p className="font-bold text-gray-900 dark:text-white text-sm">
+                                                        {data.remainingSummary.remainingCount} de {data.remainingSummary.totalCount} parcelas restantes
+                                                    </p>
+                                                    <p className="text-xs text-gray-400">
+                                                        {data.remainingSummary.paidCount} parcela(s) já quitada(s)
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {data.remainingSummary.installmentValue ? (
+                                                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border border-gray-200/60 dark:border-gray-600 whitespace-nowrap">
+                                                    {data.remainingSummary.remainingCount}x R$ {data.remainingSummary.installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </span>
+                                            ) : null}
+                                        </div>
+
+                                        <div className="space-y-2 text-xs">
+                                            {data.remainingSummary.nextDueDate && (
+                                                <div className="flex justify-between items-center py-0.5">
+                                                    <span className="text-gray-500 dark:text-gray-400 font-medium">Próximo Vencimento:</span>
+                                                    <span className="font-bold text-gray-900 dark:text-white">
+                                                        {data.remainingSummary.nextInstallmentNumber ? `Parcela #${String(data.remainingSummary.nextInstallmentNumber).padStart(2, '0')} em ` : ''}{data.remainingSummary.nextDueDate}
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {data.remainingSummary.finalDueDate && (
+                                                <div className="flex justify-between items-center py-0.5">
+                                                    <span className="text-gray-500 dark:text-gray-400 font-medium">Previsão de Quitação:</span>
+                                                    <span className="font-bold text-gray-900 dark:text-white">
+                                                        {data.remainingSummary.finalDueDate}
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {data.remainingSummary.lateCount && data.remainingSummary.lateCount > 0 ? (
+                                                <div className="flex justify-between items-center pt-2.5 border-t border-rose-100 dark:border-rose-900/30 text-rose-600 dark:text-rose-400">
+                                                    <span className="font-bold flex items-center gap-1.5">
+                                                        <AlertTriangle className="w-3.5 h-3.5" />
+                                                        Parcelas em Atraso:
+                                                    </span>
+                                                    <span className="font-bold">
+                                                        {data.remainingSummary.lateCount} parcela(s) {data.remainingSummary.lateAmount ? `• R$ ${data.remainingSummary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
+                                                    </span>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl p-4 border border-emerald-100 dark:border-emerald-800 flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                                            <CheckCircle2 className="w-5 h-5" />
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-emerald-900 dark:text-emerald-200 text-sm">Contrato Quitado</p>
+                                            <p className="text-xs text-emerald-700 dark:text-emerald-400">Todas as {data.remainingSummary.totalCount} parcelas foram quitadas.</p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
                             Parcelas Pagas

@@ -47,21 +47,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
         totalPrincipalReceived: 0,
         totalPrincipalOpen: 0,
         totalInterestPending: 0,
-        totalToReceive: 0
+        totalToReceive: 0,
+        portfolioYield: 0
     });
     const [performanceToggle, setPerformanceToggle] = useState<'Empréstado' | 'Recebidos'>('Empréstado');
     const [loading, setLoading] = useState(true);
     const [lateLoansList, setLateLoansList] = useState<Loan[]>([]);
-    const [nudgeCards, setNudgeCards] = useState(false);
-
-    // Nudge animation for mobile carousel (CSS based to bypass scroll-snap lock)
-    useEffect(() => {
-        if (!loading) {
-            const timer1 = setTimeout(() => setNudgeCards(true), 1000);
-            const timer2 = setTimeout(() => setNudgeCards(false), 1400);
-            return () => { clearTimeout(timer1); clearTimeout(timer2); };
-        }
-    }, [loading]);
+    const [activeCardIndex, setActiveCardIndex] = useState(0);
 
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
@@ -270,6 +262,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             let totalPrincipalOpen = 0;
             let totalInterestPending = 0;
             let totalToReceive = 0;
+            let activeContractualCapital = 0;
+            let activeContractualInterest = 0;
 
             const monthlyLent = Array(12).fill(0);
             const monthlyReceived = Array(12).fill(0);
@@ -295,6 +289,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 } else {
                     totalLent += amount; // Capital em Aberto
                     activeLoansCount++;
+
+                    const cap = amount;
+                    const rate = Number(loan.interest_rate) || 0;
+                    const contractInterest = totalDebt > cap ? (totalDebt - cap) : (cap * (rate / 100));
+                    activeContractualCapital += cap;
+                    activeContractualInterest += contractInterest;
                 }
 
                 let loanReceived = 0;
@@ -397,6 +397,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 if (client.status === 'active') activeCount++;
             });
 
+            const portfolioYield = activeContractualCapital > 0
+                ? (activeContractualInterest / activeContractualCapital) * 100
+                : (totalCapital > 0 ? ((totalInterestReceived + totalInterestPending) / totalCapital) * 100 : 0);
+
             setSummary({
                 totalLent,
                 totalReceived,
@@ -424,7 +428,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 totalPrincipalReceived,
                 totalPrincipalOpen,
                 totalInterestPending,
-                totalToReceive
+                totalToReceive,
+                portfolioYield
             });
 
             setLateLoansList(lateLoans.slice(0, 5));
@@ -452,22 +457,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     // Mock data for chart
     const now = new Date();
     const currentMonthIdx = now.getMonth();
-    const prevMonthIdx = (currentMonthIdx - 1 + 12) % 12;
-    const currentLentValue = summary.monthlyLent[currentMonthIdx];
-    const prevLentValue = summary.monthlyLent[prevMonthIdx];
-    let growthPct = 0;
-    if (prevLentValue > 0) {
-        growthPct = ((currentLentValue - prevLentValue) / prevLentValue) * 100;
-    } else if (currentLentValue > 0) {
-        growthPct = 100;
-    }
-    const isGrowthPositive = growthPct >= 0;
-    const growthBadge = `${isGrowthPositive ? '+' : ''}${growthPct.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
-    const growthColor = isGrowthPositive ? '#00A859' : '#EF4444';
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-            <header className="md:hidden bg-background-light dark:bg-background-dark pt-12 pb-6 px-6 relative z-10 flex flex-col">
+            <header className="md:hidden bg-background-light dark:bg-background-dark pt-12 pb-6 px-4 sm:px-6 relative z-10 flex flex-col">
                 {/* Notification Panel Mobile */}
                 {showNotifPanel && (
                     <div className="fixed top-0 left-0 right-0 bottom-0 z-[100]">
@@ -535,65 +528,80 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
 
                 {/* Mobile Cards Carousel (Dinheiro na Rua & Carteira Ativa) */}
                 <div className="w-full mt-1">
-                    <div className="flex overflow-x-auto snap-x snap-mandatory gap-4 no-scrollbar pb-1">
+                    <div 
+                        className="flex overflow-x-auto snap-x snap-mandatory gap-3 no-scrollbar pb-1"
+                        onScroll={(e) => {
+                            const el = e.currentTarget;
+                            if (el.offsetWidth > 0) {
+                                const idx = Math.round(el.scrollLeft / el.offsetWidth);
+                                if (idx !== activeCardIndex) setActiveCardIndex(idx);
+                            }
+                        }}
+                    >
                         {/* Dinheiro na Rua - Card Preto */}
-                        <div className={`min-w-full snap-center shrink-0 bg-[#1E1E24] dark:bg-card-dark rounded-3xl p-5 shadow-xl relative transition-transform duration-500 ease-in-out ${nudgeCards ? '-translate-x-12' : 'translate-x-0'}`}>
-                            <div className="flex justify-between items-end">
-                                <div className="flex flex-col z-10">
-                                    <span className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1.5">Dinheiro na Rua</span>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-white text-[28px] font-manrope font-black tracking-tight leading-none">
+                        <div className="w-full min-w-full max-w-full snap-center shrink-0 bg-[#1E1E24] dark:bg-card-dark rounded-2xl sm:rounded-3xl p-4 sm:p-5 shadow-xl relative overflow-hidden">
+                            <div className="flex justify-between items-end gap-2">
+                                <div className="flex flex-col min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                                        <span className="text-white/50 text-[10px] font-bold uppercase tracking-wider shrink-0">Dinheiro na Rua</span>
+                                        <span className="w-1 h-1 rounded-full bg-white/20 shrink-0"></span>
+                                        <span className="text-white/40 text-[10px] font-medium tracking-normal truncate">capital emprestado</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                        <span className="text-white text-[20px] xs:text-[23px] sm:text-[28px] font-manrope font-black tracking-tight leading-none truncate">
                                             {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
                                         </span>
-                                        <button onClick={() => setHideValues(!hideValues)} className="text-white/40 hover:text-white transition-colors">
-                                            {hideValues ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+                                        <button onClick={() => setHideValues(!hideValues)} className="text-white/40 hover:text-white transition-colors shrink-0 p-1 -m-1">
+                                            {hideValues ? <Eye className="w-4 h-4 sm:w-5 sm:h-5" /> : <EyeOff className="w-4 h-4 sm:w-5 sm:h-5" />}
                                         </button>
                                     </div>
-                                </div>
-
-                                {/* Conteúdo de Crescimento Integrado */}
-                                <div className="flex flex-col items-center justify-center z-10 pb-0.5">
-                                    {isGrowthPositive ? (
-                                        <TrendingUp className="w-5 h-5 mb-0.5" strokeWidth={3} style={{ color: growthColor }} />
-                                    ) : (
-                                        <TrendingDown className="w-5 h-5 mb-0.5" strokeWidth={3} style={{ color: growthColor }} />
-                                    )}
-                                    <span className="font-manrope font-black text-[15px] leading-none mb-0.5" style={{ color: growthColor }}>{growthBadge}</span>
-                                    <span className="text-white/40 text-[7px] font-black uppercase tracking-tighter leading-none">este mês</span>
                                 </div>
                             </div>
                         </div>
 
                         {/* Carteira Ativa - Card Turquesa Escuro */}
-                        <div className={`min-w-full snap-center shrink-0 bg-[#073B3D] dark:bg-[#04282B] border border-teal-900/30 rounded-3xl p-5 shadow-xl shadow-teal-900/10 relative transition-transform duration-500 ease-in-out ${nudgeCards ? '-translate-x-12' : 'translate-x-0'}`}>
-                            <div className="flex justify-between items-end">
-                                <div className="flex flex-col z-10">
-                                    <span className="text-teal-100/60 text-[10px] font-bold uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
-                                        Carteira Ativa
-                                        <span className="w-1 h-1 rounded-full bg-teal-100/60"></span>
-                                        <span className="text-[10px] font-bold tracking-wider opacity-100">total emprestado + retornos</span>
-                                    </span>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-white text-[28px] font-manrope font-black tracking-tight leading-none">
+                        <div className="w-full min-w-full max-w-full snap-center shrink-0 bg-[#073B3D] dark:bg-[#04282B] border border-teal-900/30 rounded-2xl sm:rounded-3xl p-4 sm:p-5 shadow-xl shadow-teal-900/10 relative overflow-hidden">
+                            <div className="flex justify-between items-end gap-2">
+                                <div className="flex flex-col min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+                                        <span className="text-teal-100/70 text-[10px] font-bold uppercase tracking-wider shrink-0">Carteira Ativa</span>
+                                        <span className="w-1 h-1 rounded-full bg-teal-100/40 shrink-0"></span>
+                                        <span className="text-teal-100/50 text-[10px] font-medium tracking-normal truncate">total a receber</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                        <span className="text-white text-[20px] xs:text-[23px] sm:text-[28px] font-manrope font-black tracking-tight leading-none truncate">
                                             {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalToReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
                                         </span>
-                                        <button onClick={() => setHideValues(!hideValues)} className="text-teal-100/40 hover:text-white transition-colors">
-                                            {hideValues ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+                                        <button onClick={() => setHideValues(!hideValues)} className="text-teal-100/40 hover:text-white transition-colors shrink-0 p-1 -m-1">
+                                            {hideValues ? <Eye className="w-4 h-4 sm:w-5 sm:h-5" /> : <EyeOff className="w-4 h-4 sm:w-5 sm:h-5" />}
                                         </button>
                                     </div>
+                                </div>
+
+                                {/* Conteúdo de Rentabilidade Integrado (Opção A) */}
+                                <div className="flex flex-col items-end justify-center shrink-0 pb-0.5">
+                                    <div className="flex items-center gap-1 bg-white/10 dark:bg-black/20 px-2 py-1 rounded-lg backdrop-blur-sm border border-teal-500/20">
+                                        <TrendingUp className="w-3.5 h-3.5 text-emerald-400 shrink-0" strokeWidth={2.5} />
+                                        <span className="font-manrope font-black text-[13px] sm:text-[15px] leading-none text-emerald-400">
+                                            {loading ? '...' : `${summary.portfolioYield.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}%`}
+                                        </span>
+                                    </div>
+                                    <span className="text-teal-100/60 text-[8px] font-bold uppercase tracking-tight leading-none mt-1 whitespace-nowrap">rentab. média</span>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    {/* Indicativo explícito para deslizar */}
+                    {/* Indicativo dinâmico para deslizar */}
                     <div className="flex justify-between items-center pt-2 px-1 pointer-events-none">
-                        <div className="flex items-center gap-1">
-                            <div className="w-4 h-1.5 rounded-full bg-gray-900/30 dark:bg-white/30"></div>
-                            <div className="w-1.5 h-1.5 rounded-full bg-gray-900/10 dark:bg-white/10"></div>
+                        <div className="flex items-center gap-1.5">
+                            <div className={`h-1.5 rounded-full transition-all duration-300 ${activeCardIndex === 0 ? 'w-5 bg-gray-900/70 dark:bg-white/80' : 'w-1.5 bg-gray-900/20 dark:bg-white/20'}`}></div>
+                            <div className={`h-1.5 rounded-full transition-all duration-300 ${activeCardIndex === 1 ? 'w-5 bg-teal-600 dark:bg-teal-400' : 'w-1.5 bg-gray-900/20 dark:bg-white/20'}`}></div>
                         </div>
                         <div className="flex items-center gap-0.5 text-gray-400 dark:text-gray-500">
-                            <span className="text-[9px] font-black uppercase tracking-widest">Deslize para o lado</span>
-                            <ChevronRight className="w-3.5 h-3.5 animate-pulse" />
+                            <span className="text-[9px] font-black uppercase tracking-widest">
+                                {activeCardIndex === 0 ? 'Deslize para ver carteira' : 'Deslize para voltar'}
+                            </span>
+                            <ChevronRight className={`w-3.5 h-3.5 transition-transform duration-300 ${activeCardIndex === 1 ? 'rotate-180' : 'animate-pulse'}`} />
                         </div>
                     </div>
                 </div>
@@ -1050,6 +1058,81 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                             <span className="text-sm font-black text-yellow-600">
                                 R$ {summary.totalInterestPending.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Desktop KPI Cards Row */}
+                <div className="hidden md:grid grid-cols-4 gap-4 mb-6">
+                    {/* Dinheiro na Rua */}
+                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col justify-between">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Dinheiro na Rua</span>
+                            <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-700 dark:text-gray-300">
+                                <DollarSign className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div>
+                            <span className="text-2xl font-black font-manrope text-gray-900 dark:text-white leading-none">
+                                {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                            </span>
+                            <div className="flex items-center gap-1.5 mt-2">
+                                <span className="text-[11px] text-gray-400">Capital total emprestado</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Carteira Ativa */}
+                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col justify-between">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Carteira Ativa</span>
+                            <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-900/20 flex items-center justify-center text-teal-600 dark:text-teal-400">
+                                <CalendarCheck className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div>
+                            <span className="text-2xl font-black font-manrope text-teal-600 dark:text-teal-400 leading-none">
+                                {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalToReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                            </span>
+                            <div className="flex items-center gap-1.5 mt-2">
+                                <span className="text-[11px] text-gray-400">Total a receber (capital + juros)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Juros Recebidos */}
+                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col justify-between">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Juros Recebidos</span>
+                            <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                                <TrendingUp className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div>
+                            <span className="text-2xl font-black font-manrope text-blue-600 dark:text-blue-400 leading-none">
+                                {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                            </span>
+                            <div className="flex items-center gap-1.5 mt-2">
+                                <span className="text-[11px] text-gray-400">Lucro acumulado realizado</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Rentabilidade Média da Carteira */}
+                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-emerald-100 dark:border-emerald-900/30 shadow-sm flex flex-col justify-between relative overflow-hidden">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Rentab. Média</span>
+                            <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                                <Award className="w-5 h-5" />
+                            </div>
+                        </div>
+                        <div>
+                            <span className="text-2xl font-black font-manrope text-emerald-600 dark:text-emerald-400 leading-none">
+                                {loading ? '...' : `${summary.portfolioYield.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}
+                            </span>
+                            <div className="flex items-center gap-1.5 mt-2">
+                                <span className="text-[11px] text-gray-400">Retorno médio da carteira ativa</span>
+                            </div>
                         </div>
                     </div>
                 </div>

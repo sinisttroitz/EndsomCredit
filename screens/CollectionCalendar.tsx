@@ -4,6 +4,7 @@ import { generatePixPayload } from '../utils/pixUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
+import { ShareReportModal } from '../components/ShareReportModal';
 
 interface CollectionCalendarProps {
     onBack: () => void;
@@ -48,7 +49,10 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
         pix_key: string;
         pix_beneficiary: string;
         city: string;
+        pix_keys?: any[];
     } | null>(null);
+    const [selectedPixKeyId, setSelectedPixKeyId] = useState<string>('');
+    const [showReportModal, setShowReportModal] = useState(false);
 
     useEffect(() => {
         fetchAllCharges();
@@ -58,13 +62,35 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
     const fetchUserSettings = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
+            let userPixKeys: any[] = [];
+            try {
+                const { data: dbKeys } = await supabase
+                    .from('pix_keys')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('is_default', { ascending: false });
+                if (dbKeys && dbKeys.length > 0) userPixKeys = dbKeys;
+            } catch (e) { /* ignore */ }
+
             const { data } = await supabase
                 .from('user_settings')
                 .select('*')
                 .eq('user_id', user.id)
                 .single();
+
             if (data) {
-                setUserSettings(data);
+                if (userPixKeys.length === 0 && data.pix_keys) {
+                    userPixKeys = data.pix_keys;
+                }
+                setUserSettings({
+                    ...data,
+                    pix_keys: userPixKeys
+                });
+
+                if (userPixKeys.length > 0) {
+                    const def = userPixKeys.find((k: any) => k.is_default) || userPixKeys[0];
+                    setSelectedPixKeyId(def.id);
+                }
             }
         }
     };
@@ -251,9 +277,16 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
         }
     };
 
-    const generatePix = (amountStr: string) => {
-        if (!userSettings?.pix_key) return;
-        
+    const generatePix = (amountStr: string, customKey?: string, customBeneficiary?: string) => {
+        const chosenItem = selectedPixKeyId && userSettings?.pix_keys
+            ? userSettings.pix_keys.find((k: any) => k.id === selectedPixKeyId)
+            : null;
+
+        const keyToUse = customKey || chosenItem?.pix_key || chosenItem?.key || userSettings?.pix_key;
+        if (!keyToUse) return;
+
+        const beneficiaryToUse = customBeneficiary || chosenItem?.holder_name || chosenItem?.beneficiary || userSettings?.pix_beneficiary || 'Recebedor';
+
         const amount = parseFloat(amountStr.replace(',', '.'));
         if (isNaN(amount) || amount <= 0) {
             setPixPayload('');
@@ -261,9 +294,9 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
         }
 
         const payload = generatePixPayload(
-            userSettings.pix_key,
-            userSettings.pix_beneficiary || 'Recebedor',
-            userSettings.city || 'Cidade',
+            keyToUse,
+            beneficiaryToUse,
+            userSettings?.city || 'Cidade',
             amount,
             selectedLoanForCharge?.id.substring(0, 20) // Transaction ID
         );
@@ -352,7 +385,13 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                         <ChevronRight className="w-4 h-4 text-white/70" />
                     </button>
                 </div>
-                <div className="w-10"></div> {/* Spacer */}
+                <button
+                    onClick={() => setShowReportModal(true)}
+                    title="Fechamento WhatsApp"
+                    className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-emerald-400 flex items-center justify-center transition-all active:scale-95"
+                >
+                    <Share2 className="w-4 h-4" />
+                </button>
             </header>
 
             <main className="flex-1 overflow-y-auto p-4">
@@ -524,7 +563,15 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                         <p className="text-sm font-medium text-gray-500 mt-1">Acompanhe os vencimentos e gerencie suas cobranças diárias.</p>
                     </div>
                     
-                    <div className="flex items-center gap-4 bg-white dark:bg-gray-800 p-2 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setShowReportModal(true)}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-2xl transition-all shadow-md active:scale-95"
+                        >
+                            <Share2 className="w-4 h-4" /> Fechamento WhatsApp
+                        </button>
+
+                        <div className="flex items-center gap-4 bg-white dark:bg-gray-800 p-2 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
                         <button onClick={handlePrevMonth} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
                             <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
                         </button>
@@ -534,6 +581,7 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                         <button onClick={handleNextMonth} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
                             <ChevronRight className="w-5 h-5 text-gray-600 dark:text-gray-300" />
                         </button>
+                        </div>
                     </div>
                 </div>
 
@@ -850,14 +898,57 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                                 </div>
                             )}
 
-                            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800">
-                                <p className="text-xs text-blue-700 dark:text-blue-300">
-                                    <span className="font-bold">Chave PIX:</span> {userSettings?.pix_key}
-                                </p>
-                                <p className="text-xs text-blue-700 dark:text-blue-300">
-                                    <span className="font-bold">Beneficiário:</span> {userSettings?.pix_beneficiary || 'Não informado'}
-                                </p>
-                            </div>
+                            {userSettings?.pix_keys && userSettings.pix_keys.length > 1 && (
+                                <div className="mb-3 text-left">
+                                    <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">
+                                        Receber na Chave / Conta:
+                                    </label>
+                                    <select
+                                        value={selectedPixKeyId}
+                                        onChange={(e) => {
+                                            const chosenId = e.target.value;
+                                            setSelectedPixKeyId(chosenId);
+                                            const chosen = userSettings.pix_keys?.find((k: any) => k.id === chosenId);
+                                            if (chosen) {
+                                                generatePix(pixAmount, chosen.pix_key || chosen.key, chosen.holder_name || chosen.beneficiary);
+                                            }
+                                        }}
+                                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5 text-xs font-bold text-gray-800 dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
+                                    >
+                                        {userSettings.pix_keys.map((k: any) => (
+                                            <option key={k.id} value={k.id}>
+                                                {k.financial_institution ? `${k.financial_institution.split('(')[0].trim()} - ` : ''}
+                                                {(k.key_type || k.type || 'PIX').toUpperCase()}: {k.pix_key || k.key} {k.is_default ? '(Principal)' : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {(() => {
+                                const currentItem = selectedPixKeyId && userSettings?.pix_keys
+                                    ? userSettings.pix_keys.find((k: any) => k.id === selectedPixKeyId)
+                                    : null;
+                                const displayKey = currentItem?.pix_key || currentItem?.key || userSettings?.pix_key;
+                                const displayBeneficiary = currentItem?.holder_name || currentItem?.beneficiary || userSettings?.pix_beneficiary || 'Não informado';
+                                const displayBank = currentItem?.financial_institution;
+
+                                return (
+                                    <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl border border-blue-100 dark:border-blue-800 text-left space-y-1">
+                                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                                            <span className="font-bold">Chave PIX:</span> {displayKey}
+                                        </p>
+                                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                                            <span className="font-bold">Beneficiário:</span> {displayBeneficiary}
+                                        </p>
+                                        {displayBank && (
+                                            <p className="text-xs text-blue-700 dark:text-blue-300">
+                                                <span className="font-bold">Banco:</span> {displayBank}
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -896,6 +987,11 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
                     </div>
                 </div>
             )}
+            {/* Modal de Compartilhamento / Relatório WhatsApp */}
+            <ShareReportModal
+                isOpen={showReportModal}
+                onClose={() => setShowReportModal(false)}
+            />
         </>
     );
 };

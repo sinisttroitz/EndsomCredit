@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Edit2, MapPin, CreditCard, ChevronRight, Lock, Save, X, Loader2, Search, Download, FileText, Users, Crown, Clock, AlertTriangle, Bell } from 'lucide-react';
+import { LogOut, Edit2, MapPin, CreditCard, ChevronRight, Lock, Save, X, Loader2, Search, Download, FileText, Users, Crown, Clock, AlertTriangle, Bell, Plus, Trash2, Copy, Check, Star, Key, Building2, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { UserSettings } from '../types';
+import { UserSettings, PixKeyItem, Profile as UserProfileData } from '../types';
+import { maskSensitiveKey } from '../utils/pixValidationUtils';
+import { isMissingTableError, saveUserPixSettings } from '../utils/pixUtils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -9,11 +11,17 @@ interface ProfileProps {
     onLogout: () => void;
     onNavigate?: (view: any) => void;
     userEmail?: string;
+    onAddPixKey?: () => void;
+    onEditPixKey?: (item: PixKeyItem) => void;
 }
 
-import { Profile as UserProfileData } from '../types';
-
-export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigate }) => {
+export const Profile: React.FC<ProfileProps> = ({
+    onLogout,
+    userEmail,
+    onNavigate,
+    onAddPixKey,
+    onEditPixKey
+}) => {
     const [isEditing, setIsEditing] = useState(false);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -28,6 +36,10 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
     const [confirmPassword, setConfirmPassword] = useState('');
     const [updatingPassword, setUpdatingPassword] = useState(false);
 
+    // PIX Keys Management States
+    const [deleteConfirmKey, setDeleteConfirmKey] = useState<PixKeyItem | null>(null);
+    const [showMaskedKeys, setShowMaskedKeys] = useState(false);
+
     // Estado local para o CEP e carregamento da busca
     const [cep, setCep] = useState('');
     const [loadingCep, setLoadingCep] = useState(false);
@@ -36,8 +48,140 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
         pix_key: '',
         pix_beneficiary: '',
         city: '',
-        state: ''
+        state: '',
+        pix_keys: []
     });
+
+    const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+
+    const handleCopyPixKey = (key: string, id: string) => {
+        if (!key) return;
+        navigator.clipboard.writeText(key);
+        setCopiedKeyId(id);
+        setTimeout(() => setCopiedKeyId(null), 2000);
+    };
+
+    const handleOpenAddPixKey = () => {
+        if (onAddPixKey) {
+            onAddPixKey();
+        } else if (onNavigate) {
+            onNavigate('pix-key-form');
+        }
+    };
+
+    const handleOpenEditPixKey = (item: PixKeyItem) => {
+        if (onEditPixKey) {
+            onEditPixKey(item);
+        } else if (onNavigate) {
+            onNavigate('pix-key-form');
+        }
+    };
+
+    const handleConfirmDeletePixKey = async () => {
+        if (!deleteConfirmKey) return;
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const updatedKeys = (settings.pix_keys || []).filter(k => k.id !== deleteConfirmKey.id);
+            if (updatedKeys.length > 0 && !updatedKeys.some(k => k.is_default)) {
+                updatedKeys[0].is_default = true;
+            }
+
+            const defaultKey = updatedKeys.find(k => k.is_default) || updatedKeys[0];
+
+            const { error: delTableErr } = await supabase
+                .from('pix_keys')
+                .delete()
+                .eq('id', deleteConfirmKey.id)
+                .eq('user_id', user.id);
+            if (delTableErr && !isMissingTableError(delTableErr, 'pix_keys')) {
+                console.warn('Erro ao excluir da tabela pix_keys:', delTableErr);
+            }
+
+            await saveUserPixSettings({
+                user_id: user.id,
+                pix_key: defaultKey ? (defaultKey.pix_key || defaultKey.key || '') : '',
+                pix_beneficiary: defaultKey ? (defaultKey.holder_name || defaultKey.beneficiary || '') : '',
+                city: settings.city,
+                state: settings.state,
+                pix_keys: updatedKeys,
+            });
+
+            setSettings(prev => ({
+                ...prev,
+                pix_key: defaultKey ? (defaultKey.pix_key || defaultKey.key || '') : '',
+                pix_beneficiary: defaultKey ? (defaultKey.holder_name || defaultKey.beneficiary || '') : '',
+                pix_keys: updatedKeys
+            }));
+
+            setDeleteConfirmKey(null);
+            setAlertModal({
+                open: true,
+                title: 'Chave Excluída',
+                message: 'A chave PIX foi removida com sucesso.'
+            });
+        } catch (err: any) {
+            console.error('Error deleting key:', err);
+            setDeleteConfirmKey(null);
+            setAlertModal({
+                open: true,
+                title: 'Erro ao Excluir',
+                message: err?.message || 'Não foi possível excluir a chave PIX.'
+            });
+        }
+    };
+
+    const handleSetDefaultKeyDirect = async (keyId: string) => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const updatedKeys = (settings.pix_keys || []).map(k => ({
+                ...k,
+                is_default: k.id === keyId
+            }));
+
+            const defaultKey = updatedKeys.find(k => k.id === keyId);
+
+            const { error: resetErr } = await supabase
+                .from('pix_keys')
+                .update({ is_default: false })
+                .eq('user_id', user.id);
+            if (!resetErr) {
+                await supabase
+                    .from('pix_keys')
+                    .update({ is_default: true })
+                    .eq('id', keyId)
+                    .eq('user_id', user.id);
+            } else if (!isMissingTableError(resetErr, 'pix_keys')) {
+                console.warn('Erro ao atualizar padrão em pix_keys:', resetErr);
+            }
+
+            await saveUserPixSettings({
+                user_id: user.id,
+                pix_key: defaultKey ? (defaultKey.pix_key || defaultKey.key || '') : '',
+                pix_beneficiary: defaultKey ? (defaultKey.holder_name || defaultKey.beneficiary || '') : '',
+                city: settings.city,
+                state: settings.state,
+                pix_keys: updatedKeys,
+            });
+
+            setSettings(prev => ({
+                ...prev,
+                pix_key: defaultKey ? (defaultKey.pix_key || defaultKey.key || '') : '',
+                pix_beneficiary: defaultKey ? (defaultKey.holder_name || defaultKey.beneficiary || '') : '',
+                pix_keys: updatedKeys
+            }));
+        } catch (err: any) {
+            console.error('Error setting default key:', err);
+            setAlertModal({
+                open: true,
+                title: 'Erro ao Atualizar',
+                message: err?.message || 'Não foi possível definir a chave padrão.'
+            });
+        }
+    };
 
     const [email, setEmail] = useState(userEmail || '');
     const [name, setName] = useState('');
@@ -71,6 +215,28 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
 
                 if (profileData) setUserProfile(profileData);
 
+                // 1. Tentar buscar da tabela pix_keys
+                let loadedPixKeys: PixKeyItem[] = [];
+                try {
+                    const { data: dbKeys, error: dbErr } = await supabase
+                        .from('pix_keys')
+                        .select('*')
+                        .eq('user_id', user.id)
+                        .order('is_default', { ascending: false });
+
+                    if (!dbErr && dbKeys && dbKeys.length > 0) {
+                        loadedPixKeys = dbKeys.map(k => ({
+                            ...k,
+                            key: k.pix_key,
+                            type: k.key_type,
+                            beneficiary: k.holder_name
+                        }));
+                    }
+                } catch (e) {
+                    // pix_keys table might not exist yet
+                }
+
+                // 2. Buscar user_settings
                 const { data, error } = await supabase
                     .from('user_settings')
                     .select('*')
@@ -78,11 +244,34 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
                     .single();
 
                 if (data) {
+                    if (loadedPixKeys.length === 0) {
+                        if (data.pix_keys && Array.isArray(data.pix_keys) && data.pix_keys.length > 0) {
+                            loadedPixKeys = data.pix_keys.map((k: any) => ({
+                                ...k,
+                                key_type: k.key_type || k.type || 'outro',
+                                pix_key: k.pix_key || k.key || '',
+                                holder_name: k.holder_name || k.beneficiary || ''
+                            }));
+                        } else if (data.pix_key) {
+                            loadedPixKeys = [{
+                                id: 'default-1',
+                                key_type: 'outro',
+                                pix_key: data.pix_key,
+                                holder_name: data.pix_beneficiary || '',
+                                is_default: true,
+                                key: data.pix_key,
+                                type: 'outro',
+                                beneficiary: data.pix_beneficiary || ''
+                            }];
+                        }
+                    }
+
                     setSettings({
                         pix_key: data.pix_key || '',
                         pix_beneficiary: data.pix_beneficiary || '',
                         city: data.city || '',
-                        state: data.state || ''
+                        state: data.state || '',
+                        pix_keys: loadedPixKeys
                     });
                 } else if (error && error.code !== 'PGRST116') { // PGRST116 is "not found", which is fine for first run
                     console.error("Error fetching settings:", error);
@@ -357,18 +546,40 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
                 if (nameError) throw nameError;
             }
 
-            const { error } = await supabase
-                .from('user_settings')
-                .upsert({
-                    user_id: user.id,
-                    pix_key: settings.pix_key,
-                    pix_beneficiary: settings.pix_beneficiary,
-                    city: settings.city,
-                    state: settings.state,
-                    updated_at: new Date().toISOString()
-                });
+            const keysList = [...(settings.pix_keys || [])];
+            let defaultKey = keysList.find(k => k.is_default);
+            if (!defaultKey && keysList.length > 0) {
+                keysList[0].is_default = true;
+                defaultKey = keysList[0];
+            }
 
-            if (error) throw error;
+            const primaryKey = defaultKey?.pix_key || defaultKey?.key || settings.pix_key || '';
+            const primaryBeneficiary = defaultKey?.holder_name || defaultKey?.beneficiary || settings.pix_beneficiary || '';
+
+            const { usedLegacyFallback } = await saveUserPixSettings({
+                user_id: user.id,
+                pix_key: primaryKey,
+                pix_beneficiary: primaryBeneficiary,
+                city: settings.city,
+                state: settings.state,
+                pix_keys: keysList,
+            });
+
+            setSettings(prev => ({
+                ...prev,
+                pix_key: primaryKey,
+                pix_beneficiary: primaryBeneficiary,
+                pix_keys: keysList
+            }));
+
+            if (usedLegacyFallback && keysList.length > 1) {
+                setAlertModal({
+                    open: true,
+                    title: 'Chave Principal Salva!',
+                    message: 'A sua chave PIX principal foi salva com sucesso!\n\nPara ativar o salvamento de múltiplas chaves no banco de dados, execute este comando no SQL Editor do seu Supabase:\n\nALTER TABLE user_settings ADD COLUMN IF NOT EXISTS pix_keys JSONB DEFAULT \'[]\'::jsonb;'
+                });
+            }
+
             setIsEditing(false);
             setCep(''); // Limpa o CEP após salvar, pois só armazenamos a cidade/uf
         } catch (error: any) {
@@ -487,43 +698,177 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
                     </section>
 
                     <section>
-                        <h3 className="text-xs font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-wider mb-3 pl-1">Dados de Pagamento</h3>
-                        <div className="bg-card-light dark:bg-card-dark rounded-2xl p-2 shadow-sm border border-gray-100 dark:border-gray-800">
-                            <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
-                                <div className="w-full">
-                                    <p className="text-xs text-gray-400 mb-0.5">Chave PIX</p>
-                                    {isEditing ? (
-                                        <input
-                                            value={settings.pix_key}
-                                            onChange={(e) => handleChange('pix_key', e.target.value)}
-                                            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 text-sm font-semibold text-primary dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
-                                            placeholder="CPF, Email ou Aleatória"
-                                        />
-                                    ) : (
-                                        <p className="font-semibold text-gray-800 dark:text-white">{settings.pix_key || 'Não definida'}</p>
-                                    )}
-                                </div>
-                                {!isEditing && (
-                                    <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg ml-3">
-                                        <CreditCard className="w-4 h-4 text-gray-500" />
-                                    </div>
+                        <div className="flex justify-between items-center mb-3 pl-1 pr-1">
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-xs font-bold text-text-sub-light dark:text-text-sub-dark uppercase tracking-wider">
+                                    Minhas Chaves PIX ({settings.pix_keys?.length || (settings.pix_key ? 1 : 0)})
+                                </h3>
+                                {(settings.pix_keys?.length || 0) > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowMaskedKeys(!showMaskedKeys)}
+                                        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                                        title={showMaskedKeys ? "Mostrar chaves completas" : "Ocultar chaves (privacidade)"}
+                                    >
+                                        {showMaskedKeys ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                    </button>
                                 )}
                             </div>
-                            <div className="p-3 flex justify-between items-center">
-                                <div className="w-full">
-                                    <p className="text-xs text-gray-400 mb-0.5">Beneficiário PIX</p>
-                                    {isEditing ? (
-                                        <input
-                                            value={settings.pix_beneficiary}
-                                            onChange={(e) => handleChange('pix_beneficiary', e.target.value)}
-                                            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2 text-sm font-semibold text-primary dark:text-white outline-none focus:ring-2 focus:ring-primary/20"
-                                            placeholder="Nome completo"
-                                        />
-                                    ) : (
-                                        <p className="font-semibold text-gray-800 dark:text-white">{settings.pix_beneficiary || 'Não definido'}</p>
-                                    )}
+                            <button
+                                type="button"
+                                onClick={handleOpenAddPixKey}
+                                className="px-2.5 py-1 bg-primary text-white text-xs font-bold rounded-xl shadow-sm flex items-center gap-1 active:scale-95 transition-transform"
+                            >
+                                <Plus className="w-3.5 h-3.5" /> Nova Chave
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            {(!settings.pix_keys || settings.pix_keys.length === 0) && !settings.pix_key ? (
+                                <div className="bg-card-light dark:bg-card-dark rounded-2xl p-5 shadow-sm border border-dashed border-gray-200 dark:border-gray-800 text-center space-y-2">
+                                    <CreditCard className="w-8 h-8 text-gray-400 mx-auto opacity-50" />
+                                    <p className="text-xs font-bold text-gray-600 dark:text-gray-300">Nenhuma chave PIX cadastrada</p>
+                                    <p className="text-[11px] text-gray-400">Cadastre suas chaves para receber pagamentos e gerar cobranças.</p>
+                                    <button
+                                        type="button"
+                                        onClick={handleOpenAddPixKey}
+                                        className="mt-2 px-3 py-1.5 bg-primary/10 text-primary dark:text-blue-400 text-xs font-bold rounded-xl hover:bg-primary/20 transition-colors inline-flex items-center gap-1"
+                                    >
+                                        <Plus className="w-3.5 h-3.5" /> Cadastrar Chave PIX
+                                    </button>
                                 </div>
-                            </div>
+                            ) : (
+                                (settings.pix_keys && settings.pix_keys.length > 0
+                                    ? settings.pix_keys
+                                    : [{
+                                        id: 'default',
+                                        key_type: 'outro' as const,
+                                        pix_key: settings.pix_key,
+                                        holder_name: settings.pix_beneficiary,
+                                        is_default: true,
+                                        key: settings.pix_key,
+                                        type: 'outro' as const,
+                                        beneficiary: settings.pix_beneficiary
+                                    }]
+                                ).map((k, idx) => {
+                                    const rawKey = k.pix_key || k.key || '';
+                                    const displayKey = showMaskedKeys ? maskSensitiveKey(rawKey, k.key_type || k.type || 'outro') : rawKey;
+                                    const typeLabel = (k.key_type || k.type || 'outro').toUpperCase();
+
+                                    return (
+                                        <div
+                                            key={k.id || idx}
+                                            className={`bg-card-light dark:bg-card-dark rounded-2xl p-4 shadow-sm border transition-all ${k.is_default
+                                                ? 'border-primary/40 dark:border-primary/50 ring-1 ring-primary/20 bg-blue-50/20 dark:bg-blue-900/10'
+                                                : 'border-gray-100 dark:border-gray-800'
+                                                }`}
+                                        >
+                                            {/* Header Tags */}
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                                                        {typeLabel === 'PHONE' ? 'CELULAR' : typeLabel === 'RANDOM' ? 'ALEATÓRIA' : typeLabel}
+                                                    </span>
+
+                                                    {k.financial_institution && (
+                                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                                                            <Building2 className="w-2.5 h-2.5" />
+                                                            {k.financial_institution.split('(')[0].trim()}
+                                                        </span>
+                                                    )}
+
+                                                    {k.is_default && (
+                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                                            <Star className="w-2.5 h-2.5 fill-current" /> Principal
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleCopyPixKey(rawKey, k.id)}
+                                                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                                                    title="Copiar Chave PIX"
+                                                >
+                                                    {copiedKeyId === k.id ? (
+                                                        <Check className="w-4 h-4 text-emerald-500" />
+                                                    ) : (
+                                                        <Copy className="w-4 h-4" />
+                                                    )}
+                                                </button>
+                                            </div>
+
+                                            {/* Key Value */}
+                                            <div className="mb-2">
+                                                <p className="font-bold text-sm text-gray-900 dark:text-white break-all tracking-tight font-mono">
+                                                    {displayKey || 'Não definida'}
+                                                </p>
+                                            </div>
+
+                                            {/* Details */}
+                                            <div className="pt-2 border-t border-gray-100 dark:border-gray-800/80 space-y-1 text-xs text-gray-500 dark:text-gray-400">
+                                                <p className="flex justify-between items-center">
+                                                    <span>Titular:</span>
+                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">
+                                                        {k.holder_name || k.beneficiary || settings.pix_beneficiary || 'Não definido'}
+                                                    </span>
+                                                </p>
+                                                {k.holder_document && (
+                                                    <p className="flex justify-between items-center text-[11px]">
+                                                        <span>CPF/CNPJ:</span>
+                                                        <span className="font-mono text-gray-700 dark:text-gray-300">
+                                                            {k.holder_document}
+                                                        </span>
+                                                    </p>
+                                                )}
+                                                {k.account_type && (
+                                                    <p className="flex justify-between items-center text-[11px]">
+                                                        <span>Conta:</span>
+                                                        <span className="capitalize text-gray-700 dark:text-gray-300">
+                                                            {k.account_type}
+                                                        </span>
+                                                    </p>
+                                                )}
+                                            </div>
+
+                                            {/* Card Actions */}
+                                            <div className="mt-3 pt-2.5 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
+                                                {!k.is_default ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSetDefaultKeyDirect(k.id)}
+                                                        className="text-[11px] font-semibold text-gray-500 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-1 transition-colors"
+                                                    >
+                                                        <Star className="w-3 h-3" /> Tornar Principal
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                                        <Check className="w-3 h-3" /> Chave Ativa
+                                                    </span>
+                                                )}
+
+                                                <div className="flex items-center gap-1.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleOpenEditPixKey(k)}
+                                                        className="p-1.5 text-gray-500 hover:text-primary hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-xs font-semibold flex items-center gap-1"
+                                                    >
+                                                        <Edit2 className="w-3.5 h-3.5" /> Editar
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDeleteConfirmKey(k)}
+                                                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                        title="Excluir Chave"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
                         </div>
                     </section>
 
@@ -735,23 +1080,176 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-8 relative z-10">
-                                    <div className="space-y-5">
-                                        <div>
-                                            <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Chave PIX (Para Recebimentos)</label>
-                                            {isEditing ? (
-                                                <input value={settings.pix_key} onChange={e => handleChange('pix_key', e.target.value)} className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-3 text-sm font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-primary/20 transition-all" placeholder="CPF, Email, Celular..." />
-                                            ) : (
-                                                <div className="p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl text-gray-900 dark:text-gray-200 font-medium text-sm flex justify-between items-center border border-transparent">
-                                                    {settings.pix_key || 'Não definida'} <CreditCard className="w-4 h-4 text-gray-400" />
-                                                </div>
-                                            )}
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <label className="text-xs font-bold text-gray-500 uppercase block">
+                                                    Chaves PIX ({settings.pix_keys?.length || (settings.pix_key ? 1 : 0)})
+                                                </label>
+                                                {(settings.pix_keys?.length || 0) > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowMaskedKeys(!showMaskedKeys)}
+                                                        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                                                        title={showMaskedKeys ? "Mostrar chaves completas" : "Ocultar chaves (privacidade)"}
+                                                    >
+                                                        {showMaskedKeys ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={handleOpenAddPixKey}
+                                                className="px-3 py-1.5 bg-primary text-white text-xs font-bold rounded-xl shadow-sm flex items-center gap-1.5 hover:bg-primary-dark active:scale-95 transition-all"
+                                            >
+                                                <Plus className="w-3.5 h-3.5" /> Nova Chave PIX
+                                            </button>
                                         </div>
-                                        <div>
-                                            <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Nome do Beneficiário PIX</label>
-                                            {isEditing ? (
-                                                <input value={settings.pix_beneficiary} onChange={e => handleChange('pix_beneficiary', e.target.value)} className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-3 text-sm font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-primary/20 transition-all" placeholder="Nome completo" />
+
+                                        <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1 no-scrollbar">
+                                            {(!settings.pix_keys || settings.pix_keys.length === 0) && !settings.pix_key ? (
+                                                <div className="p-6 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 text-center space-y-2">
+                                                    <CreditCard className="w-8 h-8 text-gray-400 mx-auto opacity-50" />
+                                                    <p className="text-xs font-bold text-gray-600 dark:text-gray-300">Nenhuma chave PIX cadastrada</p>
+                                                    <p className="text-[11px] text-gray-400">Cadastre suas chaves para automatizar cobranças.</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleOpenAddPixKey}
+                                                        className="mt-2 px-3 py-1.5 bg-primary/10 text-primary dark:text-blue-400 text-xs font-bold rounded-xl hover:bg-primary/20 transition-colors inline-flex items-center gap-1"
+                                                    >
+                                                        <Plus className="w-3.5 h-3.5" /> Cadastrar Primeira Chave
+                                                    </button>
+                                                </div>
                                             ) : (
-                                                <div className="p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl text-gray-900 dark:text-gray-200 font-medium text-sm border border-transparent">{settings.pix_beneficiary || 'Não definido'}</div>
+                                                (settings.pix_keys && settings.pix_keys.length > 0
+                                                    ? settings.pix_keys
+                                                    : [{
+                                                        id: 'default',
+                                                        key_type: 'outro' as const,
+                                                        pix_key: settings.pix_key,
+                                                        holder_name: settings.pix_beneficiary,
+                                                        is_default: true,
+                                                        key: settings.pix_key,
+                                                        type: 'outro' as const,
+                                                        beneficiary: settings.pix_beneficiary
+                                                    }]
+                                                ).map((k, idx) => {
+                                                    const rawKey = k.pix_key || k.key || '';
+                                                    const displayKey = showMaskedKeys ? maskSensitiveKey(rawKey, k.key_type || k.type || 'outro') : rawKey;
+                                                    const typeLabel = (k.key_type || k.type || 'outro').toUpperCase();
+
+                                                    return (
+                                                        <div
+                                                            key={k.id || idx}
+                                                            className={`p-4 rounded-2xl border transition-all ${k.is_default
+                                                                ? 'bg-blue-50/40 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/60 ring-1 ring-primary/20'
+                                                                : 'bg-gray-50 dark:bg-gray-900/50 border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700'
+                                                                }`}
+                                                        >
+                                                            {/* Header */}
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+                                                                        {typeLabel === 'PHONE' ? 'CELULAR' : typeLabel === 'RANDOM' ? 'ALEATÓRIA' : typeLabel}
+                                                                    </span>
+
+                                                                    {k.financial_institution && (
+                                                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center gap-1 border border-blue-100 dark:border-blue-800">
+                                                                            <Building2 className="w-2.5 h-2.5" />
+                                                                            {k.financial_institution.split('(')[0].trim()}
+                                                                        </span>
+                                                                    )}
+
+                                                                    {k.is_default && (
+                                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center gap-1 border border-emerald-200 dark:border-emerald-800">
+                                                                            <Star className="w-2.5 h-2.5 fill-current" /> Principal
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleCopyPixKey(rawKey, k.id)}
+                                                                    className="p-1 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                                                                    title="Copiar Chave PIX"
+                                                                >
+                                                                    {copiedKeyId === k.id ? (
+                                                                        <Check className="w-4 h-4 text-emerald-500" />
+                                                                    ) : (
+                                                                        <Copy className="w-4 h-4" />
+                                                                    )}
+                                                                </button>
+                                                            </div>
+
+                                                            {/* Key */}
+                                                            <p className="font-bold text-sm text-gray-900 dark:text-white break-all mb-1.5 font-mono">
+                                                                {displayKey || 'Não definida'}
+                                                            </p>
+
+                                                            {/* Details */}
+                                                            <div className="pt-2 border-t border-gray-200/60 dark:border-gray-800 space-y-1 text-xs text-gray-500 dark:text-gray-400">
+                                                                <p className="flex justify-between items-center">
+                                                                    <span>Titular:</span>
+                                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">
+                                                                        {k.holder_name || k.beneficiary || settings.pix_beneficiary || 'Não definido'}
+                                                                    </span>
+                                                                </p>
+                                                                {k.holder_document && (
+                                                                    <p className="flex justify-between items-center text-[11px]">
+                                                                        <span>Documento:</span>
+                                                                        <span className="font-mono text-gray-700 dark:text-gray-300">
+                                                                            {k.holder_document}
+                                                                        </span>
+                                                                    </p>
+                                                                )}
+                                                                {k.account_type && (
+                                                                    <p className="flex justify-between items-center text-[11px]">
+                                                                        <span>Tipo de Conta:</span>
+                                                                        <span className="capitalize text-gray-700 dark:text-gray-300">
+                                                                            {k.account_type}
+                                                                        </span>
+                                                                    </p>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Actions */}
+                                                            <div className="mt-3 pt-2.5 border-t border-gray-200/60 dark:border-gray-800 flex items-center justify-between gap-2">
+                                                                {!k.is_default ? (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleSetDefaultKeyDirect(k.id)}
+                                                                        className="text-xs font-semibold text-gray-500 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-1 transition-colors"
+                                                                    >
+                                                                        <Star className="w-3.5 h-3.5" /> Tornar Principal
+                                                                    </button>
+                                                                ) : (
+                                                                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                                                        <Check className="w-3.5 h-3.5" /> Chave Principal
+                                                                    </span>
+                                                                )}
+
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleOpenEditPixKey(k)}
+                                                                        className="px-2.5 py-1 text-gray-600 dark:text-gray-300 hover:text-primary hover:bg-white dark:hover:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors text-xs font-semibold flex items-center gap-1 shadow-2xs"
+                                                                    >
+                                                                        <Edit2 className="w-3 h-3" /> Editar
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setDeleteConfirmKey(k)}
+                                                                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                                        title="Excluir Chave"
+                                                                    >
+                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
                                             )}
                                         </div>
                                     </div>
@@ -957,6 +1455,39 @@ export const Profile: React.FC<ProfileProps> = ({ onLogout, userEmail, onNavigat
                                     {alertModal.confirmText || 'Confirmar'}
                                 </button>
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Confirmação de Exclusão de Chave PIX */}
+            {deleteConfirmKey && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-gray-100 dark:border-gray-800 text-center">
+                        <div className="w-14 h-14 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                            <Trash2 className="w-7 h-7" />
+                        </div>
+                        <h3 className="text-lg font-black text-gray-900 dark:text-white mb-1">
+                            Excluir Chave PIX?
+                        </h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                            Você está prestes a remover a chave <strong className="text-gray-700 dark:text-gray-200">{deleteConfirmKey.pix_key || deleteConfirmKey.key}</strong>. Esta ação não poderá ser desfeita.
+                        </p>
+                        <div className="flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setDeleteConfirmKey(null)}
+                                className="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-300 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmDeletePixKey}
+                                className="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-md shadow-red-600/20 transition-colors"
+                            >
+                                Sim, Excluir
+                            </button>
                         </div>
                     </div>
                 </div>

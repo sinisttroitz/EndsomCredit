@@ -1,5 +1,38 @@
 import { Loan, Installment, InstallmentFine } from '../types';
 
+// Feriados Nacionais Brasileiros (Fixos e Móveis)
+const FIXED_HOLIDAYS_MM_DD = new Set([
+    '01-01', // Ano Novo
+    '04-21', // Tiradentes
+    '05-01', // Dia do Trabalho
+    '09-07', // Independência do Brasil
+    '10-12', // Nossa Senhora Aparecida
+    '11-02', // Finados
+    '11-15', // Proclamação da República
+    '11-20', // Consciência Negra (Lei 14.759/2023)
+    '12-25', // Natal
+]);
+
+const MOBILE_HOLIDAYS_YYYY_MM_DD = new Set([
+    // 2026
+    '2026-02-16', '2026-02-17', '2026-04-03', '2026-06-04',
+    // 2027
+    '2027-02-08', '2027-02-09', '2027-03-26', '2027-05-27',
+    // 2028
+    '2028-02-28', '2028-02-29', '2028-04-14', '2028-06-15',
+]);
+
+export const isNationalHoliday = (date: Date): boolean => {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    if (FIXED_HOLIDAYS_MM_DD.has(`${month}-${day}`)) return true;
+
+    const yyyy = date.getFullYear();
+    if (MOBILE_HOLIDAYS_YYYY_MM_DD.has(`${yyyy}-${month}-${day}`)) return true;
+
+    return false;
+};
+
 export const generateInstallments = (loanData: Loan, fines: InstallmentFine[] = []): Installment[] => {
     const count = loanData.installments || 1;
     const installmentValue = loanData.installment_value || (loanData.amount / count);
@@ -69,6 +102,10 @@ export const generateInstallments = (loanData: Loan, fines: InstallmentFine[] = 
                         continue;
                     }
                     if (loanData.skip_sunday && day === 0) {
+                        date.setDate(date.getDate() + 1);
+                        continue;
+                    }
+                    if (loanData.skip_holidays && isNationalHoliday(date)) {
                         date.setDate(date.getDate() + 1);
                         continue;
                     }

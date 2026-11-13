@@ -14,6 +14,7 @@ interface NewLoanProps {
     frequency?: string;
     skipSaturday?: boolean;
     skipSunday?: boolean;
+    skipHolidays?: boolean;
   };
 }
 
@@ -45,7 +46,8 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   const [clientId, setClientId] = useState<string | null>(preSelectedClientId);
   const [frequency, setFrequency] = useState(initialData?.frequency || 'Diária');
   const [skipSaturday, setSkipSaturday] = useState(initialData?.skipSaturday || false);
-  const [skipSunday, setSkipSunday] = useState(initialData?.skipSunday || false);
+  const [skipSunday, setSkipSunday] = useState(initialData?.skipSunday ?? true);
+  const [skipHolidays, setSkipHolidays] = useState(initialData?.skipHolidays ?? true);
   const [amount, setAmount] = useState(initialData?.amount?.toString() || '5000');
   const [interestRate, setInterestRate] = useState(initialData?.interestRate?.toString() || '30');
   const [installments, setInstallments] = useState(initialData?.installments || 12);
@@ -151,6 +153,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
             frequency: frequency,
             skip_saturday: skipSaturday,
             skip_sunday: skipSunday,
+            skip_holidays: skipHolidays,
             progress: 0,
             amount_paid: 0
         }]);
@@ -337,17 +340,23 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                   ))}
                 </div>
                 {frequency === 'Diária' && (
-                  <div className="mt-4 flex gap-3">
-                    <div className="flex-1 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700">
-                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Pular Sábado</span>
-                      <div onClick={() => setSkipSaturday(!skipSaturday)} className={`w-10 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipSaturday ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}>
-                        <div className={`bg-white dark:bg-gray-900 w-4 h-4 rounded-full shadow-md transform duration-300 ease-in-out ${skipSaturday ? 'translate-x-[18px]' : 'translate-x-0'}`}></div>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-2.5 py-2.5 rounded-xl border border-gray-100 dark:border-gray-700">
+                      <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Sábado</span>
+                      <div onClick={() => setSkipSaturday(!skipSaturday)} className={`w-8 h-4 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipSaturday ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <div className={`bg-white dark:bg-gray-900 w-3 h-3 rounded-full shadow-md transform duration-300 ease-in-out ${skipSaturday ? 'translate-x-[14px]' : 'translate-x-0'}`}></div>
                       </div>
                     </div>
-                    <div className="flex-1 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700">
-                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Pular Domingo</span>
-                      <div onClick={() => setSkipSunday(!skipSunday)} className={`w-10 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipSunday ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}>
-                        <div className={`bg-white dark:bg-gray-900 w-4 h-4 rounded-full shadow-md transform duration-300 ease-in-out ${skipSunday ? 'translate-x-[18px]' : 'translate-x-0'}`}></div>
+                    <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-2.5 py-2.5 rounded-xl border border-gray-100 dark:border-gray-700">
+                      <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Domingo</span>
+                      <div onClick={() => setSkipSunday(!skipSunday)} className={`w-8 h-4 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipSunday ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <div className={`bg-white dark:bg-gray-900 w-3 h-3 rounded-full shadow-md transform duration-300 ease-in-out ${skipSunday ? 'translate-x-[14px]' : 'translate-x-0'}`}></div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-2.5 py-2.5 rounded-xl border border-gray-100 dark:border-gray-700">
+                      <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Feriados</span>
+                      <div onClick={() => setSkipHolidays(!skipHolidays)} className={`w-8 h-4 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipHolidays ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                        <div className={`bg-white dark:bg-gray-900 w-3 h-3 rounded-full shadow-md transform duration-300 ease-in-out ${skipHolidays ? 'translate-x-[14px]' : 'translate-x-0'}`}></div>
                       </div>
                     </div>
                   </div>
@@ -604,7 +613,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
               ))}
             </div>
             {frequency === 'Diária' && (
-                <div className="mt-4 flex gap-3">
+                <div className="mt-4 flex gap-2">
                     <div className="flex-1 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-3 py-2.5 rounded-xl border border-gray-100 dark:border-gray-700">
                         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Sáb</span>
                         <div 
@@ -621,6 +630,15 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                             className={`w-10 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipSunday ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}
                         >
                             <div className={`bg-white dark:bg-gray-900 w-4 h-4 rounded-full shadow-md transform duration-300 ease-in-out ${skipSunday ? 'translate-x-[18px]' : 'translate-x-0'}`}></div>
+                        </div>
+                    </div>
+                    <div className="flex-1 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-3 py-2.5 rounded-xl border border-gray-100 dark:border-gray-700">
+                        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Feriados</span>
+                        <div 
+                            onClick={() => setSkipHolidays(!skipHolidays)}
+                            className={`w-10 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors duration-300 ${skipHolidays ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        >
+                            <div className={`bg-white dark:bg-gray-900 w-4 h-4 rounded-full shadow-md transform duration-300 ease-in-out ${skipHolidays ? 'translate-x-[18px]' : 'translate-x-0'}`}></div>
                         </div>
                     </div>
                 </div>

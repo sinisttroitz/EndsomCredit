@@ -12,7 +12,7 @@ interface BottomNavProps {
 export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onNavigate, isMenuOpen, setIsMenuOpen }) => {
 
     // Hide nav on specific screens that should be full screen or have their own flow
-    if (currentView === 'login' || currentView === 'new-loan' || currentView === 'new-client' || currentView === 'edit-client' || currentView === 'user-notifications') return null;
+    if (currentView === 'login' || currentView === 'new-loan' || currentView === 'new-client' || currentView === 'edit-client' || currentView === 'user-notifications' || currentView === 'pix-key-form') return null;
 
     return (
         <>

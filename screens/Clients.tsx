@@ -2,13 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Search, SlidersHorizontal, ChevronRight, RefreshCw, Plus, Filter, MoreVertical, Mail, Phone, MessageSquare, MapPin, X, ChevronLeft, Calendar as CalendarIcon, DollarSign, User, MessageCircle, CreditCard, FileText, ExternalLink, Bell, Link2, UserPlus, Check, XCircle, Copy, Share2, Eye, Clock } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Client, Loan, ClientRegistration } from '../types';
-import { generateInstallments } from '../utils/loanUtils';
+import { generateInstallments, isNationalHoliday } from '../utils/loanUtils';
 import { getOrCreateRegistrationLink, fetchPendingRegistrations, approveRegistration, rejectRegistration } from '../utils/registrationUtils';
+import { AdditionalContactsList } from '../components/AdditionalContactsInput';
+import { formatAddressSummary } from '../utils/clientUtils';
 
 interface ClientsProps {
     onClientSelect: (clientId: string) => void;
     onEditClient?: (clientId: string) => void;
     onNewLoan?: (clientId: string) => void;
+    onLoanSelect?: (loanId: string) => void;
 }
 
 interface ExtendedClient extends Client {
@@ -21,7 +24,7 @@ interface ExtendedClient extends Client {
     loans: Loan[];
 }
 
-export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, onNewLoan }) => {
+export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, onNewLoan, onLoanSelect }) => {
     const [filter, setFilter] = useState<'all' | 'active' | 'late'>('all');
     const [clients, setClients] = useState<ExtendedClient[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -154,6 +157,10 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                             date.setDate(date.getDate() + 1);
                             continue;
                         }
+                        if (loan.skip_holidays && isNationalHoliday(date)) {
+                            date.setDate(date.getDate() + 1);
+                            continue;
+                        }
                         break;
                     }
                 }
@@ -231,6 +238,10 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                             continue;
                         }
                         if (loan.skip_sunday && day === 0) {
+                            date.setDate(date.getDate() + 1);
+                            continue;
+                        }
+                        if (loan.skip_holidays && isNationalHoliday(date)) {
                             date.setDate(date.getDate() + 1);
                             continue;
                         }
@@ -491,11 +502,16 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                         {/* Linha inferior */}
                                         <div className="flex items-center justify-between">
                                             {/* Saldo Devedor */}
-                                            <div className="flex items-center gap-1.5">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
                                                 <span className="text-zinc-600 dark:text-zinc-400 text-[10px] font-medium">Saldo Devedor</span>
                                                 <span className="text-sm font-bold text-zinc-900 dark:text-white">
                                                     R$ {client.debt?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </span>
+                                                {Number(client.credit_balance) > 0 && (
+                                                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded">
+                                                        +{Number(client.credit_balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} crédito
+                                                    </span>
+                                                )}
                                             </div>
 
                                             {/* Pill + Seta alinhados à direita */}
@@ -647,6 +663,11 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                                 <p className="text-base font-black text-gray-900 dark:text-white">
                                                     R$ {client.debt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </p>
+                                                {Number(client.credit_balance) > 0 && (
+                                                    <span className="inline-block text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full mt-0.5">
+                                                        +{Number(client.credit_balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} crédito
+                                                    </span>
+                                                )}
                                             </div>
 
 
@@ -734,10 +755,18 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                 <div className="space-y-2">
                                     {selectedClientDesktop.loans && selectedClientDesktop.loans.length > 0 ? (
                                         selectedClientDesktop.loans.map((loan) => (
-                                            <div key={loan.id} className="bg-[#1E1E24] text-white p-3.5 rounded-xl relative overflow-hidden">
+                                            <div
+                                                key={loan.id}
+                                                onClick={() => onLoanSelect?.(loan.id)}
+                                                className="bg-[#1E1E24] hover:bg-[#25252e] border border-transparent hover:border-gray-700/60 text-white p-3.5 rounded-xl relative overflow-hidden cursor-pointer transition-all duration-200 group active:scale-[0.99] shadow-sm"
+                                                title="Clique para abrir os detalhes deste contrato"
+                                            >
                                                 <div className="flex justify-between items-start mb-2.5">
                                                     <div>
-                                                        <span className="text-[9px] text-gray-400 block uppercase font-bold">Contrato #{loan.id.substring(0, 6)}</span>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="text-[9px] text-gray-400 block uppercase font-bold">Contrato #{loan.id.substring(0, 6)}</span>
+                                                            <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-white group-hover:translate-x-0.5 transition-all" />
+                                                        </div>
                                                         <span className="text-base font-bold">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                                     </div>
                                                     <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${loan.status === 'active' ? 'bg-green-500/20 text-green-400' :
@@ -961,11 +990,21 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                         </div>
                                     </div>
 
+                                    {/* Additional Contacts */}
+                                    {selectedRegistration.additional_contacts && selectedRegistration.additional_contacts.length > 0 && (
+                                        <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl space-y-2">
+                                            <span className="text-[9px] text-gray-400 uppercase font-bold block">Contatos Adicionais</span>
+                                            <AdditionalContactsList contacts={selectedRegistration.additional_contacts} />
+                                        </div>
+                                    )}
+
                                     {/* Address */}
                                     {selectedRegistration.address && (
                                         <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-xl">
                                             <span className="text-[9px] text-gray-400 uppercase font-bold">Endereço</span>
-                                            <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedRegistration.address}{selectedRegistration.number ? `, ${selectedRegistration.number}` : ''}</p>
+                                            <p className="text-sm font-bold text-gray-900 dark:text-white">
+                                                {formatAddressSummary(selectedRegistration)}
+                                            </p>
                                             <p className="text-xs text-gray-500">{selectedRegistration.city}{selectedRegistration.state ? ` - ${selectedRegistration.state}` : ''} {selectedRegistration.cep ? `• ${selectedRegistration.cep}` : ''}</p>
                                             {selectedRegistration.complement && <p className="text-xs text-gray-400 mt-1">{selectedRegistration.complement}</p>}
                                         </div>
