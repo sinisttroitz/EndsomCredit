@@ -7,6 +7,7 @@ import { processRecurringInterest } from '../utils/interestUtils';
 import { Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
 import * as XLSX from 'xlsx';
 import { ShareReportModal } from '../components/ShareReportModal';
+import { openWhatsApp } from '../utils/whatsappUtils';
 
 interface ReportsProps {
     onBack: () => void;
@@ -373,7 +374,7 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
             return;
         }
         const text = `Olá ${name}, identificamos pendências em seu empréstimo no valor de R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Gostaríamos de conversar para regularizar sua situação.`;
-        window.open(`https://wa.me/55${phone.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`, '_blank');
+        openWhatsApp(phone, text);
     };
 
     const exportToExcel = () => {

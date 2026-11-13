@@ -6,6 +6,7 @@ import {
   createEmptyContact,
   maskPhoneValue,
 } from '../utils/clientUtils';
+import { openWhatsApp } from '../utils/whatsappUtils';
 
 interface AdditionalContactsInputProps {
   contacts: ClientContact[];
@@ -203,14 +204,13 @@ export const AdditionalContactsList: React.FC<AdditionalContactsListProps> = ({
           className={`flex items-center justify-between gap-2 text-xs ${itemClassName}`}
         >
           {interactiveLinks ? (
-            <a
-              href={`https://wa.me/55${contact.phone.replace(/\D/g, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+            <button
+              type="button"
+              onClick={() => openWhatsApp(contact.phone)}
+              className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
             >
               {contact.phone}
-            </a>
+            </button>
           ) : (
             <span className={`font-bold ${textCls}`}>{contact.phone}</span>
           )}

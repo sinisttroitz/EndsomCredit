@@ -5,6 +5,7 @@ import { Client, Loan } from '../types';
 import { AdditionalContactsList } from '../components/AdditionalContactsInput';
 import { formatAddressSummary } from '../utils/clientUtils';
 import { isNationalHoliday } from '../utils/loanUtils';
+import { openWhatsApp } from '../utils/whatsappUtils';
 
 interface ClientDetailsProps {
     clientId: string | null;
@@ -304,14 +305,13 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                 <div>
                                     <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-tight">Telefone</p>
                                     {client.phone ? (
-                                        <a
-                                            href={`https://wa.me/55${client.phone.replace(/\D/g, '')}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                                        <button
+                                            type="button"
+                                            onClick={() => openWhatsApp(client.phone)}
+                                            className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1 text-left"
                                         >
                                             {client.phone}
-                                        </a>
+                                        </button>
                                     ) : (
                                         <p className="text-sm font-semibold text-gray-800 dark:text-white">Não informado</p>
                                     )}
@@ -496,13 +496,17 @@ export const ClientDetails: React.FC<ClientDetailsProps> = ({ clientId, onBack, 
                                         </div>
                                         <div className="flex-1">
                                             <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mb-1">WhatsApp</p>
-                                            <a
-                                                href={`https://wa.me/55${client.phone?.replace(/\D/g, '')}`}
-                                                target="_blank"
-                                                className="text-sm font-bold text-gray-900 dark:text-white hover:text-green-600 transition-colors"
-                                            >
-                                                {client.phone || '-'}
-                                            </a>
+                                            {client.phone ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openWhatsApp(client.phone)}
+                                                    className="text-sm font-bold text-gray-900 dark:text-white hover:text-green-600 transition-colors text-left"
+                                                >
+                                                    {client.phone}
+                                                </button>
+                                            ) : (
+                                                <span className="text-sm font-bold text-gray-900 dark:text-white">-</span>
+                                            )}
                                         </div>
                                     </div>
                                     {client.additional_contacts && client.additional_contacts.length > 0 && (

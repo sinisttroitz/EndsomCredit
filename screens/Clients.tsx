@@ -6,6 +6,7 @@ import { generateInstallments, isNationalHoliday } from '../utils/loanUtils';
 import { getOrCreateRegistrationLink, fetchPendingRegistrations, approveRegistration, rejectRegistration } from '../utils/registrationUtils';
 import { AdditionalContactsList } from '../components/AdditionalContactsInput';
 import { formatAddressSummary } from '../utils/clientUtils';
+import { openWhatsApp } from '../utils/whatsappUtils';
 
 interface ClientsProps {
     onClientSelect: (clientId: string) => void;
@@ -87,7 +88,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
 
     const handleShareWhatsApp = () => {
         const text = `Olá! Use este link para fazer seu pré-cadastro:\n${registrationLink}`;
-        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+        openWhatsApp(undefined, text);
     };
 
     const handleApprove = async (reg: ClientRegistration) => {
@@ -712,7 +713,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                     <button
                                         onClick={() => {
                                             if (selectedClientDesktop.phone) {
-                                                window.open(`https://wa.me/55${selectedClientDesktop.phone.replace(/\D/g, '')}`, '_blank');
+                                                openWhatsApp(selectedClientDesktop.phone);
                                             }
                                         }}
                                         className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 transition-colors flex items-center gap-1.5 px-2.5"

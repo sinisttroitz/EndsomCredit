@@ -548,7 +548,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                                         <span className="text-white/40 text-[10px] font-medium tracking-normal truncate">capital emprestado</span>
                                     </div>
                                     <div className="flex items-center gap-1.5 min-w-0">
-                                        <span className="text-white text-[20px] xs:text-[23px] sm:text-[28px] font-manrope font-black tracking-tight leading-none truncate">
+                                        <span className="text-white text-[20px] xs:text-[23px] sm:text-[28px] font-manrope font-black tracking-tight leading-none whitespace-nowrap">
                                             {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
                                         </span>
                                         <button onClick={() => setHideValues(!hideValues)} className="text-white/40 hover:text-white transition-colors shrink-0 p-1 -m-1">
@@ -569,7 +569,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                                         <span className="text-teal-100/50 text-[10px] font-medium tracking-normal truncate">total a receber</span>
                                     </div>
                                     <div className="flex items-center gap-1.5 min-w-0">
-                                        <span className="text-white text-[20px] xs:text-[23px] sm:text-[28px] font-manrope font-black tracking-tight leading-none truncate">
+                                        <span className="text-white text-[20px] xs:text-[23px] sm:text-[28px] font-manrope font-black tracking-tight leading-none whitespace-nowrap">
                                             {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalToReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
                                         </span>
                                         <button onClick={() => setHideValues(!hideValues)} className="text-teal-100/40 hover:text-white transition-colors shrink-0 p-1 -m-1">

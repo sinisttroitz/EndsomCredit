@@ -35,6 +35,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
     const [selectedBatch, setSelectedBatch] = useState<Installment[]>([]);
     const [batchTotal, setBatchTotal] = useState(0);
 
+    // Reorganize sequential notice modal
+    const [reorganizeNotice, setReorganizeNotice] = useState<{
+        open: boolean;
+        title: string;
+        message: string;
+        confirmText: string;
+        onConfirm: () => void;
+    } | null>(null);
+
     useEffect(() => {
         loadPortalData();
     }, [token]);
@@ -66,18 +75,46 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
 
     const handlePayClick = (inst: Installment) => {
         if (!lenderSettings?.pix_key) return;
-        setSelectedInstallment(inst);
-        const payload = generatePixPayload(
-            lenderSettings.pix_key,
-            lenderSettings.pix_beneficiary || 'Recebedor',
-            lenderSettings.city || 'Cidade',
-            inst.value,
-            loan?.id.substring(0, 20) || 'PORTAL'
-        );
-        setPixPayload(payload);
-        setPixCopied(false);
-        setPaymentError(null);
-        setView('payment');
+
+        // 1. Obter parcelas não pagas em ordem cronológica
+        const pendingInstallments = installmentsList.filter(i => i.status !== 'paid');
+        if (pendingInstallments.length === 0) return;
+
+        const oldestPending = pendingInstallments[0];
+
+        const proceedWithSingle = (target: Installment) => {
+            setSelectedInstallment(target);
+            const payload = generatePixPayload(
+                lenderSettings.pix_key,
+                lenderSettings.pix_beneficiary || 'Recebedor',
+                lenderSettings.city || 'Cidade',
+                target.value,
+                loan?.id ? loan.id.replace(/-/g, '').substring(0, 25) : '***'
+            );
+            setPixPayload(payload);
+            setPixCopied(false);
+            setPaymentError(null);
+            setSelectedBatch([]);
+            setBatchTotal(0);
+            setView('payment');
+        };
+
+        // Se o cliente clicou em uma parcela pulando anteriores não pagas
+        if (inst.number !== oldestPending.number) {
+            setReorganizeNotice({
+                open: true,
+                title: 'Prioridade Obrigatória',
+                message: `As parcelas mais antigas têm prioridade obrigatória de quitação.\n\nA parcela #${String(oldestPending.number).padStart(2, '0')} precisa ser quitada antes da parcela #${String(inst.number).padStart(2, '0')}.`,
+                confirmText: `Pagar Parcela #${String(oldestPending.number).padStart(2, '0')}`,
+                onConfirm: () => {
+                    setReorganizeNotice(null);
+                    proceedWithSingle(oldestPending);
+                }
+            });
+            return;
+        }
+
+        proceedWithSingle(inst);
     };
 
     const handleCopyPix = async () => {
@@ -145,19 +182,61 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
 
     const handleBatchPayClick = () => {
         if (!lenderSettings?.pix_key || selectedBatch.length === 0) return;
-        const total = selectedBatch.reduce((sum, i) => sum + i.value, 0);
-        const payload = generatePixPayload(
-            lenderSettings.pix_key,
-            lenderSettings.pix_beneficiary || 'Recebedor',
-            lenderSettings.city || 'Cidade',
-            total,
-            loan?.id.substring(0, 20) || 'PORTAL'
-        );
-        setPixPayload(payload);
-        setPixCopied(false);
-        setPaymentError(null);
-        setSelectedInstallment(null); // Using batch mode
-        setView('payment');
+
+        // 1. Obter todas as parcelas pendentes (não pagas) em ordem cronológica
+        const pendingInstallments = installmentsList.filter(i => i.status !== 'paid');
+        if (pendingInstallments.length === 0) return;
+
+        const count = selectedBatch.length;
+        // As N primeiras parcelas pendentes que DEVEM ser pagas prioritariamente
+        const targetInstallments = pendingInstallments.slice(0, count);
+        const targetNumbers = targetInstallments.map(i => i.number);
+
+        // 2. Verificar se o cliente pulou alguma parcela mais antiga
+        const selectedSorted = selectedBatch.map(i => i.number).sort((a, b) => a - b);
+        const targetSorted = [...targetNumbers].sort((a, b) => a - b);
+        const hasSkipped = selectedSorted.some((num, idx) => num !== targetSorted[idx]);
+
+        const proceedWithTargets = (targets: Installment[]) => {
+            const total = targets.reduce((sum, i) => sum + i.value, 0);
+            const payload = generatePixPayload(
+                lenderSettings.pix_key,
+                lenderSettings.pix_beneficiary || 'Recebedor',
+                lenderSettings.city || 'Cidade',
+                total,
+                loan?.id ? loan.id.replace(/-/g, '').substring(0, 25) : '***'
+            );
+            setSelectedBatch(targets);
+            setBatchTotal(total);
+            setPixPayload(payload);
+            setPixCopied(false);
+            setPaymentError(null);
+            setSelectedInstallment(null); // Using batch mode
+            setView('payment');
+        };
+
+        if (hasSkipped) {
+            // Identificar quais parcelas mais antigas tinham ficado para trás
+            const skippedNumbers = targetNumbers.filter(n => !selectedSorted.includes(n));
+            const skippedStr = skippedNumbers.map(n => `#${String(n).padStart(2, '0')}`).join(', ');
+            const targetStr = targetInstallments.length === 1
+                ? `parcela #${String(targetInstallments[0].number).padStart(2, '0')}`
+                : `parcelas #${String(targetInstallments[0].number).padStart(2, '0')} a #${String(targetInstallments[targetInstallments.length - 1].number).padStart(2, '0')}`;
+
+            setReorganizeNotice({
+                open: true,
+                title: 'Seleção Reorganizada',
+                message: `As parcelas mais antigas têm prioridade obrigatória de quitação.\n\nComo a(s) parcela(s) ${skippedStr} não haviam sido marcadas, sua seleção de ${count} parcela(s) foi reorganizada para quitar as mais antigas em ordem cronológica (${targetStr}).`,
+                confirmText: 'Pagar as mais antigas',
+                onConfirm: () => {
+                    setReorganizeNotice(null);
+                    proceedWithTargets(targetInstallments);
+                }
+            });
+            return;
+        }
+
+        proceedWithTargets(selectedBatch);
     };
 
     const selectAllPayable = () => {
@@ -344,7 +423,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
         <div className="min-h-screen bg-[#F3F4F6] flex flex-col">
             {/* Header */}
             <header className="bg-black text-white px-6 pt-10 pb-12 rounded-b-[40px] relative z-0">
-                <p className="text-[10px] font-bold text-white/50 uppercase tracking-[0.2em] mb-1">{lenderName}</p>
                 <h1 className="text-xl font-bold">Olá, {loan.client?.name || 'Cliente'}</h1>
                 <p className="text-xs text-white/50 mt-1">Acompanhe seu empréstimo abaixo</p>
             </header>
@@ -374,38 +452,51 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                 </div>
 
                 {/* Progress Card */}
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 mb-5">
-                    <h3 className="text-sm font-bold text-gray-900 mb-5">Status do Pagamento</h3>
-                    <div className="flex items-center gap-5">
+                <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-gray-100 mb-5">
+                    <h3 className="text-sm font-bold text-gray-900 mb-4">Status do Pagamento</h3>
+
+                    {/* Top Row: Gauge + Progress Info */}
+                    <div className="flex items-center gap-4">
                         <div
-                            className="w-24 h-24 rounded-full flex items-center justify-center relative shadow-inner shrink-0"
+                            className="w-20 h-20 rounded-full flex items-center justify-center relative shadow-inner shrink-0"
                             style={{ background: `conic-gradient(${isLate ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)` } as React.CSSProperties}
                         >
-                            <div className="absolute inset-2.5 rounded-full bg-white flex items-center justify-center shadow-xs">
-                                <span className="text-xl font-bold text-gray-900">{percentage}%</span>
+                            <div className="absolute inset-2 rounded-full bg-white flex items-center justify-center shadow-xs">
+                                <span className="text-lg font-black text-gray-900">{percentage}%</span>
                             </div>
                         </div>
-                        <div className="flex-1 space-y-2.5 min-w-0">
-                            <div className="grid grid-cols-2 gap-2">
-                                <div className="p-2.5 rounded-2xl bg-gray-50 border border-gray-100">
-                                    <p className="text-[9px] text-gray-400 uppercase font-bold tracking-wider truncate">Total Dívida</p>
-                                    <p className="text-sm font-black text-gray-900 mt-0.5 truncate">
-                                        R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </p>
-                                </div>
-                                <div className="p-2.5 rounded-2xl bg-emerald-50/60 border border-emerald-100">
-                                    <p className="text-[9px] text-emerald-600 uppercase font-bold tracking-wider truncate">Amortizado</p>
-                                    <p className="text-sm font-black text-emerald-600 mt-0.5 truncate">
-                                        R$ {totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="p-2 px-3 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-between">
-                                <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider">Parcelas Pagas</span>
-                                <span className="text-xs font-bold text-gray-900">
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Parcelas Pagas</span>
+                                <span className="text-xs font-black text-gray-900">
                                     {paidCount} de {totalCount} ({percentage}%)
                                 </span>
                             </div>
+                            <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
+                                <div
+                                    className={`h-full transition-all duration-300 ${isLate ? 'bg-red-500' : 'bg-emerald-500'}`}
+                                    style={{ width: `${percentage}%` }}
+                                />
+                            </div>
+                            <p className="text-[11px] text-gray-400 mt-1.5 font-medium">
+                                {totalCount - paidCount === 0 ? 'Contrato 100% quitado' : `${totalCount - paidCount} parcela(s) restante(s)`}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Bottom Row: Full-width Financial Cards (sem truncamento) */}
+                    <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-gray-100">
+                        <div className="p-3 rounded-2xl bg-gray-50 border border-gray-100 flex flex-col justify-between">
+                            <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1">Total da Dívida</p>
+                            <p className="text-sm sm:text-base font-black text-gray-900 whitespace-nowrap">
+                                R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                        </div>
+                        <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex flex-col justify-between">
+                            <p className="text-[10px] text-emerald-600 uppercase font-bold tracking-wider mb-1">Total Amortizado</p>
+                            <p className="text-sm sm:text-base font-black text-emerald-600 whitespace-nowrap">
+                                R$ {totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -414,33 +505,26 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 mb-5">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="text-sm font-bold text-gray-900">Suas Parcelas</h3>
-                        <div className="flex items-center gap-2">
-                            {lenderSettings?.pix_key && installmentsList.some(i => getStatusForInst(i) === 'late' || getStatusForInst(i) === 'pending') && (
-                                <button
-                                    onClick={() => {
-                                        if (isSelectionMode) {
-                                            setIsSelectionMode(false);
-                                            setSelectedBatch([]);
-                                            setBatchTotal(0);
-                                        } else {
-                                            setIsSelectionMode(true);
-                                            setShowAllInstallments(true);
-                                        }
-                                    }}
-                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${isSelectionMode
-                                        ? 'bg-gray-900 text-white'
-                                        : 'bg-gray-100 text-gray-600 border border-gray-200'
-                                        }`}
-                                >
-                                    {isSelectionMode ? 'Cancelar' : 'Selecionar'}
-                                </button>
-                            )}
-                            {!isSelectionMode && (
-                                <button onClick={() => setShowAllInstallments(!showAllInstallments)} className="text-xs text-blue-500 font-medium flex items-center gap-1">
-                                    {showAllInstallments ? <>Ver menos <ChevronUp className="w-3 h-3" /></> : <>Ver tudo <ChevronDown className="w-3 h-3" /></>}
-                                </button>
-                            )}
-                        </div>
+                        {lenderSettings?.pix_key && installmentsList.some(i => getStatusForInst(i) === 'late' || getStatusForInst(i) === 'pending') && (
+                            <button
+                                onClick={() => {
+                                    if (isSelectionMode) {
+                                        setIsSelectionMode(false);
+                                        setSelectedBatch([]);
+                                        setBatchTotal(0);
+                                    } else {
+                                        setIsSelectionMode(true);
+                                        setShowAllInstallments(true);
+                                    }
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${isSelectionMode
+                                    ? 'bg-gray-900 text-white'
+                                    : 'bg-gray-100 text-gray-600 border border-gray-200'
+                                    }`}
+                            >
+                                {isSelectionMode ? 'Cancelar' : 'Selecionar'}
+                            </button>
+                        )}
                     </div>
 
                     {/* Select All bar */}
@@ -532,6 +616,20 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                             );
                         })}
                     </div>
+
+                    {/* Botão Ver Mais / Ver Menos no final da lista */}
+                    {installmentsList.length > 6 && !isSelectionMode && (
+                        <button
+                            onClick={() => setShowAllInstallments(!showAllInstallments)}
+                            className="w-full mt-4 py-3 rounded-2xl bg-gray-50 hover:bg-gray-100 text-xs font-bold text-gray-700 border border-gray-100 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
+                        >
+                            {showAllInstallments ? (
+                                <>Ver menos <ChevronUp className="w-3.5 h-3.5 text-gray-400" /></>
+                            ) : (
+                                <>Ver todas as {installmentsList.length} parcelas <ChevronDown className="w-3.5 h-3.5 text-gray-400" /></>
+                            )}
+                        </button>
+                    )}
                 </div>
 
                 {/* No PIX Key Warning */}
@@ -562,6 +660,41 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({ token }) => {
                         >
                             <Check className="w-4 h-4" /> Pagar Tudo
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Aviso de Reorganização de Parcelas */}
+            {reorganizeNotice && reorganizeNotice.open && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                        onClick={() => setReorganizeNotice(null)}
+                    />
+                    <div className="relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl z-10 animate-in fade-in zoom-in duration-200">
+                        <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center mb-4 text-amber-600 border border-amber-100">
+                            <AlertTriangle className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-lg font-bold text-gray-900 mb-2">
+                            {reorganizeNotice.title}
+                        </h3>
+                        <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-line mb-6">
+                            {reorganizeNotice.message}
+                        </p>
+                        <div className="flex flex-col gap-2">
+                            <button
+                                onClick={reorganizeNotice.onConfirm}
+                                className="w-full py-3.5 rounded-2xl bg-gray-900 hover:bg-black text-white font-bold text-xs transition active:scale-[0.98]"
+                            >
+                                {reorganizeNotice.confirmText}
+                            </button>
+                            <button
+                                onClick={() => setReorganizeNotice(null)}
+                                className="w-full py-3 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs transition active:scale-[0.98]"
+                            >
+                                Cancelar e revisar
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

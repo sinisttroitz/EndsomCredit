@@ -68,6 +68,7 @@ export interface Installment {
     accumulatedInterest?: number;
     originalDate?: Date;
     fine?: InstallmentFine;
+    paidAt?: Date;
 }
 
 export interface LoanAmortization {

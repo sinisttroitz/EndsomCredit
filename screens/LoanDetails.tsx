@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle, Link2, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
+import { openWhatsApp } from '../utils/whatsappUtils';
 import { createPortalLink } from '../utils/portalUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment, InstallmentFine } from '../types';
@@ -172,6 +173,28 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
     const [selectedInstallmentForDetail, setSelectedInstallmentForDetail] = useState<Installment | null>(null);
 
+    const getStoredPaidDates = (currentLoanId: string): Record<number, string> => {
+        try {
+            const raw = localStorage.getItem(`agicred_paid_dates_${currentLoanId}`);
+            return raw ? JSON.parse(raw) : {};
+        } catch {
+            return {};
+        }
+    };
+
+    const savePaymentDates = (currentLoanId: string, installmentNumbers: number[], specificDateISO?: string) => {
+        try {
+            const existing = getStoredPaidDates(currentLoanId);
+            const nowISO = specificDateISO || new Date().toISOString();
+            installmentNumbers.forEach(num => {
+                existing[num] = nowISO;
+            });
+            localStorage.setItem(`agicred_paid_dates_${currentLoanId}`, JSON.stringify(existing));
+        } catch (e) {
+            console.error("Erro ao salvar datas reais de pagamento no localStorage:", e);
+        }
+    };
+
     const [userSettings, setUserSettings] = useState<{
         pix_key: string;
         pix_beneficiary: string;
@@ -206,13 +229,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         setProcessingRequest(true);
         try {
             // 1. Mark the request as confirmed
+            const confirmedDateISO = new Date().toISOString();
             await supabase
                 .from('client_payment_requests')
-                .update({ status: 'confirmed', resolved_at: new Date().toISOString() })
+                .update({ status: 'confirmed', resolved_at: confirmedDateISO })
                 .eq('id', request.id);
 
             // 2. Process the actual payment on the loan (same logic as executeBatchPayment)
             const instNumber = request.installment_number;
+            savePaymentDates(loan.id, [instNumber], confirmedDateISO);
             const targetInst = installmentsList.find(i => i.number === instNumber);
             
             if (targetInst) {
@@ -412,6 +437,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const numbersToPay = targetNumbers && targetNumbers.length > 0 ? targetNumbers : selectedInstallments;
             if (numbersToPay.length === 0) return;
 
+            savePaymentDates(loan.id, numbersToPay);
+
             const selectedInsts = installmentsList.filter(i => numbersToPay.includes(i.number));
             const totalPaidNow = selectedInsts.reduce((acc, curr) => acc + curr.value, 0);
             const baseValueToAbate = selectedInsts.reduce((acc, curr) => acc + curr.originalValue, 0);
@@ -546,6 +573,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             }
 
             const extraProfit = Math.max(0, paidAmount - baseValueToAbate);
+            savePaymentDates(loan.id, paidInsts.map(i => i.number));
             const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
 
             let newBalance = Number(loan.balance) - baseValueToAbate;
@@ -699,11 +727,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             }
         }
 
-        const encodedMessage = encodeURIComponent(message);
-        const phone = loan.client.phone.replace(/\D/g, '');
-        const whatsappUrl = `https://wa.me/55${phone}?text=${encodedMessage}`;
-
-        window.open(whatsappUrl, '_blank');
+        openWhatsApp(loan.client.phone, message);
         setShowChargeOptionsModal(false);
     };
 
@@ -780,7 +804,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             beneficiaryToUse,
             userSettings?.city || 'Cidade',
             amount,
-            loan?.id.substring(0, 20) // Transaction ID
+            loan?.id ? loan.id.replace(/-/g, '').substring(0, 25) : '***'
         );
         setPixPayload(payload);
     };
@@ -877,7 +901,56 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
             setLoan(finalData);
             const list = generateInstallments(finalData, finesList);
-            setInstallmentsList(list);
+
+            // Fetch confirmed client payment requests to recover exact confirmed payment timestamps
+            let confirmedRequests: any[] = [];
+            try {
+                const { data: reqs } = await supabase
+                    .from('client_payment_requests')
+                    .select('installment_number, resolved_at, created_at')
+                    .eq('loan_id', loanId)
+                    .eq('status', 'confirmed');
+                if (reqs) confirmedRequests = reqs;
+            } catch (e) { /* ignore */ }
+
+            const storedDates = getStoredPaidDates(loanId);
+            const mergedDates: Record<number, string> = { ...storedDates };
+
+            confirmedRequests.forEach((req: any) => {
+                if (req.installment_number && !mergedDates[req.installment_number]) {
+                    mergedDates[req.installment_number] = req.resolved_at || req.created_at;
+                }
+            });
+
+            const today = new Date();
+            const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+            const enrichedList = list.map(inst => {
+                if (inst.status === 'paid') {
+                    const savedDateStr = mergedDates[inst.number];
+                    let paidDate: Date;
+                    const dueZero = new Date(inst.date.getFullYear(), inst.date.getMonth(), inst.date.getDate());
+
+                    if (savedDateStr) {
+                        paidDate = new Date(savedDateStr);
+                    } else if (dueZero.getTime() > todayZero.getTime()) {
+                        // PARCELA ANTECIPADA: Se a data de vencimento está no futuro (ex: dia 16) e já consta como paga,
+                        // a quitação foi feita na data de hoje (ou no momento em que foi baixada)
+                        paidDate = today;
+                    } else {
+                        // Parcela no passado ou hoje
+                        paidDate = new Date(inst.date);
+                    }
+
+                    return {
+                        ...inst,
+                        paidAt: paidDate
+                    };
+                }
+                return inst;
+            });
+
+            setInstallmentsList(enrichedList);
         } catch (error) {
             console.error("Error fetching loan details", error);
         } finally {
@@ -1019,6 +1092,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             // Find the first unpaid installment to check for fines/late interest
             const firstUnpaid = installmentsList.find(i => i.status !== 'paid');
             if (!firstUnpaid) throw new Error("Nenhuma parcela pendente encontrada.");
+
+            savePaymentDates(loan.id, [firstUnpaid.number]);
 
             const installmentBaseValue = loan.installment_value || (loan.amount / (loan.installments || 1));
             const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
@@ -1253,15 +1328,20 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
         if (type === 'last') {
             const lastPaid = paidInstallments[paidInstallments.length - 1];
+            const stored = loan ? getStoredPaidDates(loan.id)[lastPaid.number] : null;
+            const today = new Date();
+            const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+            const dueZero = new Date(lastPaid.date.getFullYear(), lastPaid.date.getMonth(), lastPaid.date.getDate());
+            const realPaidDate: Date = lastPaid.paidAt || (stored ? new Date(stored) : (dueZero.getTime() > todayZero.getTime() ? today : lastPaid.date));
 
             // Prepare data for Image Receipt
             const data = {
                 amount: lastPaid.value,
-                date: lastPaid.date.toLocaleDateString('pt-BR'), // Reverted to use installment date as requested
+                date: realPaidDate.toLocaleDateString('pt-BR'),
                 clientName: loan.client?.name || 'Cliente',
                 contractId: loan.id.substring(0, 6).toUpperCase(),
                 installmentNumber: lastPaid.number,
-                dueDate: lastPaid.date.toLocaleDateString('pt-BR'),
+                dueDate: (lastPaid.originalDate || lastPaid.date).toLocaleDateString('pt-BR'),
                 status: 'paid',
                 originalValue: lastPaid.originalValue,
                 interest: lastPaid.accumulatedInterest,
@@ -1492,40 +1572,53 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 </div>
 
                 {/* Progress Card */}
-                <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 mb-6">
-                    <h3 className="text-sm font-bold text-primary dark:text-white mb-5">Status do Pagamento</h3>
-                    <div className="flex items-center gap-5">
+                <div className="bg-card-light dark:bg-card-dark p-5 sm:p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 mb-6">
+                    <h3 className="text-sm font-bold text-primary dark:text-white mb-4">Status do Pagamento</h3>
+                    
+                    {/* Top Row: Gauge + Progress Info */}
+                    <div className="flex items-center gap-4">
                         <div
-                            className="w-24 h-24 rounded-full flex items-center justify-center relative shadow-inner shrink-0"
+                            className="w-20 h-20 rounded-full flex items-center justify-center relative shadow-inner shrink-0"
                             style={{
                                 background: `conic-gradient(${displayStatus === 'late' ? '#EF4444' : '#10B981'} ${percentage}%, #E5E7EB 0)`
                             } as React.CSSProperties}
                         >
-                            <div className="absolute inset-2.5 rounded-full bg-card-light dark:bg-card-dark flex items-center justify-center shadow-xs">
-                                <span className="text-xl font-black text-primary dark:text-white">{percentage}%</span>
+                            <div className="absolute inset-2 rounded-full bg-card-light dark:bg-card-dark flex items-center justify-center shadow-xs">
+                                <span className="text-lg font-black text-primary dark:text-white">{percentage}%</span>
                             </div>
                         </div>
-                        <div className="flex-1 space-y-2.5 min-w-0">
-                            <div className="grid grid-cols-2 gap-2">
-                                <div className="p-2.5 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800">
-                                    <p className="text-[9px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider truncate">Total Dívida</p>
-                                    <p className="text-sm font-black text-gray-900 dark:text-white mt-0.5 truncate">
-                                        R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </p>
-                                </div>
-                                <div className="p-2.5 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
-                                    <p className="text-[9px] text-emerald-600 dark:text-emerald-400 uppercase font-bold tracking-wider truncate">Amortizado</p>
-                                    <p className="text-sm font-black text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
-                                        R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="p-2 px-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                                <span className="text-[9px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider">Parcelas Pagas</span>
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider">Parcelas Pagas</span>
                                 <span className="text-xs font-black text-gray-900 dark:text-white">
                                     {paidCount} de {totalCount} ({percentage}%)
                                 </span>
                             </div>
+                            <div className="w-full bg-gray-100 dark:bg-gray-800 h-2.5 rounded-full overflow-hidden">
+                                <div
+                                    className={`h-full transition-all duration-300 ${displayStatus === 'late' ? 'bg-red-500' : 'bg-emerald-500'}`}
+                                    style={{ width: `${percentage}%` }}
+                                />
+                            </div>
+                            <p className="text-[11px] text-gray-400 mt-1.5 font-medium">
+                                {totalCount - paidCount === 0 ? 'Contrato 100% quitado' : `${totalCount - paidCount} parcela(s) restante(s)`}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Bottom Row: Full-width Financial Cards (sem truncamento) */}
+                    <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                        <div className="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 flex flex-col justify-between">
+                            <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider mb-1">Total da Dívida</p>
+                            <p className="text-sm sm:text-base font-black text-gray-900 dark:text-white whitespace-nowrap">
+                                R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                        </div>
+                        <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 flex flex-col justify-between">
+                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-bold tracking-wider mb-1">Total Amortizado</p>
+                            <p className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                                R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -1997,14 +2090,14 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 <div className="flex-1 space-y-2.5 min-w-0">
                                     <div className="grid grid-cols-2 gap-2.5">
                                         <div className="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800">
-                                            <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider truncate">Total da Dívida</p>
-                                            <p className="text-sm xl:text-base font-black text-gray-900 dark:text-white mt-0.5 truncate">
+                                            <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider">Total da Dívida</p>
+                                            <p className="text-sm xl:text-base font-black text-gray-900 dark:text-white mt-0.5 whitespace-nowrap">
                                                 R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                         <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
-                                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-black tracking-wider truncate">Total Amortizado</p>
-                                            <p className="text-sm xl:text-base font-black text-emerald-600 dark:text-emerald-400 mt-0.5 truncate">
+                                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-black tracking-wider">Total Amortizado</p>
+                                            <p className="text-sm xl:text-base font-black text-emerald-600 dark:text-emerald-400 mt-0.5 whitespace-nowrap">
                                                 R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
                                         </div>
@@ -2201,20 +2294,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                         {installmentsList.length} parcela{installmentsList.length > 1 ? 's' : ''} no total • {paidCount} liquidada{paidCount !== 1 ? 's' : ''}
                                     </p>
                                 </div>
-                                {!isSelectionMode && installmentsList.length > 6 && (
-                                    <button
-                                        onClick={() => setShowAllInstallments(!showAllInstallments)}
-                                        className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 px-3 py-1.5 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer"
-                                    >
-                                        {showAllInstallments ? 'Ver menos' : `Ver todas (${installmentsList.length})`}
-                                    </button>
-                                )}
                             </div>
 
                             <div className="relative space-y-3.5">
                                 <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-100 dark:bg-gray-800"></div>
 
-                                {(showAllInstallments || isSelectionMode ? installmentsList : installmentsList.slice(0, 8)).map((inst) => (
+                                {installmentsList.map((inst) => (
                                     <div
                                         key={inst.number}
                                         className={`relative flex items-center gap-4 p-3.5 rounded-2xl transition-all duration-150 ${
@@ -3215,6 +3300,27 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 const pendingInsts = installmentsList.filter(i => i.status !== 'paid');
                 const isNextPending = pendingInsts.length > 0 && pendingInsts[0].number === inst.number;
 
+                // Determinar a data REAL de pagamento da parcela
+                const storedDateStr = loan ? getStoredPaidDates(loan.id)[inst.number] : null;
+                let paymentDate: Date;
+                if (inst.paidAt) {
+                    paymentDate = inst.paidAt;
+                } else if (storedDateStr) {
+                    paymentDate = new Date(storedDateStr);
+                } else if (inst.status === 'paid') {
+                    if (dueDateZero.getTime() > todayZero.getTime()) {
+                        // Vencimento futuro: pagamento foi antecipado (hoje)
+                        paymentDate = today;
+                    } else {
+                        paymentDate = inst.date;
+                    }
+                } else {
+                    paymentDate = today;
+                }
+
+                const payZero = new Date(paymentDate.getFullYear(), paymentDate.getMonth(), paymentDate.getDate());
+                const isPaidInAdvance = inst.status === 'paid' && dueDateZero.getTime() > payZero.getTime();
+
                 return (
                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setSelectedInstallmentForDetail(null)}></div>
@@ -3317,9 +3423,16 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                             </span>
                                         </div>
                                         {inst.status === 'paid' ? (
-                                            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                                                {inst.date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                            </span>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                                                    {paymentDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                </span>
+                                                {isPaidInAdvance && (
+                                                    <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 px-1.5 py-0.5 rounded">
+                                                        Antecipada
+                                                    </span>
+                                                )}
+                                            </div>
                                         ) : (
                                             <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
                                                 Hoje ({today.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })})
@@ -3359,7 +3472,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                         onClick={() => {
                                             const data = {
                                                 amount: inst.value,
-                                                date: inst.date.toLocaleDateString('pt-BR'),
+                                                date: paymentDate.toLocaleDateString('pt-BR'),
                                                 clientName: loan.client?.name || 'Cliente',
                                                 contractId: loan.id.substring(0, 6).toUpperCase(),
                                                 installmentNumber: inst.number,
@@ -3540,8 +3653,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     <button
                                         onClick={() => {
                                             const message = `Olá, ${loan.client?.name || ''}!\n\nAcompanhe seu empréstimo pelo link abaixo:\n\n${portalLink}\n\nPor lá você pode ver suas parcelas e realizar pagamentos.`;
-                                            const phone = loan.client?.phone?.replace(/\D/g, '') || '';
-                                            window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(message)}`, '_blank');
+                                            openWhatsApp(loan.client?.phone || '', message);
                                         }}
                                         className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm bg-green-600 text-white active:scale-[0.98] transition-all"
                                     >

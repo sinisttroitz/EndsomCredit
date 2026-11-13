@@ -3,6 +3,7 @@ import { X, Copy, Check, MessageSquare, Calendar, ChevronLeft, ChevronRight, Tre
 import { supabase } from '../supabaseClient';
 import { Loan } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
+import { openWhatsApp } from '../utils/whatsappUtils';
 
 interface ShareReportModalProps {
     isOpen: boolean;
@@ -282,8 +283,7 @@ export const ShareReportModal: React.FC<ShareReportModalProps> = ({
     };
 
     const handleShareWhatsApp = () => {
-        const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(activeMessage)}`;
-        window.open(url, '_blank');
+        openWhatsApp(undefined, activeMessage);
     };
 
     const changeDate = (days: number) => {

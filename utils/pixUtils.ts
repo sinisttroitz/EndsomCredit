@@ -81,6 +81,67 @@ export const saveUserPixSettings = async (
   throw firstAttempt.error;
 };
 
+/**
+ * Normalizes text to ASCII (removing accents and special characters)
+ * and truncates to the maximum allowed length by BACEN / EMVCo.
+ */
+export const sanitizePixText = (str: string, maxLength: number): string => {
+  return (str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove diacritics / accents
+    .replace(/[^a-zA-Z0-9 ]/g, '') // only alphanumeric and spaces
+    .trim()
+    .substring(0, maxLength)
+    .trim();
+};
+
+/**
+ * Cleans and standardizes the Pix key according to BACEN standards:
+ * - Email: lowercase, trimmed
+ * - CPF: 11 digits only (unmasked)
+ * - CNPJ: 14 digits only (unmasked)
+ * - Phone: +55... with country code
+ * - Random key (EVP): lowercase, trimmed
+ */
+export const sanitizePixKey = (key: string): string => {
+  if (!key) return '';
+  const trimmed = key.trim();
+
+  // Email
+  if (trimmed.includes('@')) {
+    return trimmed.toLowerCase();
+  }
+
+  // EVP / Random key (UUID format)
+  if (/^[0-9a-fA-F-]{32,36}$/.test(trimmed) && trimmed.includes('-')) {
+    return trimmed.toLowerCase();
+  }
+
+  const digits = trimmed.replace(/\D/g, '');
+
+  // Phone (has international format or parentheses/mask, or standard 10/11 digits when explicit)
+  if (trimmed.includes('(') || trimmed.includes(')') || trimmed.startsWith('+') || (digits.length === 11 && digits.startsWith('55'))) {
+    return digits.startsWith('55') ? `+${digits}` : `+55${digits}`;
+  }
+
+  // CPF (11 digits) or CNPJ (14 digits)
+  if (digits.length === 11 || digits.length === 14) {
+    return digits;
+  }
+
+  return trimmed;
+};
+
+/**
+ * Sanitizes transaction ID (txid) for static Pix (Tag 62 / Subtag 05).
+ * BACEN requires alphanumeric characters only [a-zA-Z0-9], max 25 chars, or '***'.
+ */
+export const sanitizePixTxId = (txid?: string): string => {
+  if (!txid || txid === '***') return '***';
+  const clean = txid.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25);
+  return clean || '***';
+};
+
 export const generatePixPayload = (
   key: string,
   name: string,
@@ -93,11 +154,19 @@ export const generatePixPayload = (
     return `${id}${len}${value}`;
   };
 
+  const cleanKey = sanitizePixKey(key);
+  // BACEN Tag 59 (Merchant Name): max 25 characters, alphanumeric & spaces, no accents
+  const cleanName = sanitizePixText(name, 25) || 'RECEBEDOR';
+  // BACEN Tag 60 (Merchant City): max 15 characters, alphanumeric & spaces, no accents
+  const cleanCity = sanitizePixText(city, 15) || 'CIDADE';
+  // BACEN Tag 62 Subtag 05 (txid): [a-zA-Z0-9]{1,25} or '***' (no hyphens allowed!)
+  const cleanTxId = sanitizePixTxId(transactionId);
+
   const amountStr = amount.toFixed(2);
 
   const merchantAccountInfo = [
     formatField('00', 'BR.GOV.BCB.PIX'),
-    formatField('01', key),
+    formatField('01', cleanKey),
   ].join('');
 
   const payload = [
@@ -107,9 +176,9 @@ export const generatePixPayload = (
     formatField('53', '986'), // Transaction Currency (BRL)
     formatField('54', amountStr), // Transaction Amount
     formatField('58', 'BR'), // Country Code
-    formatField('59', name), // Merchant Name
-    formatField('60', city), // Merchant City
-    formatField('62', formatField('05', transactionId)), // Additional Data Field Template
+    formatField('59', cleanName), // Merchant Name (max 25)
+    formatField('60', cleanCity), // Merchant City (max 15)
+    formatField('62', formatField('05', cleanTxId)), // Additional Data Field Template
     '6304', // CRC16 placeholder
   ].join('');
 

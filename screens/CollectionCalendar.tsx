@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Search, Calendar as CalendarIcon, Filter, Wallet, Banknote, AlertTriangle, X, Share2, QrCode, Copy, MapPin, Loader2 } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
+import { openWhatsApp } from '../utils/whatsappUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Installment } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
@@ -242,11 +243,7 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
             }
         }
         
-        const encodedMessage = encodeURIComponent(message);
-        const phone = selectedLoanForCharge.client.phone.replace(/\D/g, '');
-        const whatsappUrl = `https://wa.me/55${phone}?text=${encodedMessage}`;
-        
-        window.open(whatsappUrl, '_blank');
+        openWhatsApp(selectedLoanForCharge.client.phone, message);
         setShowChargeOptionsModal(false);
     };
 
@@ -298,7 +295,7 @@ export const CollectionCalendar: React.FC<CollectionCalendarProps> = ({ onBack, 
             beneficiaryToUse,
             userSettings?.city || 'Cidade',
             amount,
-            selectedLoanForCharge?.id.substring(0, 20) // Transaction ID
+            selectedLoanForCharge?.id ? selectedLoanForCharge.id.replace(/-/g, '').substring(0, 25) : '***'
         );
         setPixPayload(payload);
     };

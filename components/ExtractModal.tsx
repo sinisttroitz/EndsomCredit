@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Share2, X, Check, Calendar, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Share2, X } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
 export interface RemainingSummary {
@@ -56,11 +56,16 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
         try {
             await document.fonts.ready;
 
-            const canvas = await html2canvas(extractRef.current, {
-                scale: 2,
-                backgroundColor: '#F3F4F6',
+            const el = extractRef.current;
+            const canvas = await html2canvas(el, {
+                scale: 3,
+                backgroundColor: '#FFFFFF',
                 logging: false,
-                useCORS: true
+                useCORS: true,
+                width: el.scrollWidth,
+                height: el.scrollHeight,
+                windowWidth: el.scrollWidth,
+                windowHeight: el.scrollHeight,
             });
 
             canvas.toBlob(async (blob) => {
@@ -89,7 +94,7 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                     link.click();
                 }
                 setIsSharing(false);
-            }, 'image/png');
+            }, 'image/png', 1.0);
 
         } catch (error) {
             console.error('Error generating extract:', error);
@@ -100,211 +105,198 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
 
     if (!isOpen) return null;
 
+    const rs = data.remainingSummary;
+    const percentage = rs && rs.totalCount > 0 ? Math.round((rs.paidCount / rs.totalCount) * 100) : 0;
+    const divider = <div style={{ height: '1px', background: '#F3F4F6', margin: '0' }}></div>;
+
+    const installmentsCount = data.installments.length;
+    const allSameValue = installmentsCount > 0 && data.installments.every(i => i.value === data.installments[0].value);
+    const firstInst = installmentsCount > 0 ? data.installments[0] : null;
+    const lastInst = installmentsCount > 0 ? data.installments[installmentsCount - 1] : null;
+    const firstNum = firstInst ? String(firstInst.number).padStart(2, '0') : null;
+    const lastNum = lastInst ? String(lastInst.number).padStart(2, '0') : null;
+    const unitValue = rs?.installmentValue || (firstInst ? firstInst.value : 0);
+
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center sm:p-6">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
             
-            <div className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-md bg-gray-100 dark:bg-gray-900 rounded-none sm:rounded-[32px] shadow-2xl overflow-hidden flex flex-col">
+            <div className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-md bg-white dark:bg-gray-900 rounded-none sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col">
                 
                 <div className="absolute top-4 left-4 z-10">
-                    <button onClick={onClose} className="p-2 bg-white/80 dark:bg-black/50 backdrop-blur-md rounded-full hover:bg-white dark:hover:bg-black transition-colors">
-                        <X className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                    <button onClick={onClose} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                        <X className="w-5 h-5 text-gray-500" />
                     </button>
                 </div>
 
-                <div className="overflow-y-auto no-scrollbar flex-1 p-6 pb-32">
+                <div className="overflow-y-auto no-scrollbar flex-1 px-5 pt-14 pb-28">
                     
-                    <div ref={extractRef} className="bg-gray-50 dark:bg-gray-900 p-4 min-h-full">
+                    <div ref={extractRef} style={{ width: '380px', maxWidth: '380px', margin: '0 auto', padding: '28px 24px 24px', background: '#FFFFFF', fontFamily: "'Inter', sans-serif" }}>
                         
-                        <h2 className="text-center text-lg font-bold text-gray-900 dark:text-white mb-6 mt-2">
-                            Extrato de Pagamentos
-                        </h2>
-
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
-                            Resumo do Contrato
-                        </h3>
-
-                        {/* Contract Info Card */}
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm mb-4 border border-gray-100 dark:border-gray-700">
-                            <div className="space-y-4">
-                                <div>
-                                    <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">DATA DE EMISSÃO</p>
-                                    <p className="font-bold text-gray-900 dark:text-white">{data.emissionDate}</p>
-                                </div>
-                                <div className="border-t border-gray-50 dark:border-gray-700 pt-3">
-                                    <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">CLIENTE</p>
-                                    <p className="font-bold text-gray-900 dark:text-white text-lg">{data.clientName}</p>
-                                </div>
-                                <div className="border-t border-gray-50 dark:border-gray-700 pt-3">
-                                    <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">CONTRATO</p>
-                                    <p className="font-bold text-blue-600 dark:text-blue-400">#{data.contractId}</p>
-                                </div>
+                        {/* 1. Header */}
+                        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                            <div style={{ fontSize: '10px', fontWeight: 800, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: '16px' }}>
+                                Extrato de Pagamentos
+                            </div>
+                            <div style={{ fontSize: '24px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                                {data.clientName}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '6px', fontWeight: 500 }}>
+                                Contrato #{data.contractId} · {data.emissionDate}
                             </div>
                         </div>
 
-                        {/* Summary Cards */}
-                        <div className="space-y-3 mb-6">
-                            {/* Total Paid */}
-                            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-2xl p-4 border border-blue-100 dark:border-blue-800">
-                                <p className="text-xs text-blue-600 dark:text-blue-300 mb-1">Total Pago Acumulado</p>
-                                <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">
+                        {divider}
+
+                        {/* 2. Situação Financeira (sem valores duplicados) */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '18px 0' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Total Pago</span>
+                                <span style={{ fontSize: '15px', fontWeight: 900, color: '#111827' }}>
                                     R$ {data.totalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </p>
+                                </span>
                             </div>
-
-                            {/* Balance */}
-                            <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700">
-                                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Saldo Devedor Atual</p>
-                                <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Saldo Devedor</span>
+                                <span style={{ fontSize: '15px', fontWeight: 900, color: data.balance > 0 ? '#111827' : '#059669' }}>
                                     R$ {data.balance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </p>
+                                </span>
                             </div>
-
-                            {/* Credit Available (Optional) */}
                             {data.creditAvailable !== undefined && data.creditAvailable > 0 && (
-                                <div className="bg-green-50 dark:bg-green-900/20 rounded-2xl p-4 border border-green-100 dark:border-green-800">
-                                    <p className="text-xs text-green-600 dark:text-green-300 mb-1">Crédito Disponível</p>
-                                    <p className="text-2xl font-bold text-green-700 dark:text-green-400">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Crédito Disponível</span>
+                                    <span style={{ fontSize: '14px', fontWeight: 800, color: '#111827' }}>
                                         R$ {data.creditAvailable.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </p>
+                                    </span>
                                 </div>
                             )}
                         </div>
 
-                        {/* Remaining Installments Smart Summary */}
-                        {data.remainingSummary && (
-                            <div className="mb-6">
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">
-                                    {data.remainingSummary.remainingCount > 0 ? 'Previsão das Parcelas Faltantes' : 'Status do Contrato'}
-                                </h3>
+                        {divider}
 
-                                {data.remainingSummary.remainingCount > 0 ? (
-                                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700 shadow-sm space-y-3">
-                                        <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-700">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300">
-                                                    <Calendar className="w-5 h-5" />
-                                                </div>
-                                                <div>
-                                                    <p className="font-bold text-gray-900 dark:text-white text-sm">
-                                                        {data.remainingSummary.remainingCount} de {data.remainingSummary.totalCount} parcelas restantes
-                                                    </p>
-                                                    <p className="text-xs text-gray-400">
-                                                        {data.remainingSummary.paidCount} parcela(s) já quitada(s)
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            {data.remainingSummary.installmentValue ? (
-                                                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border border-gray-200/60 dark:border-gray-600 whitespace-nowrap">
-                                                    {data.remainingSummary.remainingCount}x R$ {data.remainingSummary.installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                </span>
-                                            ) : null}
-                                        </div>
-
-                                        <div className="space-y-2 text-xs">
-                                            {data.remainingSummary.nextDueDate && (
-                                                <div className="flex justify-between items-center py-0.5">
-                                                    <span className="text-gray-500 dark:text-gray-400 font-medium">Próximo Vencimento:</span>
-                                                    <span className="font-bold text-gray-900 dark:text-white">
-                                                        {data.remainingSummary.nextInstallmentNumber ? `Parcela #${String(data.remainingSummary.nextInstallmentNumber).padStart(2, '0')} em ` : ''}{data.remainingSummary.nextDueDate}
-                                                    </span>
-                                                </div>
-                                            )}
-
-                                            {data.remainingSummary.finalDueDate && (
-                                                <div className="flex justify-between items-center py-0.5">
-                                                    <span className="text-gray-500 dark:text-gray-400 font-medium">Previsão de Quitação:</span>
-                                                    <span className="font-bold text-gray-900 dark:text-white">
-                                                        {data.remainingSummary.finalDueDate}
-                                                    </span>
-                                                </div>
-                                            )}
-
-                                            {data.remainingSummary.lateCount && data.remainingSummary.lateCount > 0 ? (
-                                                <div className="flex justify-between items-center pt-2.5 border-t border-rose-100 dark:border-rose-900/30 text-rose-600 dark:text-rose-400">
-                                                    <span className="font-bold flex items-center gap-1.5">
-                                                        <AlertTriangle className="w-3.5 h-3.5" />
-                                                        Parcelas em Atraso:
-                                                    </span>
-                                                    <span className="font-bold">
-                                                        {data.remainingSummary.lateCount} parcela(s) {data.remainingSummary.lateAmount ? `• R$ ${data.remainingSummary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
-                                                    </span>
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl p-4 border border-emerald-100 dark:border-emerald-800 flex items-center gap-3">
-                                        <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                                            <CheckCircle2 className="w-5 h-5" />
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-emerald-900 dark:text-emerald-200 text-sm">Contrato Quitado</p>
-                                            <p className="text-xs text-emerald-700 dark:text-emerald-400">Todas as {data.remainingSummary.totalCount} parcelas foram quitadas.</p>
-                                        </div>
-                                    </div>
-                                )}
+                        {/* 3. Situação das Parcelas (hierarquia limpa e direta) */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '18px 0' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Parcelas Quitadas</span>
+                                <span style={{ fontSize: '13px', fontWeight: 700, color: '#111827' }}>
+                                    {rs ? `${rs.paidCount} de ${rs.totalCount} (${percentage}%)` : `${installmentsCount} parcelas`}
+                                </span>
                             </div>
+                            {firstNum && lastNum && installmentsCount > 1 && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Faixa Quitada</span>
+                                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>
+                                        #{firstNum} a #{lastNum}
+                                    </span>
+                                </div>
+                            )}
+                            {unitValue > 0 && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Valor da Parcela</span>
+                                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>
+                                        R$ {unitValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Parcelas Restantes</span>
+                                <span style={{ fontSize: '12px', fontWeight: 700, color: rs && rs.remainingCount === 0 ? '#059669' : '#111827' }}>
+                                    {rs && rs.remainingCount === 0 ? 'Nenhuma (Quitado)' : rs ? `${rs.remainingCount} parcela(s)` : '-'}
+                                </span>
+                            </div>
+                            {rs && rs.lateCount && rs.lateCount > 0 ? (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '12px', color: '#EF4444', fontWeight: 600 }}>Parcelas em Atraso</span>
+                                    <span style={{ fontSize: '12px', fontWeight: 700, color: '#EF4444' }}>
+                                        {rs.lateCount}x{rs.lateAmount ? ` · R$ ${rs.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
+                                    </span>
+                                </div>
+                            ) : null}
+                        </div>
+
+                        {/* 4. Próximos Vencimentos (Apenas se houver saldo restante) */}
+                        {rs && rs.remainingCount > 0 && (rs.nextDueDate || rs.finalDueDate) && (
+                            <>
+                                {divider}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '18px 0' }}>
+                                    {rs.nextDueDate && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Próximo Vencimento</span>
+                                            <span style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>
+                                                {rs.nextInstallmentNumber ? `#${String(rs.nextInstallmentNumber).padStart(2, '0')} em ` : ''}{rs.nextDueDate}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {rs.finalDueDate && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Previsão de Quitação</span>
+                                            <span style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>
+                                                {rs.finalDueDate}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
                         )}
 
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
-                            Parcelas Pagas
-                        </h3>
-
-                        {/* Installments List */}
-                        <div className="space-y-3 mb-8">
-                            {data.installments.map((inst) => (
-                                <div key={inst.number} className="bg-white dark:bg-gray-800 rounded-2xl p-4 border border-gray-100 dark:border-gray-700 flex items-center gap-4">
-                                    <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400">
-                                        <Check className="w-5 h-5 stroke-[3]" />
+                        {/* 5. Detalhamento opcional se os valores entre parcelas variarem (ex: juros/multas variáveis) */}
+                        {!allSameValue && installmentsCount > 0 && (
+                            <>
+                                {divider}
+                                <div style={{ padding: '16px 0 12px' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: 800, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: '12px' }}>
+                                        Detalhamento por Parcela
                                     </div>
-                                    <div className="flex-1">
-                                        <div className="flex justify-between items-start mb-1">
-                                            <p className="font-bold text-gray-900 dark:text-white">Parcela #{String(inst.number).padStart(2, '0')}</p>
-                                            <p className="font-bold text-gray-900 dark:text-white">
-                                                R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </p>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">Pago em {inst.date}</p>
-                                            <p className="text-[10px] font-bold text-green-600 dark:text-green-400 uppercase tracking-wide">CONFIRMADO</p>
-                                        </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                                        {data.installments.map((inst) => (
+                                            <div
+                                                key={inst.number}
+                                                style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    padding: '6px 0',
+                                                    borderBottom: '1px solid #F9FAFB',
+                                                }}
+                                            >
+                                                <span style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280' }}>#{String(inst.number).padStart(2, '0')}</span>
+                                                <span style={{ fontSize: '11px', fontWeight: 700, color: '#111827' }}>
+                                                    R$ {inst.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
-                            ))}
-                            {data.installments.length === 0 && (
-                                <p className="text-center text-gray-500 text-sm py-4">Nenhuma parcela paga encontrada.</p>
-                            )}
-                        </div>
+                            </>
+                        )}
 
-                        {/* Footer */}
-                        <div className="text-center mt-8 pt-8 border-t border-gray-200 dark:border-gray-700">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">AUTENTICAÇÃO DIGITAL</p>
-                            <p className="text-[10px] font-mono text-gray-400 break-all mb-4">
-                                HASH: {data.authenticationCode}
-                            </p>
-                            <div className="flex items-center justify-center gap-1 text-gray-400">
-                                <Check className="w-3 h-3" />
-                                <span className="text-[10px] uppercase font-medium">Documento assinado digitalmente</span>
+                        {/* 6. Autenticação Digital */}
+                        {divider}
+                        <div style={{ textAlign: 'center', padding: '14px 0 4px' }}>
+                            <div style={{ fontSize: '9px', fontWeight: 700, color: '#D1D5DB', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: '4px' }}>
+                                Autenticação
+                            </div>
+                            <div style={{ fontSize: '10px', fontFamily: 'monospace', color: '#9CA3AF', wordBreak: 'break-all' }}>
+                                {data.authenticationCode}
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="absolute bottom-0 left-0 right-0 z-50 p-6 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-t border-gray-200 dark:border-gray-800">
+                <div className="absolute bottom-0 left-0 right-0 z-50 p-5 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-t border-gray-100 dark:border-gray-800">
                     <button 
                         onClick={handleShare}
                         disabled={isSharing}
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-70"
+                        className="w-full bg-gray-900 hover:bg-black text-white py-3.5 rounded-2xl font-bold shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-70 text-sm"
                     >
                         {isSharing ? (
                             <>
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                Gerando Extrato...
+                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                Gerando...
                             </>
                         ) : (
                             <>
-                                <Share2 className="w-5 h-5" />
+                                <Share2 className="w-4 h-4" />
                                 Compartilhar Extrato
                             </>
                         )}
