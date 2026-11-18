@@ -81,6 +81,74 @@ export const generateInstallments = (loanData: Loan, fines: InstallmentFine[] = 
         }
     }
 
+    if (loanData.frequency === 'Aluguel') {
+        const dailyFee = loanData.installment_value || 0;
+        const totalPaidInterest = Number(loanData.total_interest_paid) || 0;
+        const daysPaid = dailyFee > 0 ? Math.floor(totalPaidInterest / dailyFee) : 0;
+        
+        const list: Installment[] = [];
+        let curDate = new Date(startDate);
+        const today = new Date();
+        const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        
+        let dayIndex = 0;
+        const isClosed = loanData.status === 'paid' || loanData.balance <= 0;
+        
+        while (true) {
+            const dow = curDate.getDay();
+            if (loanData.skip_saturday && dow === 6) {
+                curDate.setDate(curDate.getDate() + 1);
+                continue;
+            }
+            if (loanData.skip_sunday && dow === 0) {
+                curDate.setDate(curDate.getDate() + 1);
+                continue;
+            }
+            if (loanData.skip_holidays && isNationalHoliday(curDate)) {
+                curDate.setDate(curDate.getDate() + 1);
+                continue;
+            }
+            
+            const curZero = new Date(curDate.getFullYear(), curDate.getMonth(), curDate.getDate());
+            
+            let status: 'paid' | 'pending' | 'late' | 'future' = 'future';
+            if (isClosed) {
+                status = 'paid';
+            } else if (dayIndex < daysPaid) {
+                status = 'paid';
+            } else if (curZero < todayZero) {
+                status = 'late';
+            } else if (curZero.getTime() === todayZero.getTime()) {
+                status = 'pending';
+            } else {
+                status = 'future';
+            }
+            
+            list.push({
+                number: dayIndex + 1,
+                date: new Date(curDate),
+                value: dailyFee,
+                status: status,
+                originalValue: dailyFee,
+                accumulatedInterest: 0,
+                originalDate: new Date(curDate)
+            });
+            
+            dayIndex++;
+            curDate.setDate(curDate.getDate() + 1);
+            
+            if (isClosed) {
+                if (dayIndex >= Math.max(1, daysPaid)) break;
+            } else {
+                if (dayIndex >= daysPaid && curZero > todayZero) break;
+            }
+            
+            if (dayIndex >= 365) break;
+        }
+        
+        return list;
+    }
+
     const list: Installment[] = [];
     let paidAccumulator = 0;
     let dailyDateTracker = new Date(startDate);

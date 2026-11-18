@@ -34,6 +34,9 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
         case 'Mensal':
             date.setDate(date.getDate() + 30);
             break;
+        case 'Aluguel':
+            date.setDate(date.getDate() + 1);
+            break;
         default:
             date.setDate(date.getDate() + 30);
     }
@@ -50,6 +53,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   const [skipHolidays, setSkipHolidays] = useState(initialData?.skipHolidays ?? true);
   const [amount, setAmount] = useState(initialData?.amount?.toString() || '5000');
   const [interestRate, setInterestRate] = useState(initialData?.interestRate?.toString() || '30');
+  const [dailyRentFee, setDailyRentFee] = useState(initialData?.installmentValue?.toString() || '20');
   const [installments, setInstallments] = useState(initialData?.installments || 12);
   const [dueDate, setDueDate] = useState(getDueDateByFrequency(initialData?.frequency || 'Diária'));
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,16 +118,12 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   // Calculations
   const principal = parseFloat(amount.replace(/\./g, '').replace(',', '.')) || 0;
   const rate = parseFloat(interestRate) || 0;
+  const dailyFee = parseFloat(dailyRentFee.replace(/\./g, '').replace(',', '.')) || 0;
   
-  // Nova lógica: Juros simples aplicados uma única vez sobre o principal
-  // juros = valor_principal × (taxa_juros / 100)
-  const totalInterest = principal * (rate / 100);
-  
-  // total = valor_principal + juros
-  const totalAmount = principal + totalInterest;
-  
-  // valor_parcela = total / numero_parcelas
-  const monthlyPayment = installments > 0 ? totalAmount / installments : 0;
+  const isAluguel = frequency === 'Aluguel';
+  const totalInterest = isAluguel ? 0 : principal * (rate / 100);
+  const totalAmount = isAluguel ? principal : principal + totalInterest;
+  const monthlyPayment = isAluguel ? dailyFee : (installments > 0 ? totalAmount / installments : 0);
 
   const handleSave = async () => {
     if (!clientId) {
@@ -140,14 +140,18 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("No user");
 
+        const saveRate = isAluguel 
+            ? (principal > 0 ? Number(((dailyFee / principal) * 100).toFixed(2)) : 0)
+            : rate;
+
         const { error } = await supabase.from('loans').insert([{
             client_id: clientId,
             user_id: user.id,
             amount: principal,
-            balance: totalAmount, // Starts with full debt
-            interest_rate: rate,
-            installments: installments,
-            installment_value: monthlyPayment,
+            balance: isAluguel ? principal : totalAmount, // In aluguel, debt is capital to return
+            interest_rate: saveRate,
+            installments: isAluguel ? 1 : installments,
+            installment_value: isAluguel ? dailyFee : monthlyPayment,
             due_date: dueDate,
             status: 'active',
             frequency: frequency,
@@ -155,7 +159,8 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
             skip_sunday: skipSunday,
             skip_holidays: skipHolidays,
             progress: 0,
-            amount_paid: 0
+            amount_paid: 0,
+            total_interest_paid: 0
         }]);
 
         if (error) throw error;
@@ -272,21 +277,33 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                 </div>
               </div>
 
-              {/* Interest Rate */}
+              {/* Interest Rate or Daily Rent */}
               <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm col-span-1">
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-8 h-8 bg-amber-50 dark:bg-amber-900/20 rounded-lg flex items-center justify-center">
                     <TrendingUp className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                   </div>
-                  <span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.1em]">Juros %</span>
+                  <span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.1em]">
+                    {frequency === 'Aluguel' ? 'Diária R$' : 'Juros %'}
+                  </span>
                 </div>
-                <input 
-                  className="w-full bg-transparent text-3xl font-black text-gray-900 dark:text-white outline-none placeholder-gray-300 dark:placeholder-gray-600 caret-amber-500 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
-                  type="number" 
-                  value={interestRate}
-                  onChange={e => setInterestRate(e.target.value)}
-                  placeholder="0"
-                />
+                {frequency === 'Aluguel' ? (
+                  <input 
+                    className="w-full bg-transparent text-3xl font-black text-gray-900 dark:text-white outline-none placeholder-gray-300 dark:placeholder-gray-600 caret-amber-500 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
+                    type="number" 
+                    value={dailyRentFee}
+                    onChange={e => setDailyRentFee(e.target.value)}
+                    placeholder="0"
+                  />
+                ) : (
+                  <input 
+                    className="w-full bg-transparent text-3xl font-black text-gray-900 dark:text-white outline-none placeholder-gray-300 dark:placeholder-gray-600 caret-amber-500 appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
+                    type="number" 
+                    value={interestRate}
+                    onChange={e => setInterestRate(e.target.value)}
+                    placeholder="0"
+                  />
+                )}
               </div>
 
               {/* Installments */}
@@ -297,7 +314,9 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                   </div>
                   <span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.1em]">Parcelas</span>
                 </div>
-                {(frequency === 'Mensal' || frequency === 'Quinzenal') ? (
+                {frequency === 'Aluguel' ? (
+                  <p className="text-xl font-black text-gray-900 dark:text-white mt-1">Livre</p>
+                ) : (frequency === 'Mensal' || frequency === 'Quinzenal') ? (
                   <p className="text-3xl font-black text-gray-900 dark:text-white">1</p>
                 ) : (
                   <div className="flex items-center gap-3">
@@ -324,12 +343,12 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
               <div className="bg-white dark:bg-[#111] rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm">
                 <h2 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.15em] mb-4">Frequência</h2>
                 <div className="flex p-1 bg-gray-100 dark:bg-gray-800 rounded-xl gap-1">
-                  {['Diária', 'Semanal', 'Quinzenal', 'Mensal'].map((freq) => (
+                  {['Diária', 'Semanal', 'Quinzenal', 'Mensal', 'Aluguel'].map((freq) => (
                     <button 
                       key={freq} 
                       onClick={() => {
                         setFrequency(freq);
-                        if (freq === 'Mensal' || freq === 'Quinzenal') setInstallments(1);
+                        if (freq === 'Mensal' || freq === 'Quinzenal' || freq === 'Aluguel') setInstallments(1);
                         setDueDate(getDueDateByFrequency(freq));
                       }}
                       className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all duration-200 
@@ -339,7 +358,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                     </button>
                   ))}
                 </div>
-                {frequency === 'Diária' && (
+                {(frequency === 'Diária' || frequency === 'Aluguel') && (
                   <div className="mt-4 grid grid-cols-3 gap-2">
                     <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-2.5 py-2.5 rounded-xl border border-gray-100 dark:border-gray-700">
                       <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Sábado</span>
@@ -398,7 +417,11 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                   <p className="text-5xl font-black text-gray-900 dark:text-white tracking-tight">
                     R$ {monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                   </p>
-                  <p className="text-sm text-gray-400 mt-2 font-semibold">{installments}x de R$ {monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                  <p className="text-sm text-gray-400 mt-2 font-semibold">
+                    {frequency === 'Aluguel' 
+                      ? `Diária de R$ ${dailyFee.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` 
+                      : `${installments}x de R$ ${monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`}
+                  </p>
                 </div>
 
                 {/* Tear line */}
@@ -416,19 +439,28 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                       R$ {principal.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-400 font-medium">Juros ({interestRate}%)</span>
-                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300 font-mono">
-                      + R$ {totalInterest.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                    </span>
-                  </div>
+                  {frequency === 'Aluguel' ? (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-400 font-medium">Taxa de Aluguel</span>
+                      <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                        R$ {dailyFee.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} / dia
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-400 font-medium">Juros ({interestRate}%)</span>
+                      <span className="text-sm font-bold text-gray-700 dark:text-gray-300 font-mono">
+                        + R$ {totalInterest.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-400 font-medium">Frequência</span>
                     <span className="text-sm font-bold text-gray-700 dark:text-gray-300">{frequency}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-400 font-medium">Parcelas</span>
-                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300">{installments}x</span>
+                    <span className="text-sm text-gray-400 font-medium">Prazo</span>
+                    <span className="text-sm font-bold text-gray-700 dark:text-gray-300">{frequency === 'Aluguel' ? 'Livre (até quitação)' : `${installments}x`}</span>
                   </div>
                   {selectedClientName && (
                     <div className="flex justify-between items-center">
@@ -543,24 +575,37 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
 
             {/* Compact secondary fields row */}
             <div className="flex gap-3">
-              {/* Interest Rate */}
+              {/* Interest Rate or Daily Rent */}
               <div className="flex-1 bg-gray-50 dark:bg-gray-800/50 rounded-2xl p-4 border border-gray-100 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-colors group">
                 <div className="flex items-center gap-1.5 mb-2">
                   <TrendingUp className="w-3 h-3 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
-                  <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest group-hover:text-gray-500 transition-colors">Juros %</label>
+                  <label className="text-[9px] font-bold text-gray-400 uppercase tracking-widest group-hover:text-gray-500 transition-colors">
+                    {frequency === 'Aluguel' ? 'Diária R$' : 'Juros %'}
+                  </label>
                 </div>
-                <input 
-                    className="w-full bg-transparent text-2xl font-black text-gray-900 dark:text-white outline-none placeholder-gray-300 dark:placeholder-gray-600 caret-primary appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
-                    type="number" 
-                    value={interestRate}
-                    onChange={e => setInterestRate(e.target.value)}
-                    placeholder="0"
-                    style={{ fontFamily: "'Inter', sans-serif" }}
-                />
+                {frequency === 'Aluguel' ? (
+                  <input 
+                      className="w-full bg-transparent text-2xl font-black text-gray-900 dark:text-white outline-none placeholder-gray-300 dark:placeholder-gray-600 caret-primary appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
+                      type="number" 
+                      value={dailyRentFee}
+                      onChange={e => setDailyRentFee(e.target.value)}
+                      placeholder="0"
+                      style={{ fontFamily: "'Inter', sans-serif" }}
+                  />
+                ) : (
+                  <input 
+                      className="w-full bg-transparent text-2xl font-black text-gray-900 dark:text-white outline-none placeholder-gray-300 dark:placeholder-gray-600 caret-primary appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]" 
+                      type="number" 
+                      value={interestRate}
+                      onChange={e => setInterestRate(e.target.value)}
+                      placeholder="0"
+                      style={{ fontFamily: "'Inter', sans-serif" }}
+                  />
+                )}
               </div>
 
               {/* Installments */}
-              {(frequency !== 'Mensal' && frequency !== 'Quinzenal') && (
+              {(frequency !== 'Mensal' && frequency !== 'Quinzenal' && frequency !== 'Aluguel') && (
               <div className="flex-1 bg-gray-50 dark:bg-gray-800/50 rounded-2xl p-4 border border-gray-100 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-colors group">
                 <div className="flex items-center gap-1.5 mb-2">
                   <Layers className="w-3 h-3 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 transition-colors" />
@@ -597,12 +642,12 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
           <div className="mb-5">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3 block">Frequência</span>
             <div className="flex p-1 bg-gray-100 dark:bg-gray-800 rounded-2xl gap-1">
-              {['Diária', 'Semanal', 'Quinzenal', 'Mensal'].map((freq) => (
+              {['Diária', 'Semanal', 'Quinzenal', 'Mensal', 'Aluguel'].map((freq) => (
                  <button 
                     key={freq} 
                     onClick={() => {
                         setFrequency(freq);
-                        if (freq === 'Mensal' || freq === 'Quinzenal') setInstallments(1);
+                        if (freq === 'Mensal' || freq === 'Quinzenal' || freq === 'Aluguel') setInstallments(1);
                         setDueDate(getDueDateByFrequency(freq));
                     }}
                     className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 
@@ -612,7 +657,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                  </button>
               ))}
             </div>
-            {frequency === 'Diária' && (
+            {(frequency === 'Diária' || frequency === 'Aluguel') && (
                 <div className="mt-4 flex gap-2">
                     <div className="flex-1 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 px-3 py-2.5 rounded-xl border border-gray-100 dark:border-gray-700">
                         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Sáb</span>
@@ -673,11 +718,17 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
 
             {/* Main value - ticket hero */}
             <div className="px-5 pt-5 pb-4 text-center">
-              <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-widest mb-1">Valor da Parcela</p>
+              <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-widest mb-1">
+                {isAluguel ? 'Diária do Aluguel' : 'Valor da Parcela'}
+              </p>
               <p className="text-4xl font-black text-gray-900 dark:text-white" style={{ fontFamily: "'Inter', sans-serif" }}>
                 R$ {monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
               </p>
-              <p className="text-xs text-gray-400 mt-1.5 font-semibold">{installments}x de R$ {monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+              <p className="text-xs text-gray-400 mt-1.5 font-semibold">
+                {isAluguel 
+                  ? 'Prazo Livre • R$ ' + monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' / dia'
+                  : `${installments}x de R$ ${monthlyPayment.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`}
+              </p>
             </div>
 
             {/* Perforated tear line */}
@@ -695,15 +746,26 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                   R$ {principal.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                 </span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-gray-400 font-medium">Juros ({interestRate}%)</span>
-                <span className="text-sm font-bold text-gray-700 dark:text-gray-300 font-mono tracking-tight">
-                  + R$ {totalInterest.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                </span>
-              </div>
+              {isAluguel ? (
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-400 font-medium">Taxa de Aluguel</span>
+                  <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono tracking-tight">
+                    R$ {dailyFee.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})} / dia
+                  </span>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-400 font-medium">Juros ({interestRate}%)</span>
+                  <span className="text-sm font-bold text-gray-700 dark:text-gray-300 font-mono tracking-tight">
+                    + R$ {totalInterest.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                  </span>
+                </div>
+              )}
               <div className="h-px bg-gray-100 dark:bg-gray-800"></div>
               <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wide">Total</span>
+                <span className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wide">
+                  {isAluguel ? 'Capital a Devolver' : 'Total'}
+                </span>
                 <span className="text-lg font-black text-gray-900 dark:text-white font-mono">
                   R$ {totalAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                 </span>
@@ -718,7 +780,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
                 disabled={loading}
                 className="w-full bg-primary dark:bg-white text-white dark:text-primary py-4 rounded-xl font-bold shadow-lg shadow-primary/20 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-70"
             >
-                {loading ? 'Processando...' : 'Gerar Empréstimo'}
+                {loading ? 'Processando...' : (isAluguel ? 'Cadastrar Aluguel' : 'Gerar Empréstimo')}
             </button>
         </div>
       </main>

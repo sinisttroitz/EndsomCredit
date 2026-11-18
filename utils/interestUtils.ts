@@ -9,7 +9,7 @@ export const processRecurringInterest = async (loans: Loan[]) => {
 
     for (const loan of loans) {
         if (loan.status === 'paid') continue;
-        if (loan.frequency === 'Diária') continue; // Daily loans don't use period-based interest — use manual fines instead
+        if (loan.frequency === 'Diária' || loan.frequency === 'Aluguel') continue; // Daily loans and Aluguel don't use period-based interest
 
         const [year, month, day] = loan.due_date.split('-').map(Number);
         const originalDueDate = new Date(year, month - 1, day);

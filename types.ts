@@ -40,7 +40,7 @@ export interface Loan {
   installments?: number;
   installment_value?: number;
   interest_rate?: number;
-  frequency?: 'Diária' | 'Semanal' | 'Quinzenal' | 'Mensal';
+  frequency?: 'Diária' | 'Semanal' | 'Quinzenal' | 'Mensal' | 'Aluguel';
   skip_saturday?: boolean;
   skip_sunday?: boolean;
   skip_holidays?: boolean;

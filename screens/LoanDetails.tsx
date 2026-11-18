@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle, Link2, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Minus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle, Link2, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { openWhatsApp } from '../utils/whatsappUtils';
 import { createPortalLink } from '../utils/portalUtils';
@@ -26,6 +26,10 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [showSinglePaymentConfirmModal, setShowSinglePaymentConfirmModal] = useState(false);
     const [showMensalPaymentModal, setShowMensalPaymentModal] = useState(false);
+    const [showAluguelPaymentModal, setShowAluguelPaymentModal] = useState(false);
+    const [aluguelPaymentMode, setAluguelPaymentMode] = useState<'menu' | 'rent' | 'payoff'>('menu');
+    const [aluguelDaysToPay, setAluguelDaysToPay] = useState(1);
+    const [aluguelIncludePendingOnPayoff, setAluguelIncludePendingOnPayoff] = useState(true);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
     const [receiptData, setReceiptData] = useState<any>(null);
     const [showReceiptImageModal, setShowReceiptImageModal] = useState(false);
@@ -1310,6 +1314,125 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         }
     };
 
+    const executeAluguelRentPayment = async (days: number, amountToPay: number) => {
+        if (!loan) return;
+        setProcessing(true);
+        try {
+            const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null
+                ? Number(loan.amount_paid)
+                : currentTotalInterestPaid;
+
+            // 1. Insert Amortization Record (100% interest profit, capital untouched)
+            const { error: amortError } = await supabase
+                .from('loan_amortizations')
+                .insert({
+                    loan_id: loan.id,
+                    amount_paid: amountToPay,
+                    interest_paid: amountToPay,
+                    principal_paid: 0,
+                    fine_paid: 0,
+                    previous_balance: loan.balance,
+                    new_balance: loan.balance
+                });
+
+            if (amortError) console.error("Error inserting aluguel amortization:", amortError);
+
+            // 2. Update Loan (total_interest_paid & amount_paid)
+            const { error: loanError } = await supabase
+                .from('loans')
+                .update({
+                    total_interest_paid: currentTotalInterestPaid + amountToPay,
+                    amount_paid: currentAmountPaid + amountToPay
+                })
+                .eq('id', loan.id);
+
+            if (loanError) throw loanError;
+
+            setShowAluguelPaymentModal(false);
+            setAluguelPaymentMode('menu');
+            await fetchLoanData();
+
+            setAlertModal({
+                open: true,
+                title: 'Aluguel Recebido!',
+                message: `Recebimento de R$ ${amountToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${days} diária${days > 1 ? 's' : ''}) registrado com sucesso!`
+            });
+        } catch (error) {
+            console.error(error);
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao registrar pagamento do aluguel.'
+            });
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const executeAluguelFullPayoff = async (includePendingRent: boolean, pendingRentVal: number) => {
+        if (!loan) return;
+        setProcessing(true);
+        try {
+            const currentTotalInterestPaid = Number(loan.total_interest_paid) || 0;
+            const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null
+                ? Number(loan.amount_paid)
+                : currentTotalInterestPaid;
+
+            const principalAmount = Number(loan.amount);
+            const interestAmount = includePendingRent ? pendingRentVal : 0;
+            const totalAmountPaid = principalAmount + interestAmount;
+
+            // 1. Insert Amortization Record
+            const { error: amortError } = await supabase
+                .from('loan_amortizations')
+                .insert({
+                    loan_id: loan.id,
+                    amount_paid: totalAmountPaid,
+                    interest_paid: interestAmount,
+                    principal_paid: principalAmount,
+                    fine_paid: 0,
+                    previous_balance: loan.balance,
+                    new_balance: 0
+                });
+
+            if (amortError) console.error("Error inserting payoff amortization:", amortError);
+
+            // 2. Update Loan (balance = 0, status = 'paid', progress = 100)
+            const { error: loanError } = await supabase
+                .from('loans')
+                .update({
+                    balance: 0,
+                    status: 'paid',
+                    progress: 100,
+                    total_interest_paid: currentTotalInterestPaid + interestAmount,
+                    amount_paid: currentAmountPaid + totalAmountPaid
+                })
+                .eq('id', loan.id);
+
+            if (loanError) throw loanError;
+
+            setShowAluguelPaymentModal(false);
+            setAluguelPaymentMode('menu');
+            await fetchLoanData();
+
+            setAlertModal({
+                open: true,
+                title: 'Contrato Encerrado!',
+                message: `Devolução do capital de R$ ${principalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} confirmada e contrato quitado com sucesso!`
+            });
+        } catch (error) {
+            console.error(error);
+            setAlertModal({
+                open: true,
+                title: 'Erro',
+                message: 'Erro ao quitar contrato de aluguel.'
+            });
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     const handleGenerateReceipt = async (type: 'last' | 'full') => {
         if (!loan) return;
 
@@ -1440,9 +1563,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         );
     }
 
-    const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
-    const totalPaid = Math.max(0, totalDebt - Number(loan.balance));
-    const percentage = loan.status === 'paid' ? 100 : Math.max(0, loan.progress || 0);
+    const isAluguel = loan.frequency === 'Aluguel';
+    const totalDebt = isAluguel ? Number(loan.amount) : (loan.installment_value || 0) * (loan.installments || 1);
+    const totalPaid = isAluguel
+        ? (loan.status === 'paid' ? Number(loan.amount) : 0)
+        : Math.max(0, totalDebt - Number(loan.balance));
+    const percentage = loan.status === 'paid' ? 100 : (isAluguel ? (loan.balance <= 0 ? 100 : 0) : Math.max(0, loan.progress || 0));
     const paidCount = installmentsList.filter(i => i.status === 'paid').length;
     const totalCount = installmentsList.length;
 
@@ -1453,7 +1579,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     // Calculate original amount fallback if it's 0 (due to amortization)
     const originalAmount = Number(loan.amount) > 0
         ? Number(loan.amount)
-        : totalDebt / (1 + (Number(loan.interest_rate) / 100));
+        : (isAluguel ? Number(loan.amount) : totalDebt / (1 + (Number(loan.interest_rate) / 100)));
 
     // For paid loans, use the actual amount paid stored in DB if available, otherwise fallback to calculation
     const displayTotalPaid = loan.status === 'paid' && loan.amount_paid
@@ -1589,9 +1715,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         </div>
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between mb-1">
-                                <span className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider">Parcelas Pagas</span>
+                                <span className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider">
+                                    {isAluguel ? 'Diárias Pagas' : 'Parcelas Pagas'}
+                                </span>
                                 <span className="text-xs font-black text-gray-900 dark:text-white">
-                                    {paidCount} de {totalCount} ({percentage}%)
+                                    {isAluguel ? `${paidCount} quitadas` : `${paidCount} de ${totalCount} (${percentage}%)`}
                                 </span>
                             </div>
                             <div className="w-full bg-gray-100 dark:bg-gray-800 h-2.5 rounded-full overflow-hidden">
@@ -1601,7 +1729,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 />
                             </div>
                             <p className="text-[11px] text-gray-400 mt-1.5 font-medium">
-                                {totalCount - paidCount === 0 ? 'Contrato 100% quitado' : `${totalCount - paidCount} parcela(s) restante(s)`}
+                                {isAluguel 
+                                    ? (loan.status === 'paid' ? 'Contrato e capital quitados' : `${installmentsList.filter(i => i.status === 'late' || i.status === 'pending').length} diária(s) em aberto`)
+                                    : (totalCount - paidCount === 0 ? 'Contrato 100% quitado' : `${totalCount - paidCount} parcela(s) restante(s)`)}
                             </p>
                         </div>
                     </div>
@@ -1609,13 +1739,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     {/* Bottom Row: Full-width Financial Cards (sem truncamento) */}
                     <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
                         <div className="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 flex flex-col justify-between">
-                            <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider mb-1">Total da Dívida</p>
+                            <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold tracking-wider mb-1">
+                                {isAluguel ? 'Capital Alugado' : 'Total da Dívida'}
+                            </p>
                             <p className="text-sm sm:text-base font-black text-gray-900 dark:text-white whitespace-nowrap">
                                 R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
                         </div>
                         <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 flex flex-col justify-between">
-                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-bold tracking-wider mb-1">Total Amortizado</p>
+                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-bold tracking-wider mb-1">
+                                {isAluguel ? 'Capital Devolvido' : 'Total Amortizado'}
+                            </p>
                             <p className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
                                 R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
@@ -1626,19 +1760,29 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 {/* Grid Stats */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Valor Solicitado</p>
+                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">
+                            {isAluguel ? 'Capital Inicial' : 'Valor Solicitado'}
+                        </p>
                         <p className="font-bold text-gray-900 dark:text-white">R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Valor da Parcela</p>
+                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">
+                            {isAluguel ? 'Diária do Aluguel' : 'Valor da Parcela'}
+                        </p>
                         <p className="font-bold text-gray-900 dark:text-white">
-                            {loan.installments}x de R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {isAluguel 
+                                ? `R$ ${(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / dia`
+                                : `${loan.installments}x de R$ ${(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </p>
                     </div>
                     <div className="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">Taxa de Juros</p>
+                        <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark uppercase font-bold mb-1">
+                            {isAluguel ? 'Modalidade' : 'Taxa de Juros'}
+                        </p>
                         <p className="font-bold text-gray-900 dark:text-white">
-                            {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : loan.frequency === 'Quinzenal' ? 'a.q.' : 'a.m.'}
+                            {isAluguel 
+                                ? 'Aluguel de Dinheiro'
+                                : `${loan.interest_rate}% ${loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : loan.frequency === 'Quinzenal' ? 'a.q.' : 'a.m.'}`}
                         </p>
                     </div>
                     <div
@@ -1673,7 +1817,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 {/* History */}
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 mb-6">
                     <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-sm font-bold text-primary dark:text-white">Histórico de Parcelas</h3>
+                        <h3 className="text-sm font-bold text-primary dark:text-white">{isAluguel ? 'Histórico de Diárias' : 'Histórico de Parcelas'}</h3>
                         {!isSelectionMode && (
                             <span
                                 className="text-xs text-accent-blue font-medium cursor-pointer"
@@ -1718,7 +1862,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                                 <div className={`flex-1 flex justify-between items-center ${inst.status === 'future' && !isSelectionMode ? 'opacity-60' : ''}`}>
                                     <div>
-                                        <p className="text-sm font-bold text-primary dark:text-white">Parcela #{String(inst.number).padStart(2, '0')}</p>
+                                        <p className="text-sm font-bold text-primary dark:text-white">{isAluguel ? 'Diária' : 'Parcela'} #{String(inst.number).padStart(2, '0')}</p>
                                         <p className="text-[10px] text-text-sub-light dark:text-text-sub-dark">
                                             {inst.status === 'paid' ? `Paga` :
                                                 inst.status === 'late' ? `Vencido desde ${(inst.originalDate || inst.date).toLocaleDateString()}` :
@@ -1785,7 +1929,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             {loan.status !== 'paid' && (
                                 <button
                                     onClick={() => {
-                                        if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
+                                        if (loan.frequency === 'Aluguel') {
+                                            setShowAluguelPaymentModal(true);
+                                        } else if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
                                             setShowMensalPaymentModal(true);
                                         } else {
                                             setShowPaymentModal(true);
@@ -1803,7 +1949,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </button>
                             )}
 
-                            {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && (
+                            {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && loan.frequency !== 'Aluguel' && (
                                 <button
                                     onClick={toggleSelectionMode}
                                     className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-100 dark:border-gray-700 shadow-sm transition-all active:scale-[0.96]"
@@ -1969,7 +2115,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         {loan.status !== 'paid' && (
                             <button
                                 onClick={() => {
-                                    if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
+                                    if (loan.frequency === 'Aluguel') {
+                                        setShowAluguelPaymentModal(true);
+                                    } else if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
                                         setShowMensalPaymentModal(true);
                                     } else {
                                         setShowPaymentModal(true);
@@ -2020,7 +2168,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         {/* Card 1: Saldo Devedor Restante */}
                         <div className="bg-white dark:bg-card-dark rounded-3xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
                             <div className="flex items-center justify-between mb-3">
-                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Saldo Restante</span>
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">
+                                    {isAluguel ? 'Capital Pendente de Devolução' : 'Saldo Restante'}
+                                </span>
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                                     displayStatus === 'active' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
                                     displayStatus === 'late' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
@@ -2033,9 +2183,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 R$ {installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                             <div className="flex items-center justify-between text-xs text-gray-400 mt-2 pt-2 border-t border-gray-100 dark:border-gray-800">
-                                <span>{paidCount === totalCount ? 'Todos os pagamentos foram quitados' : `${totalCount - paidCount} parcela(s) pendente(s)`}</span>
+                                <span>
+                                    {isAluguel 
+                                        ? (paidCount === totalCount ? 'Todos os dias quitados' : `${installmentsList.filter(i => i.status !== 'paid').length} diária(s) pendente(s)`) 
+                                        : (paidCount === totalCount ? 'Todos os pagamentos foram quitados' : `${totalCount - paidCount} parcela(s) pendente(s)`)}
+                                </span>
                                 <span className="font-semibold text-gray-600 dark:text-gray-400">
-                                    {loan.installment_value ? `Parcelas de R$ ${(loan.installment_value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
+                                    {isAluguel 
+                                        ? `Diária de R$ ${(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` 
+                                        : (loan.installment_value ? `Parcelas de R$ ${(loan.installment_value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '')}
                                 </span>
                             </div>
 
@@ -2090,22 +2246,30 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 <div className="flex-1 space-y-2.5 min-w-0">
                                     <div className="grid grid-cols-2 gap-2.5">
                                         <div className="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800">
-                                            <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider">Total da Dívida</p>
+                                            <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider">
+                                                {isAluguel ? 'Capital Alugado' : 'Total da Dívida'}
+                                            </p>
                                             <p className="text-sm xl:text-base font-black text-gray-900 dark:text-white mt-0.5 whitespace-nowrap">
                                                 R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                         <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
-                                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-black tracking-wider">Total Amortizado</p>
+                                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-black tracking-wider">
+                                                {isAluguel ? 'Capital Devolvido' : 'Total Amortizado'}
+                                            </p>
                                             <p className="text-sm xl:text-base font-black text-emerald-600 dark:text-emerald-400 mt-0.5 whitespace-nowrap">
                                                 R$ {displayTotalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                     </div>
                                     <div className="p-2.5 px-3 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                                        <span className="text-[10px] text-gray-400 uppercase font-black tracking-wider">Parcelas Pagas</span>
+                                        <span className="text-[10px] text-gray-400 uppercase font-black tracking-wider">
+                                            {isAluguel ? 'Diárias Pagas' : 'Parcelas Pagas'}
+                                        </span>
                                         <span className="text-xs font-black text-gray-900 dark:text-white">
-                                            {paidCount} de {totalCount} parcelas ({percentage}%)
+                                            {isAluguel 
+                                                ? `${paidCount} diárias quitadas`
+                                                : `${paidCount} de ${totalCount} parcelas (${percentage}%)`}
                                         </span>
                                     </div>
                                 </div>
@@ -2115,21 +2279,31 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         {/* Card 3: Ficha Técnica (Grid 2x2) */}
                         <div className="grid grid-cols-2 gap-4">
                             <div className="bg-white dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">Valor Solicitado</p>
+                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">
+                                    {isAluguel ? 'Capital Inicial' : 'Valor Solicitado'}
+                                </p>
                                 <p className="text-base font-black text-gray-900 dark:text-white">
                                     R$ {originalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </p>
                             </div>
                             <div className="bg-white dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">Valor da Parcela</p>
+                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">
+                                    {isAluguel ? 'Diária do Aluguel' : 'Valor da Parcela'}
+                                </p>
                                 <p className="text-base font-black text-gray-900 dark:text-white">
-                                    {loan.installments}x de R$ {(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {isAluguel 
+                                        ? `R$ ${(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / dia`
+                                        : `${loan.installments}x de R$ ${(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                                 </p>
                             </div>
                             <div className="bg-white dark:bg-card-dark p-4 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">Taxa de Juros</p>
+                                <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1">
+                                    {isAluguel ? 'Modalidade' : 'Taxa de Juros'}
+                                </p>
                                 <p className="text-base font-black text-gray-900 dark:text-white">
-                                    {loan.interest_rate}% {loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : loan.frequency === 'Quinzenal' ? 'a.q.' : 'a.m.'}
+                                    {isAluguel 
+                                        ? 'Aluguel de Dinheiro'
+                                        : `${loan.interest_rate}% ${loan.frequency === 'Semanal' ? 'a.s.' : loan.frequency === 'Diária' ? 'a.d.' : loan.frequency === 'Quinzenal' ? 'a.q.' : 'a.m.'}`}
                                 </p>
                             </div>
                             <div
@@ -2168,7 +2342,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 {loan.status !== 'paid' && (
                                     <button
                                         onClick={() => {
-                                            if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
+                                            if (loan.frequency === 'Aluguel') {
+                                                setShowAluguelPaymentModal(true);
+                                            } else if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
                                                 setShowMensalPaymentModal(true);
                                             } else {
                                                 setShowPaymentModal(true);
@@ -2187,7 +2363,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     </button>
                                 )}
 
-                                {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && (
+                                {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && loan.frequency !== 'Aluguel' && (
                                     <button
                                         onClick={toggleSelectionMode}
                                         className="w-full py-3 px-4 rounded-2xl bg-gray-50 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-800 dark:text-gray-200 font-bold text-xs border border-gray-200 dark:border-gray-700 transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer"
@@ -2289,9 +2465,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         <div className="bg-white dark:bg-card-dark rounded-3xl p-6 lg:p-7 border border-gray-100 dark:border-gray-800 shadow-sm">
                             <div className="flex items-center justify-between mb-6">
                                 <div>
-                                    <h3 className="text-base font-black text-gray-900 dark:text-white tracking-tight">Cronograma de Parcelas</h3>
+                                    <h3 className="text-base font-black text-gray-900 dark:text-white tracking-tight">
+                                        {isAluguel ? 'Histórico de Diárias' : 'Cronograma de Parcelas'}
+                                    </h3>
                                     <p className="text-xs text-gray-400 mt-0.5">
-                                        {installmentsList.length} parcela{installmentsList.length > 1 ? 's' : ''} no total • {paidCount} liquidada{paidCount !== 1 ? 's' : ''}
+                                        {isAluguel 
+                                            ? `${installmentsList.length} diária${installmentsList.length > 1 ? 's' : ''} no total • ${paidCount} liquidada${paidCount !== 1 ? 's' : ''}`
+                                            : `${installmentsList.length} parcela${installmentsList.length > 1 ? 's' : ''} no total • ${paidCount} liquidada${paidCount !== 1 ? 's' : ''}`}
                                     </p>
                                 </div>
                             </div>
@@ -2340,7 +2520,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                             <div>
                                                 <div className="flex items-center gap-2">
                                                     <p className="text-sm font-black text-gray-900 dark:text-white">
-                                                        Parcela #{String(inst.number).padStart(2, '0')}
+                                                        {isAluguel ? 'Diária' : 'Parcela'} #{String(inst.number).padStart(2, '0')}
                                                     </p>
                                                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                                                         inst.status === 'paid' ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400' :
@@ -2678,6 +2858,250 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     </div>
                 </div>
             )}
+
+            {/* Modal de Pagamento de Aluguel */}
+            {showAluguelPaymentModal && loan && (() => {
+                const dailyFee = loan.installment_value || 0;
+                const unpaidDays = installmentsList.filter(i => i.status !== 'paid');
+                const pendingRent = unpaidDays.length * dailyFee;
+                const rentToPay = aluguelDaysToPay * dailyFee;
+                const totalPayoff = Number(loan.amount) + (aluguelIncludePendingOnPayoff ? pendingRent : 0);
+
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setShowAluguelPaymentModal(false); setAluguelPaymentMode('menu'); }}></div>
+                        <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200 border border-gray-100 dark:border-gray-800">
+                            
+                            {aluguelPaymentMode === 'menu' && (
+                                <>
+                                    <div className="flex flex-col items-center text-center mb-5">
+                                        <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mb-2">
+                                            <Banknote className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                                        </div>
+                                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Aluguel de Dinheiro</h3>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            {loan.client?.name || 'Cliente'} • Capital: R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                    </div>
+
+                                    {/* Card de Resumo de Diárias */}
+                                    <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 mb-4 space-y-2">
+                                        <div className="flex justify-between items-center text-xs">
+                                            <span className="text-gray-500 dark:text-gray-400">Diária do Aluguel</span>
+                                            <span className="font-bold text-gray-900 dark:text-white">R$ {dailyFee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} / dia</span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-xs">
+                                            <span className="text-gray-500 dark:text-gray-400">Diárias Pendentes</span>
+                                            <span className={`font-bold ${unpaidDays.length > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600'}`}>
+                                                {unpaidDays.length} dia{unpaidDays.length !== 1 ? 's' : ''} (R$ {pendingRent.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-xs border-t border-gray-200 dark:border-gray-700/60 pt-2">
+                                            <span className="text-gray-500 dark:text-gray-400">Total Já Recebido</span>
+                                            <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                                R$ {(Number(loan.total_interest_paid) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2.5">
+                                        {/* 1. Receber Diárias */}
+                                        <button
+                                            onClick={() => {
+                                                setAluguelDaysToPay(Math.max(1, unpaidDays.length));
+                                                setAluguelPaymentMode('rent');
+                                            }}
+                                            disabled={processing}
+                                            className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md shadow-emerald-500/20 transition-all active:scale-[0.98]"
+                                        >
+                                            <div className="flex items-center gap-2.5">
+                                                <Wallet className="w-4 h-4" />
+                                                <span>Receber Diárias de Aluguel</span>
+                                            </div>
+                                            <ChevronRight className="w-4 h-4 opacity-80" />
+                                        </button>
+
+                                        {/* 2. Devolver Capital e Encerrar */}
+                                        <button
+                                            onClick={() => setAluguelPaymentMode('payoff')}
+                                            disabled={processing}
+                                            className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-gray-900 dark:bg-white hover:bg-black text-white dark:text-gray-900 font-bold text-xs shadow-md transition-all active:scale-[0.98]"
+                                        >
+                                            <div className="flex items-center gap-2.5">
+                                                <CheckCircle2 className="w-4 h-4" />
+                                                <span>Devolver Capital e Quitar</span>
+                                            </div>
+                                            <span className="font-mono text-[11px] opacity-90">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                        </button>
+
+                                        {/* 3. Amortizar Parte do Capital */}
+                                        <button
+                                            onClick={() => {
+                                                setShowAluguelPaymentModal(false);
+                                                setAluguelPaymentMode('menu');
+                                                setShowAmortizationPage(true);
+                                            }}
+                                            disabled={processing}
+                                            className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-bold text-xs border border-gray-200 dark:border-gray-700 transition-all active:scale-[0.98]"
+                                        >
+                                            <div className="flex items-center gap-2.5">
+                                                <TrendingDown className="w-4 h-4" />
+                                                <span>Devolução Parcial de Capital</span>
+                                            </div>
+                                            <ChevronRight className="w-4 h-4 opacity-60" />
+                                        </button>
+
+                                        <button
+                                            onClick={() => { setShowAluguelPaymentModal(false); setAluguelPaymentMode('menu'); }}
+                                            className="w-full py-2.5 text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors uppercase tracking-wider mt-1 text-center"
+                                        >
+                                            Cancelar
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+
+                            {aluguelPaymentMode === 'rent' && (
+                                <>
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Receber Diárias</h3>
+                                        <button onClick={() => setAluguelPaymentMode('menu')} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full">
+                                            <ArrowLeft className="w-4 h-4 text-gray-500" />
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block mb-1.5">
+                                                Quantidade de Diárias
+                                            </label>
+                                            <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-800 p-2 rounded-2xl border border-gray-200 dark:border-gray-700">
+                                                <button
+                                                    onClick={() => setAluguelDaysToPay(Math.max(1, aluguelDaysToPay - 1))}
+                                                    className="w-10 h-10 rounded-xl bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center font-bold text-gray-700 dark:text-white active:scale-95 transition"
+                                                >
+                                                    <Minus className="w-4 h-4" />
+                                                </button>
+                                                <input
+                                                    type="number"
+                                                    value={aluguelDaysToPay}
+                                                    onChange={(e) => setAluguelDaysToPay(Math.max(1, parseInt(e.target.value) || 1))}
+                                                    className="w-full text-center text-2xl font-black bg-transparent outline-none text-gray-900 dark:text-white font-mono"
+                                                />
+                                                <button
+                                                    onClick={() => setAluguelDaysToPay(aluguelDaysToPay + 1)}
+                                                    className="w-10 h-10 rounded-xl bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center font-bold text-gray-700 dark:text-white active:scale-95 transition"
+                                                >
+                                                    <Plus className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Atalhos rápidos */}
+                                        <div className="flex gap-2">
+                                            {[1, 5, 7, unpaidDays.length].filter((v, idx, arr) => v > 0 && arr.indexOf(v) === idx).map((n) => (
+                                                <button
+                                                    key={n}
+                                                    onClick={() => setAluguelDaysToPay(n)}
+                                                    className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition ${aluguelDaysToPay === n ? 'bg-emerald-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
+                                                >
+                                                    {n === unpaidDays.length ? `Pendentes (${n})` : `${n}d`}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* Card Valor Total */}
+                                        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 text-center">
+                                            <p className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 tracking-wider mb-1">
+                                                Total a Receber ({aluguelDaysToPay} diária{aluguelDaysToPay > 1 ? 's' : ''})
+                                            </p>
+                                            <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+                                                R$ {rentToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                            <p className="text-[11px] text-gray-500 mt-1">
+                                                100% de lucro (capital de R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} segue intacto)
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            onClick={() => executeAluguelRentPayment(aluguelDaysToPay, rentToPay)}
+                                            disabled={processing}
+                                            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3.5 rounded-2xl font-bold shadow-md shadow-emerald-500/20 transition active:scale-[0.98] flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+                                        >
+                                            {processing ? 'Processando...' : `Confirmar Recebimento de R$ ${rentToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+
+                            {aluguelPaymentMode === 'payoff' && (
+                                <>
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Devolver Capital</h3>
+                                        <button onClick={() => setAluguelPaymentMode('menu')} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full">
+                                            <ArrowLeft className="w-4 h-4 text-gray-500" />
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 space-y-2">
+                                            <div className="flex justify-between items-center text-xs">
+                                                <span className="text-gray-500 dark:text-gray-400">Capital Emprestado</span>
+                                                <span className="font-bold text-gray-900 dark:text-white">
+                                                    R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                            {pendingRent > 0 && (
+                                                <div className="flex justify-between items-center text-xs">
+                                                    <span className="text-gray-500 dark:text-gray-400">Diárias Pendentes ({unpaidDays.length}d)</span>
+                                                    <span className="font-bold text-rose-600 dark:text-rose-400">
+                                                        + R$ {pendingRent.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {pendingRent > 0 && (
+                                            <label className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={aluguelIncludePendingOnPayoff}
+                                                    onChange={(e) => setAluguelIncludePendingOnPayoff(e.target.checked)}
+                                                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                                                />
+                                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                                    Cobrar diárias pendentes junto com o capital
+                                                </span>
+                                            </label>
+                                        )}
+
+                                        <div className="p-4 rounded-2xl bg-gray-900 text-white dark:bg-white dark:text-gray-900 text-center">
+                                            <p className="text-[10px] uppercase font-bold opacity-70 tracking-wider mb-1">
+                                                Total a Devolver para Quitar
+                                            </p>
+                                            <p className="text-3xl font-black font-mono">
+                                                R$ {totalPayoff.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                            <p className="text-[11px] opacity-75 mt-1">
+                                                O contrato será finalizado e o saldo zerado.
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            onClick={() => executeAluguelFullPayoff(aluguelIncludePendingOnPayoff, pendingRent)}
+                                            disabled={processing}
+                                            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3.5 rounded-2xl font-bold shadow-md shadow-emerald-500/20 transition active:scale-[0.98] flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+                                        >
+                                            {processing ? 'Processando...' : `Confirmar Quitação de R$ ${totalPayoff.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* Receipt Modal */}
             {showReceiptModal && (
@@ -3449,12 +3873,16 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     <button
                                         onClick={() => {
                                             setSelectedInstallmentForDetail(null);
-                                            setShowSinglePaymentConfirmModal(true);
+                                            if (loan.frequency === 'Aluguel') {
+                                                executeAluguelRentPayment(1, inst.value);
+                                            } else {
+                                                setShowSinglePaymentConfirmModal(true);
+                                            }
                                         }}
                                         className="w-full bg-[#5AAB22] hover:bg-[#4E961D] text-white py-3.5 rounded-2xl font-bold shadow-md shadow-emerald-600/20 transition active:scale-[0.98] flex items-center justify-center gap-2 text-sm"
                                     >
                                         <Check className="w-4 h-4 stroke-[3]" />
-                                        Pagar esta Parcela Agora
+                                        {isAluguel ? 'Pagar esta Diária Agora' : 'Pagar esta Parcela Agora'}
                                     </button>
                                 )}
 
