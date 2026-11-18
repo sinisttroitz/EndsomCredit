@@ -51,7 +51,7 @@ BEGIN
         name, cap, daily, paid_inst, total_inst, start_date, credit_balance, freq, skip_sat, skip_sun, skip_hol
     ) VALUES
         ('Wanderson Uber', 1300.00, 84.50, 14, 20, '2026-08-29', 68.00, 'Diária', false, true, true),
-        ('Butieira', 2000.00, 230.00, 4, 10, '2026-10-23', 0.00, 'Diária', false, true, true),
+        ('Butieira', 2000.00, 230.00, 0, 10, '2026-10-23', 0.00, 'Diária', false, true, true),
         ('Eduardo', 480.00, 33.00, 4, 20, '2026-10-29', 0.00, 'Diária', false, true, true),
         ('Irmão do Chico do Regis', 500.00, 35.00, 7, 20, '2026-10-20', 0.00, 'Diária', false, true, true),
         ('Miriam', 1120.00, 78.00, 5, 20, '2026-10-28', 0.00, 'Diária', false, true, true),
@@ -70,7 +70,7 @@ BEGIN
         ('Juliana', 1500.00, 87.50, 9, 24, '2026-10-29', 61.00, 'Diária', false, true, true),
         ('João Victor', 1300.00, 50.00, 2, 37, '2026-10-26', 0.00, 'Diária', false, true, true),
         ('Daniel', 1000.00, 65.00, 11, 20, '2026-10-31', 0.00, 'Diária', false, true, true),
-        ('Wagner', 1000.00, 70.00, 2, 20, '2026-10-10', 0.00, 'Diária', false, true, true);
+        ('Wagner', 1000.00, 70.00, 5, 20, '2026-11-10', 0.00, 'Diária', false, true, true);
 
     -- 4. Processar cada cliente e empréstimo
     FOR rec IN SELECT * FROM temp_import_diarias_quinzenas LOOP
