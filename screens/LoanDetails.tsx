@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { ArrowLeft, ChevronLeft, MoreHorizontal, Check, Clock, Circle, Banknote, FileText, X, PlusCircle, AlertTriangle, Share2, Trash2, QrCode, Copy, Calendar, RefreshCw, Edit2, Plus, Minus, Wallet, TrendingDown, ChevronRight, HelpCircle, Info, Calculator, XCircle, Link2, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { generatePixPayload } from '../utils/pixUtils';
 import { openWhatsApp } from '../utils/whatsappUtils';
@@ -19,6 +19,8 @@ interface LoanDetailsProps {
 
 export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewLoan }) => {
     const [loan, setLoan] = useState<Loan | null>(null);
+    const [amortizationsList, setAmortizationsList] = useState<any[]>([]);
+    const [viewMode, setViewMode] = useState<'schedule' | 'timeline'>('schedule');
     const [installmentsList, setInstallmentsList] = useState<Installment[]>([]);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
@@ -30,6 +32,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [aluguelPaymentMode, setAluguelPaymentMode] = useState<'menu' | 'rent' | 'payoff'>('menu');
     const [aluguelDaysToPay, setAluguelDaysToPay] = useState(1);
     const [aluguelIncludePendingOnPayoff, setAluguelIncludePendingOnPayoff] = useState(true);
+    const [showOlderPaidAluguel, setShowOlderPaidAluguel] = useState(false);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
     const [receiptData, setReceiptData] = useState<any>(null);
     const [showReceiptImageModal, setShowReceiptImageModal] = useState(false);
@@ -37,9 +40,21 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [showExtractImageModal, setShowExtractImageModal] = useState(false);
     const [showAVModal, setShowAVModal] = useState(false);
     const [showAVConfirmModal, setShowAVConfirmModal] = useState(false);
-    const [avConfirmData, setAvConfirmData] = useState<{ paidCount: number, remainingCredit: number, paidAmount: number } | null>(null);
+    const [avConfirmData, setAvConfirmData] = useState<{ 
+        paidCount: number, 
+        remainingCredit: number, 
+        paidAmount: number,
+        mensalAction?: 'credit_only' | 'renew' | 'full',
+        avInputAmount?: number
+    } | null>(null);
     const [showRenewConfirmModal, setShowRenewConfirmModal] = useState(false);
-    const [renewConfirmData, setRenewConfirmData] = useState<{ amountToPay: number, nextDueDate: string, nextValue: number, type: 'full' | 'renew' } | null>(null);
+    const [renewConfirmData, setRenewConfirmData] = useState<{ 
+        amountToPay: number, 
+        nextDueDate: string, 
+        nextValue: number, 
+        type: 'full' | 'renew',
+        usedCredit?: number
+    } | null>(null);
     const [avAmount, setAvAmount] = useState('');
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [deletePassword, setDeletePassword] = useState('');
@@ -136,7 +151,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 .update({
                     balance: result.newBalance,
                     amount: Math.max(0, Number(loan.amount) - preview.distribution.principalPaid), // Update principal
-                    due_date: isPaidOff ? loan.due_date : nextDueISO,
+                    due_date: isPaidOff ? loan.due_date : (loan.frequency === 'Aluguel' ? loan.due_date : nextDueISO),
                     status: isPaidOff ? 'paid' : 'active',
                     total_interest_paid: newTotalInterestPaid,
                     amount_paid: newAmountPaid
@@ -513,6 +528,43 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         const currentCredit = Number(loan.client?.credit_balance) || 0;
         let totalAvailable = avRequestedAmount + currentCredit;
 
+        // Suporte a AV no Mensal / Contratos de parcela única
+        const isMensalLoan = loan.frequency === 'Mensal' || (loan.frequency === 'Quinzenal' && (loan.installments || 1) <= 1);
+        if (isMensalLoan) {
+            const principal = Number(loan.amount);
+            const totalFines = fines.reduce((acc, curr) => acc + curr.fine_value, 0);
+            const interestToPay = Math.max(0, Number(loan.balance) - principal) + totalFines;
+            const fullPayoff = Number(loan.balance) + totalFines;
+
+            let action: 'credit_only' | 'renew' | 'full' = 'credit_only';
+            let paid = 0;
+            let remaining = totalAvailable;
+
+            if (fullPayoff > 0 && totalAvailable >= fullPayoff - 0.01) {
+                action = 'full';
+                paid = fullPayoff;
+                remaining = Math.max(0, totalAvailable - fullPayoff);
+            } else if (interestToPay > 0 && totalAvailable >= interestToPay - 0.01) {
+                action = 'renew';
+                paid = interestToPay;
+                remaining = Math.max(0, totalAvailable - interestToPay);
+            } else {
+                action = 'credit_only';
+                paid = 0;
+                remaining = totalAvailable;
+            }
+
+            setAvConfirmData({
+                paidCount: action === 'credit_only' ? 0 : 1,
+                remainingCredit: remaining,
+                paidAmount: paid,
+                mensalAction: action,
+                avInputAmount: avRequestedAmount
+            });
+            setShowAVConfirmModal(true);
+            return;
+        }
+
         // Filter unpaid installments and sort by date (number)
         const unpaidInstallments = installmentsList
             .filter(i => i.status !== 'paid')
@@ -552,11 +604,56 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     };
     const executeAVPayment = async (paidAmount: number, newCreditBalance: number) => {
         if (!loan) return;
+        const currentConfirm = avConfirmData;
         setShowAVConfirmModal(false);
         setAvConfirmData(null);
         setProcessing(true);
 
         try {
+            // Processamento Mensal do AV
+            if (currentConfirm?.mensalAction) {
+                if (currentConfirm.mensalAction === 'credit_only') {
+                    const { error: clientError } = await supabase
+                        .from('clients')
+                        .update({ credit_balance: newCreditBalance })
+                        .eq('id', loan.client_id);
+                    if (clientError) throw clientError;
+
+                    const inputAmount = currentConfirm.avInputAmount || 0;
+                    if (inputAmount > 0) {
+                        await supabase.from('loan_amortizations').insert({
+                            loan_id: loan.id,
+                            amount_paid: inputAmount,
+                            principal_paid: 0,
+                            interest_paid: inputAmount,
+                            fine_paid: 0,
+                            previous_balance: loan.balance,
+                            new_balance: loan.balance
+                        });
+                    }
+
+                    setShowAVModal(false);
+                    setAvAmount('');
+                    await fetchLoanData();
+
+                    setAlertModal({
+                        open: true,
+                        title: 'Adiantamento Registrado!',
+                        message: `Adiantamento de R$ ${inputAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} registrado como saldo de crédito do cliente!`
+                    });
+                    return;
+                } else if (currentConfirm.mensalAction === 'renew') {
+                    await executeMensalPayment('renew', newCreditBalance);
+                    setShowAVModal(false);
+                    setAvAmount('');
+                    return;
+                } else if (currentConfirm.mensalAction === 'full') {
+                    await executeMensalPayment('full', newCreditBalance);
+                    setShowAVModal(false);
+                    setAvAmount('');
+                    return;
+                }
+            }
             // Calculate base amount to abate from balance (only original installment values)
             const unpaidInstallments = installmentsList
                 .filter(i => i.status !== 'paid')
@@ -618,6 +715,20 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 .eq('id', loan.client_id);
 
             if (clientError) throw clientError;
+
+            // Record AV in loan_amortizations
+            const inputAv = currentConfirm?.avInputAmount || paidAmount;
+            if (inputAv > 0) {
+                await supabase.from('loan_amortizations').insert({
+                    loan_id: loan.id,
+                    amount_paid: inputAv,
+                    principal_paid: baseValueToAbate,
+                    interest_paid: extraProfit,
+                    fine_paid: 0,
+                    previous_balance: loan.balance,
+                    new_balance: newBalance
+                });
+            }
 
             setShowAVModal(false);
             setAvAmount('');
@@ -903,6 +1014,18 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const finesList = finesData || [];
             setFines(finesList);
 
+            // Fetch Amortizations / Renewals History
+            try {
+                const { data: amortsData } = await supabase
+                    .from('loan_amortizations')
+                    .select('*')
+                    .eq('loan_id', loanId)
+                    .order('created_at', { ascending: false });
+                setAmortizationsList(amortsData || []);
+            } catch (e) {
+                console.error("Erro ao buscar amortizações:", e);
+            }
+
             setLoan(finalData);
             const list = generateInstallments(finalData, finesList);
 
@@ -1157,6 +1280,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         if (!loan) return;
 
         const totalFines = fines.reduce((acc, curr) => acc + curr.fine_value, 0);
+        const clientCredit = Number(loan.client?.credit_balance) || 0;
 
         if (type === 'renew') {
             // Calculate renewal details for the message
@@ -1186,10 +1310,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             const interest = principal * (Number(loan.interest_rate) / 100);
             const newBalance = principal + interest;
 
-            const interestToPay = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
+            const rawInterestToPay = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
+            const creditToUse = Math.min(clientCredit, rawInterestToPay);
+            const amountToPayNow = Math.max(0, rawInterestToPay - creditToUse);
 
             setRenewConfirmData({
-                amountToPay: interestToPay,
+                amountToPay: amountToPayNow,
+                usedCredit: creditToUse,
                 nextDueDate: formattedDate,
                 nextValue: newBalance,
                 type: 'renew'
@@ -1197,9 +1324,13 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             setShowRenewConfirmModal(true);
         } else {
             // Quitar Total
-            const totalToPay = Number(loan.balance) + totalFines;
+            const rawTotalToPay = Number(loan.balance) + totalFines;
+            const creditToUse = Math.min(clientCredit, rawTotalToPay);
+            const amountToPayNow = Math.max(0, rawTotalToPay - creditToUse);
+
             setRenewConfirmData({
-                amountToPay: totalToPay,
+                amountToPay: amountToPayNow,
+                usedCredit: creditToUse,
                 nextDueDate: '',
                 nextValue: 0,
                 type: 'full'
@@ -1208,14 +1339,16 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         }
     };
 
-    const executeMensalPayment = async (type: 'full' | 'renew') => {
+    const executeMensalPayment = async (type: 'full' | 'renew', targetCreditBalance?: number, usedCredit?: number) => {
         if (!loan) return;
+        const usedCreditAmount = usedCredit !== undefined ? usedCredit : (renewConfirmData?.usedCredit || 0);
         setShowRenewConfirmModal(false);
         setRenewConfirmData(null);
         setProcessing(true);
         try {
             let updates: any = {};
             const totalFines = fines.reduce((acc, curr) => acc + curr.fine_value, 0);
+            let newBalance = 0;
 
             const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
             const currentAmountPaid = loan.amount_paid !== undefined && loan.amount_paid !== null
@@ -1259,7 +1392,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 // Reset balance to Principal + Interest
                 const principal = Number(loan.amount);
                 const interest = principal * (Number(loan.interest_rate) / 100);
-                const newBalance = principal + interest;
+                newBalance = principal + interest;
 
                 // Calculate interest paid in this renewal (Current Balance - Principal) + Fines
                 const interestPaid = Math.max(0, Number(loan.balance) - principal) + totalFines;
@@ -1289,6 +1422,40 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     .delete()
                     .eq('loan_id', loan.id);
                 if (finesError) console.error("Error deleting fines", finesError);
+            }
+
+            // Registrar amortização e atualizar saldo de crédito do cliente
+            if (type === 'renew') {
+                const interestPaid = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
+                if (interestPaid > 0) {
+                    await supabase.from('loan_amortizations').insert({
+                        loan_id: loan.id,
+                        amount_paid: interestPaid,
+                        principal_paid: 0,
+                        interest_paid: interestPaid,
+                        fine_paid: totalFines,
+                        previous_balance: loan.balance,
+                        new_balance: newBalance
+                    });
+                }
+            } else if (type === 'full') {
+                const interestPaid = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
+                await supabase.from('loan_amortizations').insert({
+                    loan_id: loan.id,
+                    amount_paid: Number(loan.balance) + totalFines,
+                    principal_paid: Number(loan.amount),
+                    interest_paid: interestPaid,
+                    fine_paid: totalFines,
+                    previous_balance: loan.balance,
+                    new_balance: 0
+                });
+            }
+
+            if (targetCreditBalance !== undefined) {
+                await supabase.from('clients').update({ credit_balance: targetCreditBalance }).eq('id', loan.client_id);
+            } else if (usedCreditAmount > 0) {
+                const currentCredit = Number(loan.client?.credit_balance) || 0;
+                await supabase.from('clients').update({ credit_balance: Math.max(0, currentCredit - usedCreditAmount) }).eq('id', loan.client_id);
             }
 
             setShowMensalPaymentModal(false);
@@ -1437,19 +1604,17 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         if (!loan) return;
 
         const paidInstallments = installmentsList.filter(i => i.status === 'paid');
-
-        if (paidInstallments.length === 0) {
-            setAlertModal({
-                open: true,
-                title: 'Sem Pagamentos',
-                message: 'Nenhum pagamento registrado para este empréstimo.'
-            });
-            return;
-        }
-
         const now = new Date().toLocaleString('pt-BR');
 
         if (type === 'last') {
+            if (paidInstallments.length === 0) {
+                setAlertModal({
+                    open: true,
+                    title: 'Sem Pagamentos',
+                    message: 'Ainda não há pagamentos registrados para gerar o comprovante de parcela.'
+                });
+                return;
+            }
             const lastPaid = paidInstallments[paidInstallments.length - 1];
             const stored = loan ? getStoredPaidDates(loan.id)[lastPaid.number] : null;
             const today = new Date();
@@ -1482,12 +1647,15 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         }
 
         // Prepare data for Extract Image
-        const totalDebt = (loan.installment_value || 0) * (loan.installments || 1);
+        const isAluguelLoan = loan.frequency === 'Aluguel';
+        const totalDebt = isAluguelLoan ? Number(loan.amount) : (loan.installment_value || 0) * (loan.installments || 1);
         const displayTotalPaid = loan.status === 'paid' && loan.amount_paid
             ? Number(loan.amount_paid)
-            : Math.max(0, totalDebt - Number(loan.balance));
+            : (isAluguelLoan ? (Number(loan.total_interest_paid) || 0) : Math.max(0, totalDebt - Number(loan.balance)));
 
-        const currentBalance = installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0);
+        const currentBalance = isAluguelLoan
+            ? Number(loan.balance)
+            : installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0);
 
         const formatDate = (d: any) => {
             if (!d) return undefined;
@@ -1502,12 +1670,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
         const remainingSummary = {
             remainingCount: pendingInstallments.length,
-            totalCount: loan.installments || installmentsList.length,
+            totalCount: isAluguelLoan ? installmentsList.length : (loan.installments || installmentsList.length),
             paidCount: paidInstallments.length,
             installmentValue: loan.installment_value || (nextPending?.value ?? 0),
             nextInstallmentNumber: nextPending?.number,
             nextDueDate: formatDate(nextPending?.date),
-            finalDueDate: formatDate(lastPending?.date),
+            finalDueDate: isAluguelLoan ? 'Livre (até quitação)' : formatDate(lastPending?.date),
             lateCount: lateInstallments.length,
             lateAmount: lateInstallments.reduce((sum, i) => sum + i.value, 0)
         };
@@ -1520,6 +1688,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             balance: currentBalance,
             creditAvailable: loan.client?.credit_balance,
             remainingSummary,
+            isAluguel: isAluguelLoan,
             installments: paidInstallments.map(i => ({
                 number: i.number,
                 date: formatDate(i.date) || '',
@@ -1564,11 +1733,283 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     }
 
     const isAluguel = loan.frequency === 'Aluguel';
-    const totalDebt = isAluguel ? Number(loan.amount) : (loan.installment_value || 0) * (loan.installments || 1);
+    const isMensal = loan.frequency === 'Mensal';
+    const totalDebt = isAluguel 
+        ? Number(loan.amount) 
+        : isMensal 
+            ? Number(loan.balance) 
+            : (loan.installment_value || 0) * (loan.installments || 1);
     const totalPaid = isAluguel
         ? (loan.status === 'paid' ? Number(loan.amount) : 0)
-        : Math.max(0, totalDebt - Number(loan.balance));
+        : isMensal
+            ? (Number(loan.total_interest_paid) || 0) + Math.max(0, Number(loan.amount) - (Number(loan.balance) - Number(loan.installment_value)))
+            : Math.max(0, totalDebt - Number(loan.balance));
     const percentage = loan.status === 'paid' ? 100 : (isAluguel ? (loan.balance <= 0 ? 100 : 0) : Math.max(0, loan.progress || 0));
+
+    // Linha do tempo e extrato histórico do contrato (Cálculo regular seguro sem violação de Hooks)
+    const timelineEvents: any[] = [];
+    let importedPaidCount = 0;
+    let importedPaidAmount = 0;
+
+    amortizationsList.forEach(a => {
+        const amt = Number(a.amount_paid) || 0;
+        const intPaid = Number(a.interest_paid) || 0;
+        const prinPaid = Number(a.principal_paid) || 0;
+        const finePaid = Number(a.fine_paid) || 0;
+        const prevBal = Number(a.previous_balance) || 0;
+        const newBal = Number(a.new_balance) || 0;
+        const date = a.created_at ? new Date(a.created_at) : new Date();
+
+        let type: 'renew' | 'amortization' | 'full' | 'credit' = 'amortization';
+        let title = 'Amortização de Capital (AV)';
+        let badge = 'Amortização';
+        let details = 'Abatimento no saldo devedor do contrato.';
+
+        const isImportRecord = !isMensal && !isAluguel && Math.abs(prevBal - totalDebt) < 1 && newBal > 0 && prinPaid > 0;
+        const isCreditOnlyAV = Math.abs(prevBal - newBal) < 0.01 && prinPaid === 0 && intPaid === 0 && amt > 0;
+
+        if (isImportRecord) {
+            const instVal = Number(loan.installment_value) || 1;
+            const instCount = Math.round(amt / instVal);
+            importedPaidCount += instCount;
+            importedPaidAmount += amt;
+            type = 'amortization';
+            title = instCount > 0 ? `Carga Inicial (${instCount} parcelas pagas)` : 'Parcelas Anteriores (Carga Inicial)';
+            badge = 'Carga Inicial';
+            details = instCount > 0 
+                ? `${instCount} parcelas quitadas no carnê antes da migração para o sistema.` 
+                : 'Parcelas quitadas no carnê antes da migração para o sistema.';
+        } else if (isCreditOnlyAV) {
+            type = 'credit';
+            title = 'Adiantamento de Valores (Crédito)';
+            badge = 'Crédito em Haver';
+            details = 'Adiantamento guardado como saldo de crédito do cliente para futuras parcelas.';
+        } else if (newBal <= 0.01 && (prinPaid > 0 || amt >= prevBal)) {
+            type = 'full';
+            title = 'Quitação do Empréstimo';
+            badge = 'Quitação';
+            details = 'Contrato 100% quitado e finalizado.';
+        } else if (prinPaid <= 0.01 && intPaid > 0) {
+            type = 'renew';
+            title = 'Renovação de Juros';
+            badge = 'Renovação';
+            details = 'Pagamento de juros do ciclo. Vencimento estendido.';
+        } else if (prinPaid > 0) {
+            type = 'amortization';
+            title = 'Amortização de Capital (AV)';
+            badge = 'Amortização';
+            details = `Capital próprio abatido em R$ ${prinPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`;
+        }
+
+        timelineEvents.push({
+            id: a.id,
+            date,
+            dateFormatted: date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+            type,
+            title,
+            badge,
+            amount: amt,
+            interestPaid: intPaid,
+            principalPaid: prinPaid,
+            finePaid,
+            previousBalance: prevBal,
+            newBalance: newBal,
+            details
+        });
+    });
+
+    // Se for empréstimo parcelado (Diária, Semanal, Quinzenal), calcular parcelas pagas no sistema
+    if (!isMensal && !isAluguel) {
+        const paidInstallments = installmentsList.filter(i => i.status === 'paid');
+        const systemPaidCount = paidInstallments.length - importedPaidCount;
+        if (systemPaidCount > 0) {
+            const instVal = Number(loan.installment_value) || 0;
+            const systemPaidTotal = systemPaidCount * instVal;
+            const baseBefore = totalDebt - importedPaidAmount;
+            const baseAfter = Number(loan.balance);
+            
+            const storedDates = getStoredPaidDates(loan.id);
+            const lastPaidInstNumber = paidInstallments[paidInstallments.length - 1]?.number;
+            const lastDateISO = lastPaidInstNumber ? storedDates[lastPaidInstNumber] : null;
+            const eventDate = lastDateISO ? new Date(lastDateISO) : (paidInstallments[paidInstallments.length - 1]?.date || new Date());
+
+            const startRange = importedPaidCount + 1;
+            const endRange = paidInstallments.length;
+            const rangeText = startRange === endRange ? `${startRange}ª parcela` : `${startRange}ª a ${endRange}ª`;
+
+            timelineEvents.push({
+                id: 'system-paid-installments',
+                date: eventDate,
+                dateFormatted: eventDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                type: 'amortization',
+                title: `${systemPaidCount}x Parcela(s) Liquidada(s) (${rangeText})`,
+                badge: 'Parcelas',
+                amount: systemPaidTotal,
+                interestPaid: 0,
+                principalPaid: systemPaidTotal,
+                finePaid: 0,
+                previousBalance: baseBefore,
+                newBalance: baseAfter,
+                details: `Recebimento de ${systemPaidCount} parcela(s) no sistema via carnê.`
+            });
+        }
+    }
+
+    if (loan.created_at) {
+        const startDate = new Date(loan.created_at);
+        const originalCapital = Number(loan.amount) || 0;
+        timelineEvents.push({
+            id: 'contract-start',
+            date: startDate,
+            dateFormatted: startDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+            type: 'start',
+            title: 'Contrato Criado',
+            badge: 'Início',
+            amount: originalCapital,
+            interestPaid: 0,
+            principalPaid: 0,
+            finePaid: 0,
+            previousBalance: 0,
+            newBalance: isAluguel 
+                ? originalCapital 
+                : isMensal 
+                    ? (Number(loan.installment_value) || (originalCapital * (1 + (Number(loan.interest_rate) || 0) / 100))) 
+                    : totalDebt,
+            details: `Empréstimo concedido • Taxa de ${loan.interest_rate}% • ${loan.frequency}`
+        });
+    }
+
+    timelineEvents.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+    const renewalsCount = timelineEvents.filter(e => e.type === 'renew').length;
+    const totalInterestFromEvents = timelineEvents.reduce((acc, e) => acc + (e.interestPaid || 0), 0) || (Number(loan?.total_interest_paid) || 0);
+
+    const renderTimelineView = () => {
+        const clientCredit = Number(loan.client?.credit_balance) || 0;
+        const nextInstValue = Number(loan.installment_value) || 0;
+        const diffToNext = Math.max(0, nextInstValue - clientCredit);
+
+        return (
+            <div className="space-y-4">
+                {clientCredit > 0 && (
+                    <div className="p-4 rounded-2xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-sm shrink-0">
+                                <Wallet className="w-4 h-4" />
+                            </div>
+                            <div>
+                                <p className="text-xs font-black text-blue-950 dark:text-blue-200">
+                                    Saldo de Crédito Disponível: R$ {clientCredit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                                <p className="text-[11px] text-blue-700 dark:text-blue-400 mt-0.5">
+                                    {isMensal 
+                                        ? 'Valor acumulado em haver para abater nos próximos juros ou na quitação.'
+                                        : diffToNext === 0
+                                            ? 'Crédito suficiente para liquidar a próxima parcela!'
+                                            : `Valor em haver. Faltam apenas R$ ${diffToNext.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} para liquidar a próxima parcela (${paidCount + 1}ª).`}
+                                </p>
+                            </div>
+                        </div>
+                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-100 dark:bg-blue-900/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
+                            Crédito Ativo
+                        </span>
+                    </div>
+                )}
+
+                {timelineEvents.length === 0 ? (
+                    <div className="py-12 flex flex-col items-center justify-center text-center">
+                        <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 flex items-center justify-center mb-2">
+                            <Clock className="w-5 h-5" />
+                        </div>
+                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">Nenhum evento registrado</h4>
+                        <p className="text-xs text-gray-400 mt-0.5">As renovações e amortizações deste contrato aparecerão aqui.</p>
+                    </div>
+                ) : (
+                    <div className="relative pl-6 space-y-4">
+                        <div className="absolute left-[11px] top-3 bottom-3 w-0.5 bg-gray-200 dark:bg-gray-800"></div>
+
+                        {timelineEvents.map((event, idx) => (
+                            <div key={event.id || idx} className="relative flex items-start gap-3.5 group">
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10 border ${
+                                    event.type === 'renew' 
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-400' 
+                                        : event.type === 'amortization'
+                                        ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-400' 
+                                        : event.type === 'full'
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-400' 
+                                        : event.type === 'credit'
+                                        ? 'bg-purple-50 border-purple-200 text-purple-700 dark:bg-purple-950/40 dark:border-purple-800 dark:text-purple-400'
+                                        : 'bg-gray-100 border-gray-200 text-gray-700 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300'
+                                }`}>
+                                    {event.type === 'renew' ? <RefreshCw className="w-3 h-3" /> :
+                                     event.type === 'amortization' ? <TrendingDown className="w-3 h-3" /> :
+                                     event.type === 'full' ? <CheckCircle2 className="w-3 h-3" /> :
+                                     event.type === 'credit' ? <Wallet className="w-3 h-3" /> :
+                                     <Calendar className="w-3 h-3" />}
+                                </div>
+
+                        <div className="flex-1 bg-gray-50/70 dark:bg-gray-800/40 rounded-2xl p-4 border border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700 transition-colors">
+                            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-gray-900 dark:text-white">
+                                        {event.title}
+                                    </span>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600">
+                                        {event.badge}
+                                    </span>
+                                </div>
+                                <span className="text-[11px] font-medium text-gray-400">
+                                    {event.dateFormatted}
+                                </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-gray-200/60 dark:border-gray-700/60">
+                                <div>
+                                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Valor</span>
+                                    <span className="text-xs font-black text-gray-900 dark:text-white">
+                                        R$ {event.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+
+                                {event.interestPaid > 0 && (
+                                    <div>
+                                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Juros</span>
+                                        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                                            + R$ {event.interestPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {event.principalPaid > 0 && (
+                                    <div>
+                                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Capital</span>
+                                        <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                                            - R$ {event.principalPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Saldo Restante</span>
+                                    <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                                        R$ {event.newBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {event.details && (
+                                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">
+                                    {event.details}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
     const paidCount = installmentsList.filter(i => i.status === 'paid').length;
     const totalCount = installmentsList.length;
 
@@ -1585,6 +2026,20 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const displayTotalPaid = loan.status === 'paid' && loan.amount_paid
         ? Number(loan.amount_paid)
         : totalPaid;
+
+    // Para aluguel: agrupamento inteligente de diárias antigas (foco no que está pendente hoje)
+    const paidAluguelList = isAluguel ? installmentsList.filter(i => i.status === 'paid') : [];
+    const unpaidAluguelList = isAluguel ? installmentsList.filter(i => i.status !== 'paid') : [];
+    const olderPaidAluguelList = isAluguel && paidAluguelList.length > 5
+        ? paidAluguelList.slice(0, paidAluguelList.length - 3)
+        : [];
+    const recentPaidAluguelList = isAluguel && paidAluguelList.length > 5
+        ? paidAluguelList.slice(paidAluguelList.length - 3)
+        : paidAluguelList;
+
+    const visibleAluguelList = isAluguel
+        ? (showOlderPaidAluguel ? installmentsList : [...recentPaidAluguelList, ...unpaidAluguelList])
+        : installmentsList;
 
     return (
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
@@ -1814,23 +2269,92 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                     </div>
                 </div>
 
-                {/* History */}
+                {/* History & Timeline */}
                 <div className="bg-card-light dark:bg-card-dark p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 mb-6">
-                    <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-sm font-bold text-primary dark:text-white">{isAluguel ? 'Histórico de Diárias' : 'Histórico de Parcelas'}</h3>
-                        {!isSelectionMode && (
-                            <span
-                                className="text-xs text-accent-blue font-medium cursor-pointer"
-                                onClick={() => setShowAllInstallments(!showAllInstallments)}
-                            >
-                                {showAllInstallments ? 'Ver menos' : 'Ver tudo'}
-                            </span>
-                        )}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+                        <div>
+                            <h3 className="text-sm font-bold text-primary dark:text-white">
+                                {isMensal ? 'Controle do Empréstimo Mensal' : (isAluguel ? 'Histórico de Diárias' : 'Cronograma & Extrato')}
+                            </h3>
+                            {isMensal && (
+                                <p className="text-[11px] text-gray-400 mt-0.5">
+                                    {renewalsCount > 0 
+                                        ? `${renewalsCount} renovação(ões) • R$ ${totalInterestFromEvents.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} em juros` 
+                                        : '1º ciclo (nenhuma renovação ainda)'}
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex items-center border border-gray-200 dark:border-gray-700/60">
+                                <button
+                                    onClick={() => setViewMode('schedule')}
+                                    className={`py-1 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                        viewMode === 'schedule'
+                                            ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-xs'
+                                            : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                                    }`}
+                                >
+                                    {isMensal ? 'Ciclo' : 'Parcelas'}
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('timeline')}
+                                    className={`py-1 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                        viewMode === 'timeline'
+                                            ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-xs'
+                                            : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                                    }`}
+                                >
+                                    <span>Extrato ({timelineEvents.length})</span>
+                                </button>
+                            </div>
+
+                            {!isSelectionMode && !isAluguel && viewMode === 'schedule' && (
+                                <span
+                                    className="text-xs text-accent-blue font-medium cursor-pointer ml-auto"
+                                    onClick={() => setShowAllInstallments(!showAllInstallments)}
+                                >
+                                    {showAllInstallments ? 'Ver menos' : 'Ver tudo'}
+                                </span>
+                            )}
+                        </div>
                     </div>
+
+                    {viewMode === 'timeline' ? (
+                        renderTimelineView()
+                    ) : (
                     <div className="relative space-y-6">
                         <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-100 dark:bg-gray-700"></div>
 
-                        {(showAllInstallments || isSelectionMode ? installmentsList : installmentsList.slice(0, 5)).map((inst) => (
+                        {isAluguel && olderPaidAluguelList.length > 0 && (
+                            <div 
+                                onClick={() => setShowOlderPaidAluguel(!showOlderPaidAluguel)}
+                                className="p-3 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 flex items-center justify-between cursor-pointer transition-all mb-4"
+                            >
+                                <div className="flex items-center gap-2.5">
+                                    <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
+                                        <Check className="w-3.5 h-3.5" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                                            {olderPaidAluguelList.length} diárias anteriores quitadas
+                                        </p>
+                                        <p className="text-[10px] text-gray-400">
+                                            R$ {(olderPaidAluguelList.reduce((acc, i) => acc + i.value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} pagos anteriormente
+                                        </p>
+                                    </div>
+                                </div>
+                                <span className="text-[11px] font-bold text-primary dark:text-white flex items-center gap-1">
+                                    {showOlderPaidAluguel ? 'Recolher' : 'Ver todas'}
+                                    <ChevronRight className={`w-3.5 h-3.5 transition-transform ${showOlderPaidAluguel ? 'rotate-90' : ''}`} />
+                                </span>
+                            </div>
+                        )}
+
+                        {(isAluguel 
+                            ? visibleAluguelList 
+                            : (showAllInstallments || isSelectionMode ? installmentsList : installmentsList.slice(0, 5))
+                        ).map((inst) => (
                             <div
                                 key={inst.number}
                                 className={`relative flex items-center gap-4 transition-all duration-200 ${inst.status !== 'paid' ? 'cursor-pointer active:scale-[0.99]' : 'cursor-pointer active:scale-[0.99]'}`}
@@ -1905,6 +2429,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             </div>
                         ))}
                     </div>
+                    )}
                 </div>
 
                 <div className="mb-10">
@@ -1931,7 +2456,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     onClick={() => {
                                         if (loan.frequency === 'Aluguel') {
                                             setShowAluguelPaymentModal(true);
-                                        } else if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
+                                        } else if (loan.frequency === 'Mensal' || (loan.frequency === 'Quinzenal' && (loan.installments || 1) <= 1)) {
                                             setShowMensalPaymentModal(true);
                                         } else {
                                             setShowPaymentModal(true);
@@ -1949,7 +2474,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </button>
                             )}
 
-                            {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && loan.frequency !== 'Aluguel' && (
+                            {loan.status !== 'paid' && loan.frequency !== 'Mensal' && (loan.frequency !== 'Quinzenal' || (loan.installments || 1) > 1) && loan.frequency !== 'Aluguel' && (
                                 <button
                                     onClick={toggleSelectionMode}
                                     className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-100 dark:border-gray-700 shadow-sm transition-all active:scale-[0.96]"
@@ -2117,8 +2642,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 onClick={() => {
                                     if (loan.frequency === 'Aluguel') {
                                         setShowAluguelPaymentModal(true);
-                                    } else if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
-                                        setShowMensalPaymentModal(true);
+                                    } else if (loan.frequency === 'Mensal' || (loan.frequency === 'Quinzenal' && (loan.installments || 1) <= 1)) {
+                                            setShowMensalPaymentModal(true);
                                     } else {
                                         setShowPaymentModal(true);
                                     }
@@ -2314,7 +2839,21 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     }
                                 }}
                             >
-                                {loan.status === 'paid' ? (
+                                {isMensal ? (
+                                    <>
+                                        <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1 flex items-center justify-between">
+                                            <span>Juros Recebidos</span>
+                                            {renewalsCount > 0 && (
+                                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                                                    {renewalsCount}x renovado
+                                                </span>
+                                            )}
+                                        </p>
+                                        <p className="text-base font-black text-emerald-600 dark:text-emerald-400">
+                                            R$ {totalInterestFromEvents.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                    </>
+                                ) : loan.status === 'paid' ? (
                                     <>
                                         <p className="text-[10px] text-gray-400 uppercase font-black tracking-wider mb-1 flex items-center gap-1">
                                             Juros Pagos
@@ -2344,8 +2883,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                         onClick={() => {
                                             if (loan.frequency === 'Aluguel') {
                                                 setShowAluguelPaymentModal(true);
-                                            } else if (loan.frequency === 'Mensal' || loan.frequency === 'Quinzenal') {
-                                                setShowMensalPaymentModal(true);
+                                            } else if (loan.frequency === 'Mensal' || (loan.frequency === 'Quinzenal' && (loan.installments || 1) <= 1)) {
+                                            setShowMensalPaymentModal(true);
                                             } else {
                                                 setShowPaymentModal(true);
                                             }
@@ -2363,7 +2902,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                     </button>
                                 )}
 
-                                {loan.status !== 'paid' && loan.frequency !== 'Mensal' && loan.frequency !== 'Quinzenal' && loan.frequency !== 'Aluguel' && (
+                                {loan.status !== 'paid' && loan.frequency !== 'Mensal' && (loan.frequency !== 'Quinzenal' || (loan.installments || 1) > 1) && loan.frequency !== 'Aluguel' && (
                                     <button
                                         onClick={toggleSelectionMode}
                                         className="w-full py-3 px-4 rounded-2xl bg-gray-50 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-800 dark:text-gray-200 font-bold text-xs border border-gray-200 dark:border-gray-700 transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer"
@@ -2461,25 +3000,84 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             </div>
                         )}
 
-                        {/* Cronograma de Parcelas */}
+                        {/* Cronograma de Parcelas & Extrato Histórico */}
                         <div className="bg-white dark:bg-card-dark rounded-3xl p-6 lg:p-7 border border-gray-100 dark:border-gray-800 shadow-sm">
-                            <div className="flex items-center justify-between mb-6">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                                 <div>
                                     <h3 className="text-base font-black text-gray-900 dark:text-white tracking-tight">
-                                        {isAluguel ? 'Histórico de Diárias' : 'Cronograma de Parcelas'}
+                                        {isMensal ? 'Histórico & Ciclo do Empréstimo Mensal' : (isAluguel ? 'Histórico de Diárias' : 'Cronograma de Parcelas')}
                                     </h3>
                                     <p className="text-xs text-gray-400 mt-0.5">
-                                        {isAluguel 
-                                            ? `${installmentsList.length} diária${installmentsList.length > 1 ? 's' : ''} no total • ${paidCount} liquidada${paidCount !== 1 ? 's' : ''}`
-                                            : `${installmentsList.length} parcela${installmentsList.length > 1 ? 's' : ''} no total • ${paidCount} liquidada${paidCount !== 1 ? 's' : ''}`}
+                                        {isMensal 
+                                            ? (renewalsCount > 0 
+                                                ? `${renewalsCount} renovação(ões) realizada(s) • R$ ${totalInterestFromEvents.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} em juros recebidos` 
+                                                : '1º ciclo vigente • Aguardando vencimento')
+                                            : (isAluguel 
+                                                ? `${installmentsList.length} diária${installmentsList.length > 1 ? 's' : ''} no total • ${paidCount} liquidada${paidCount !== 1 ? 's' : ''}`
+                                                : `${installmentsList.length} parcela${installmentsList.length > 1 ? 's' : ''} no total • ${paidCount} liquidada${paidCount !== 1 ? 's' : ''}`)}
                                     </p>
+                                </div>
+
+                                <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-xl flex items-center border border-gray-200 dark:border-gray-700/60 self-start sm:self-auto">
+                                    <button
+                                        onClick={() => setViewMode('schedule')}
+                                        className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                            viewMode === 'schedule'
+                                                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-xs'
+                                                : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                                        }`}
+                                    >
+                                        {isMensal ? 'Ciclo Vigente' : 'Cronograma'}
+                                    </button>
+                                    <button
+                                        onClick={() => setViewMode('timeline')}
+                                        className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                            viewMode === 'timeline'
+                                                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-xs'
+                                                : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                                        }`}
+                                    >
+                                        <span>Extrato & Histórico</span>
+                                        <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                                            {timelineEvents.length}
+                                        </span>
+                                    </button>
                                 </div>
                             </div>
 
+                            {viewMode === 'timeline' ? (
+                                renderTimelineView()
+                            ) : (
+                            <>
                             <div className="relative space-y-3.5">
                                 <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-100 dark:bg-gray-800"></div>
 
-                                {installmentsList.map((inst) => (
+                                {isAluguel && olderPaidAluguelList.length > 0 && (
+                                    <div 
+                                        onClick={() => setShowOlderPaidAluguel(!showOlderPaidAluguel)}
+                                        className="p-3.5 bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 flex items-center justify-between cursor-pointer transition-all mb-2"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
+                                                <Check className="w-4 h-4" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-gray-900 dark:text-white">
+                                                    {olderPaidAluguelList.length} diárias anteriores já quitadas
+                                                </p>
+                                                <p className="text-[11px] text-gray-400">
+                                                    Total de R$ {(olderPaidAluguelList.reduce((acc, i) => acc + i.value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} recebidos no período anterior
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <span className="text-xs font-bold text-primary dark:text-white flex items-center gap-1 bg-white dark:bg-gray-700 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                            {showOlderPaidAluguel ? 'Recolher histórico' : 'Ver todas'}
+                                            <ChevronRight className={`w-3.5 h-3.5 transition-transform ${showOlderPaidAluguel ? 'rotate-90' : ''}`} />
+                                        </span>
+                                    </div>
+                                )}
+
+                                {(isAluguel ? visibleAluguelList : installmentsList).map((inst) => (
                                     <div
                                         key={inst.number}
                                         className={`relative flex items-center gap-4 p-3.5 rounded-2xl transition-all duration-150 ${
@@ -2596,6 +3194,8 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                         </button>
                                     </div>
                                 </div>
+                            )}
+                            </>
                             )}
                         </div>
                     </div>
@@ -2776,88 +3376,185 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             )}
 
             {/* Mensal/Quinzenal Payment Modal */}
-            {showMensalPaymentModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMensalPaymentModal(false)}></div>
-                    <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
-                        <div className="flex flex-col items-center text-center mb-6">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Pagamento de Empréstimo</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Escolha como deseja prosseguir com este empréstimo {loan.frequency.toLowerCase()}.
-                            </p>
-                        </div>
+            {showMensalPaymentModal && loan && (() => {
+                const totalFines = fines.reduce((acc, curr) => acc + curr.fine_value, 0);
+                const clientCredit = Number(loan.client?.credit_balance) || 0;
 
-                        <div className="space-y-3">
-                            {/* 1. Pagar Tudo */}
-                            <button
-                                onClick={() => handleMensalPayment('full')}
-                                disabled={processing}
-                                className="w-full flex flex-col rounded-2xl overflow-hidden shadow-sm transition-transform active:scale-[0.98] disabled:opacity-70 disabled:scale-100 border border-gray-100 dark:border-gray-800"
-                            >
-                                <div className="w-full bg-gray-100 dark:bg-gray-800 py-3.5 px-4 flex items-center justify-center gap-2">
-                                    <Wallet className="w-4 h-4 text-gray-500" />
-                                    <span className="text-[15px] font-extrabold text-[#111827] dark:text-white">
-                                        Pagar Tudo e Encerrar
-                                    </span>
-                                </div>
-                                <div className="w-full bg-[#5AAB22] py-2 px-4 flex items-center justify-center">
-                                    <span className="text-lg font-black text-white">
-                                        R$ {(Number(loan.balance) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                </div>
-                            </button>
+                // 1. Pagar Juros e Renovar
+                const rawInterest = Math.max(0, Number(loan.balance) - Number(loan.amount)) + totalFines;
+                const interestCreditUsed = Math.min(clientCredit, rawInterest);
+                const interestToPayNow = Math.max(0, rawInterest - interestCreditUsed);
 
-                            {/* 2. Pagar Juros */}
-                            <button
-                                onClick={() => handleMensalPayment('renew')}
-                                disabled={processing}
-                                className="w-full flex flex-col rounded-2xl overflow-hidden shadow-sm transition-transform active:scale-[0.98] disabled:opacity-70 disabled:scale-100 border border-gray-100 dark:border-gray-800"
-                            >
-                                <div className="w-full bg-gray-100 dark:bg-gray-800 py-3.5 px-4 flex items-center justify-center gap-2">
-                                    <RefreshCw className="w-4 h-4 text-gray-500" />
-                                    <span className="text-[15px] font-extrabold text-[#111827] dark:text-white">
-                                        Pagar Juros e Renovar
-                                    </span>
-                                </div>
-                                <div className="w-full bg-[#00AEEF] py-2 px-4 flex items-center justify-center">
-                                    <span className="text-lg font-black text-white">
-                                        R$ {(Math.max(0, Number(loan.balance) - Number(loan.amount)) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                </div>
-                            </button>
+                // 2. Quitar Total
+                const rawFullPayoff = Number(loan.balance) + totalFines;
+                const fullCreditUsed = Math.min(clientCredit, rawFullPayoff);
+                const fullToPayNow = Math.max(0, rawFullPayoff - fullCreditUsed);
 
-                            {/* 3. Abater Capital */}
-                            <button
-                                onClick={() => {
-                                    setShowMensalPaymentModal(false);
-                                    setShowAmortizationPage(true);
-                                }}
-                                disabled={processing}
-                                className="w-full flex flex-col rounded-2xl overflow-hidden shadow-sm transition-transform active:scale-[0.98] disabled:opacity-70 disabled:scale-100 border border-gray-100 dark:border-gray-800"
-                            >
-                                <div className="w-full bg-gray-100 dark:bg-gray-800 py-3.5 px-4 flex items-center justify-center gap-2">
-                                    <TrendingDown className="w-4 h-4 text-gray-500" />
-                                    <span className="text-[15px] font-extrabold text-[#111827] dark:text-white">
-                                        Abater Capital
-                                    </span>
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMensalPaymentModal(false)}></div>
+                        <div className="relative bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-md shadow-2xl animate-in fade-in zoom-in duration-200 border border-gray-100 dark:border-gray-800">
+                            {/* Header */}
+                            <div className="flex items-center justify-between pb-4 mb-4 border-b border-gray-100 dark:border-gray-800">
+                                <div>
+                                    <h3 className="text-base font-bold text-gray-900 dark:text-white">Opções de Pagamento</h3>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        Contrato {loan.frequency.toLowerCase()}
+                                    </p>
                                 </div>
-                                <div className="w-full bg-[#F78B1F] py-2 px-4 flex items-center justify-center">
-                                    <span className="text-lg font-black text-white">
-                                        R$ {(Number(loan.balance) + fines.reduce((acc, curr) => acc + curr.fine_value, 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                </div>
-                            </button>
+                                <button
+                                    onClick={() => setShowMensalPaymentModal(false)}
+                                    className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors cursor-pointer"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
 
+                            {/* Saldo de Crédito Sóbrio */}
+                            {clientCredit > 0 && (
+                                <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border border-gray-200/80 dark:border-gray-700 flex items-center justify-between mb-3 text-xs">
+                                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+                                        <Wallet className="w-4 h-4 text-gray-500" />
+                                        <span>Saldo de crédito disponível:</span>
+                                    </div>
+                                    <span className="font-bold text-gray-900 dark:text-white">
+                                        R$ {clientCredit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Lista de Ações - Estilo Bancário Sóbrio / Sem clichês de IA */}
+                            <div className="space-y-2.5">
+                                {/* 1. Pagar Juros e Renovar */}
+                                <button
+                                    onClick={() => handleMensalPayment('renew')}
+                                    disabled={processing}
+                                    className="w-full group p-3.5 rounded-2xl bg-white dark:bg-gray-800/80 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 shadow-xs transition-all flex items-center justify-between gap-3 text-left active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+                                >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-700/60 flex items-center justify-center text-gray-700 dark:text-gray-200 shrink-0">
+                                            <RefreshCw className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <span className="font-semibold text-sm text-gray-900 dark:text-white block">
+                                                Pagar Juros e Renovar
+                                            </span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400 block truncate">
+                                                Novo vencimento para +30 dias
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2.5 shrink-0 text-right">
+                                        <div>
+                                            <span className="text-sm font-bold text-gray-900 dark:text-white block">
+                                                R$ {interestToPayNow.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            {interestCreditUsed > 0 && (
+                                                <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium block">
+                                                    (- R$ {interestCreditUsed.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} saldo)
+                                                </span>
+                                            )}
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 group-hover:translate-x-0.5 transition-all shrink-0" />
+                                    </div>
+                                </button>
+
+                                {/* 2. Quitar Tudo e Encerrar */}
+                                <button
+                                    onClick={() => handleMensalPayment('full')}
+                                    disabled={processing}
+                                    className="w-full group p-3.5 rounded-2xl bg-white dark:bg-gray-800/80 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 shadow-xs transition-all flex items-center justify-between gap-3 text-left active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+                                >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-700/60 flex items-center justify-center text-gray-700 dark:text-gray-200 shrink-0">
+                                            <CheckCircle2 className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <span className="font-semibold text-sm text-gray-900 dark:text-white block">
+                                                Quitar Tudo e Encerrar
+                                            </span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400 block truncate">
+                                                Liquidação total do contrato
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2.5 shrink-0 text-right">
+                                        <div>
+                                            <span className="text-sm font-bold text-gray-900 dark:text-white block">
+                                                R$ {fullToPayNow.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            {fullCreditUsed > 0 && (
+                                                <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium block">
+                                                    (- R$ {fullCreditUsed.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} saldo)
+                                                </span>
+                                            )}
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 group-hover:translate-x-0.5 transition-all shrink-0" />
+                                    </div>
+                                </button>
+
+                                {/* 3. Informar AV / Adiantamento */}
+                                <button
+                                    onClick={() => {
+                                        setShowMensalPaymentModal(false);
+                                        setShowAVModal(true);
+                                    }}
+                                    disabled={processing}
+                                    className="w-full group p-3.5 rounded-2xl bg-white dark:bg-gray-800/80 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 shadow-xs transition-all flex items-center justify-between gap-3 text-left active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+                                >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-700/60 flex items-center justify-center text-gray-700 dark:text-gray-200 shrink-0">
+                                            <Plus className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <span className="font-semibold text-sm text-gray-900 dark:text-white block">
+                                                Informar AV / Adiantamento
+                                            </span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400 block truncate">
+                                                Receber pagamento avulso
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 group-hover:translate-x-0.5 transition-all shrink-0" />
+                                </button>
+
+                                {/* 4. Abater Capital */}
+                                <button
+                                    onClick={() => {
+                                        setShowMensalPaymentModal(false);
+                                        setShowAmortizationPage(true);
+                                    }}
+                                    disabled={processing}
+                                    className="w-full group p-3.5 rounded-2xl bg-white dark:bg-gray-800/80 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 shadow-xs transition-all flex items-center justify-between gap-3 text-left active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+                                >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-700/60 flex items-center justify-center text-gray-700 dark:text-gray-200 shrink-0">
+                                            <TrendingDown className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <span className="font-semibold text-sm text-gray-900 dark:text-white block">
+                                                Abater Capital
+                                            </span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400 block truncate">
+                                                Amortizar parte do principal
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200 group-hover:translate-x-0.5 transition-all shrink-0" />
+                                </button>
+                            </div>
+
+                            {/* Footer Cancel */}
                             <button
                                 onClick={() => setShowMensalPaymentModal(false)}
-                                className="w-full py-4 text-xs font-bold text-red-500 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors uppercase tracking-wider mt-2"
+                                className="w-full mt-4 py-2.5 rounded-xl text-xs font-semibold text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
                             >
                                 Cancelar
                             </button>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* Modal de Pagamento de Aluguel */}
             {showAluguelPaymentModal && loan && (() => {
@@ -3125,7 +3822,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                                 <div>
                                     <h4 className="font-bold text-gray-900 dark:text-white">Última Parcela Paga</h4>
-                                    <p className="text-xs text-gray-500">Comprovante do pagamento mais recente</p>
+                                    <p className="text-xs text-gray-500">
+                                        {paidCount === 0 ? 'Disponível após o 1º pagamento' : 'Comprovante do pagamento mais recente'}
+                                    </p>
                                 </div>
                             </button>
 
@@ -3138,7 +3837,9 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 </div>
                                 <div>
                                     <h4 className="font-bold text-gray-900 dark:text-white">Resumo Completo</h4>
-                                    <p className="text-xs text-gray-500">Extrato de todos os pagamentos</p>
+                                    <p className="text-xs text-gray-500">
+                                        {paidCount === 0 ? 'Extrato com termos iniciais do contrato' : 'Extrato de todos os pagamentos'}
+                                    </p>
                                 </div>
                             </button>
                         </div>
@@ -3190,21 +3891,51 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                 <Info className="w-8 h-8 text-blue-600 dark:text-blue-400" />
                             </div>
 
-                            <h3 className="text-2xl font-black text-gray-900 dark:text-white mb-5 tracking-tighter">Confirmar Pagamento AV</h3>
+                            <h3 className="text-2xl font-black text-gray-900 dark:text-white mb-5 tracking-tighter">
+                                {avConfirmData.mensalAction === 'credit_only'
+                                    ? 'Confirmar Adiantamento'
+                                    : avConfirmData.mensalAction === 'renew'
+                                        ? 'Renovação Mensal (AV)'
+                                        : avConfirmData.mensalAction === 'full'
+                                            ? 'Quitação Total (AV)'
+                                            : 'Confirmar Pagamento AV'}
+                            </h3>
 
                             {/* Cards Section */}
-                            <div className="grid grid-cols-2 gap-3 w-full mb-10">
-                                <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-4 rounded-2xl border-l-4 border-blue-600 flex flex-col items-start text-left">
-                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Parcelas a Pagar</span>
-                                    <span className="text-sm font-black text-gray-900 dark:text-white leading-tight">{avConfirmData.paidCount} Parcela(s)</span>
+                            <div className="grid grid-cols-2 gap-3 w-full mb-6">
+                                <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-4 rounded-2xl flex flex-col items-start text-left">
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+                                        {avConfirmData.mensalAction === 'credit_only' ? 'Adiantamento' : avConfirmData.mensalAction === 'renew' ? 'Juros Pagos' : 'Parcelas a Pagar'}
+                                    </span>
+                                    <span className="text-sm font-black text-gray-900 dark:text-white leading-tight">
+                                        {avConfirmData.mensalAction === 'credit_only' 
+                                            ? `R$ ${(avConfirmData.avInputAmount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                            : avConfirmData.mensalAction === 'renew'
+                                                ? `R$ ${avConfirmData.paidAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                                : `${avConfirmData.paidCount} Parcela(s)`}
+                                    </span>
                                 </div>
                                 <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-4 rounded-2xl flex flex-col items-start text-left">
-                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Saldo de Crédito</span>
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+                                        {avConfirmData.mensalAction === 'credit_only' ? 'Saldo de Crédito' : 'Crédito Restante'}
+                                    </span>
                                     <span className="text-sm font-black text-gray-900 dark:text-white leading-tight">
                                         R$ {avConfirmData.remainingCredit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                 </div>
                             </div>
+
+                            {avConfirmData.mensalAction === 'credit_only' && (
+                                <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-2xl border border-blue-100 dark:border-blue-900/40 text-xs text-blue-800 dark:text-blue-300 mb-6 text-left leading-relaxed">
+                                    Este valor ficará guardado como crédito do cliente para abater nos próximos juros ou na quitação.
+                                </div>
+                            )}
+
+                            {avConfirmData.mensalAction === 'renew' && (
+                                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-100 dark:border-emerald-900/40 text-xs text-emerald-800 dark:text-emerald-300 mb-6 text-left leading-relaxed">
+                                    O valor cobre os juros do mês! O contrato será renovado por mais 30 dias.
+                                </div>
+                            )}
 
                             {/* Action Buttons */}
                             <div className="w-full space-y-4">
@@ -3241,11 +3972,16 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                             </h3>
 
                             <div className="w-full space-y-3 mb-10">
-                                <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-5 rounded-2xl border-l-4 border-blue-600 flex flex-col items-start text-left">
+                                <div className="bg-[#f8f6f6] dark:bg-gray-800/50 p-5 rounded-2xl flex flex-col items-start text-left">
                                     <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 leading-tight">Valor a Pagar Agora</span>
                                     <span className="text-xl font-black text-gray-900 dark:text-white">
                                         R$ {renewConfirmData.amountToPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
+                                    {renewConfirmData.usedCredit && renewConfirmData.usedCredit > 0 ? (
+                                        <span className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-1">
+                                            (Crédito utilizado: - R$ {renewConfirmData.usedCredit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                                        </span>
+                                    ) : null}
                                 </div>
 
                                 {renewConfirmData.type === 'renew' && (

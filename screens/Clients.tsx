@@ -7,6 +7,7 @@ import { getOrCreateRegistrationLink, fetchPendingRegistrations, approveRegistra
 import { AdditionalContactsList } from '../components/AdditionalContactsInput';
 import { formatAddressSummary } from '../utils/clientUtils';
 import { openWhatsApp } from '../utils/whatsappUtils';
+import { matchesClientSearch } from '../utils/searchUtils';
 
 interface ClientsProps {
     onClientSelect: (clientId: string) => void;
@@ -147,23 +148,23 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                 } else {
                     date = new Date(dailyDateTracker);
                     date.setDate(date.getDate() + 1);
+                }
 
-                    while (true) {
-                        const day = date.getDay();
-                        if (loan.skip_saturday && day === 6) {
-                            date.setDate(date.getDate() + 1);
-                            continue;
-                        }
-                        if (loan.skip_sunday && day === 0) {
-                            date.setDate(date.getDate() + 1);
-                            continue;
-                        }
-                        if (loan.skip_holidays && isNationalHoliday(date)) {
-                            date.setDate(date.getDate() + 1);
-                            continue;
-                        }
-                        break;
+                while (true) {
+                    const day = date.getDay();
+                    if (loan.skip_saturday && day === 6) {
+                        date.setDate(date.getDate() + 1);
+                        continue;
                     }
+                    if (loan.skip_sunday && day === 0) {
+                        date.setDate(date.getDate() + 1);
+                        continue;
+                    }
+                    if (loan.skip_holidays && isNationalHoliday(date)) {
+                        date.setDate(date.getDate() + 1);
+                        continue;
+                    }
+                    break;
                 }
                 dailyDateTracker = new Date(date);
             } else {
@@ -231,23 +232,23 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                 } else {
                     date = new Date(dailyDateTracker);
                     date.setDate(date.getDate() + 1);
+                }
 
-                    while (true) {
-                        const day = date.getDay();
-                        if (loan.skip_saturday && day === 6) {
-                            date.setDate(date.getDate() + 1);
-                            continue;
-                        }
-                        if (loan.skip_sunday && day === 0) {
-                            date.setDate(date.getDate() + 1);
-                            continue;
-                        }
-                        if (loan.skip_holidays && isNationalHoliday(date)) {
-                            date.setDate(date.getDate() + 1);
-                            continue;
-                        }
-                        break;
+                while (true) {
+                    const day = date.getDay();
+                    if (loan.skip_saturday && day === 6) {
+                        date.setDate(date.getDate() + 1);
+                        continue;
                     }
+                    if (loan.skip_sunday && day === 0) {
+                        date.setDate(date.getDate() + 1);
+                        continue;
+                    }
+                    if (loan.skip_holidays && isNationalHoliday(date)) {
+                        date.setDate(date.getDate() + 1);
+                        continue;
+                    }
+                    break;
                 }
                 dailyDateTracker = new Date(date);
             } else {
@@ -360,7 +361,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
             matchesFilter = client.status === filter;
         }
 
-        const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesSearch = matchesClientSearch(client, searchTerm);
         return matchesFilter && matchesSearch;
     });
 
@@ -383,7 +384,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                     <input
                                         autoFocus
                                         className="w-48 py-2.5 pl-4 pr-10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-sm"
-                                        placeholder="Buscar..."
+                                        placeholder="Buscar nome ou telefone..."
                                         type="text"
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
@@ -557,7 +558,7 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                         <input
                                             type="text"
                                             className="w-full sm:w-64 pl-9 pr-4 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full font-medium text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all shadow-sm"
-                                            placeholder="Buscar cliente..."
+                                            placeholder="Buscar por nome ou telefone..."
                                             value={searchTerm}
                                             onChange={(e) => setSearchTerm(e.target.value)}
                                         />

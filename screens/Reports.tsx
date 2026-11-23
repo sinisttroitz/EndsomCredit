@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ArrowLeft, TrendingUp, DollarSign, Users, AlertTriangle, Download, Calendar, Filter, Phone, CheckCircle, Clock, ArrowDown, Wallet, PieChart as PieIcon, Info, Search, Bell, Share2, Zap, Layers, RefreshCw, X } from 'lucide-react';
+import { ArrowLeft, TrendingUp, DollarSign, Users, AlertTriangle, Download, Calendar, Filter, Phone, CheckCircle, Clock, ArrowDown, Wallet, PieChart as PieIcon, Info, Search, Bell, Share2, Zap, Layers, RefreshCw, X, MessageCircle, ArrowUpRight, Copy, Check } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan, Client } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
@@ -26,6 +26,9 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
     const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'paid' | 'late'>('all');
     const [filterClient, setFilterClient] = useState('');
     const [filterFrequency, setFilterFrequency] = useState<'all' | 'Diária' | 'Quinzenal' | 'Mensal'>('all');
+    const [profitSearch, setProfitSearch] = useState('');
+    const [profitStatusFilter, setProfitStatusFilter] = useState<'all' | 'active' | 'late' | 'paid'>('active');
+    const [copiedProfit, setCopiedProfit] = useState(false);
 
     const [alertModal, setAlertModal] = useState<{
         open: boolean;
@@ -114,7 +117,8 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
                 const bal = Number(loan.balance) || 0;
                 const instVal = Number(loan.installment_value) || 0;
                 const instCount = Number(loan.installments) || 1;
-                const totalDebt = instVal * instCount;
+                const isMensal = loan.frequency === 'Mensal';
+                const totalDebt = isMensal ? (cap + instVal) : (instVal * instCount);
                 const paid = loan.amount_paid !== undefined && loan.amount_paid !== null
                     ? Number(loan.amount_paid)
                     : Math.max(0, totalDebt - bal);
@@ -173,6 +177,7 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
         let totalPrincipalReceived = 0;
         let activeContractualCapital = 0;
         let activeContractualInterest = 0;
+        let activeBalance = 0;
 
         const now = new Date();
         const startOfWeek = new Date(now);
@@ -188,11 +193,12 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
         filteredLoans.forEach(loan => loanMap.set(loan.id, loan));
 
         filteredLoans.forEach(loan => {
-            const installmentValue = Number(loan.installment_value) || 0;
-            const installmentsCount = Number(loan.installments) || 1;
-            const totalDebt = installmentValue * installmentsCount;
             const amount = Number(loan.amount) || 0;
             const balance = Number(loan.balance) || 0;
+            const installmentValue = Number(loan.installment_value) || 0;
+            const installmentsCount = Number(loan.installments) || 1;
+            const isMensal = loan.frequency === 'Mensal';
+            const totalDebt = isMensal ? (amount + installmentValue) : (installmentValue * installmentsCount);
 
             // Logica do Dashboard para "Total Recebido" (Dívida Abatida)
             let loanReceived = 0;
@@ -227,6 +233,7 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
                 const totalPendingFines = loanFines.reduce((sum, f) => sum + (Number(f.fine_value) || 0), 0);
 
                 totalToReceive += (loanReceived + balance + totalPendingFines);
+                activeBalance += balance;
                 activeClients.add(loan.client_id);
 
                 const contractTotal = totalDebt > 0 ? totalDebt : amount;
@@ -288,7 +295,10 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
             interestFromActiveExceeded,
             totalInterestPending,
             totalPrincipalReceived,
-            portfolioYield
+            portfolioYield,
+            activeCapital: activeContractualCapital,
+            activeBalance,
+            activeContractualInterest
         };
     }, [filteredLoans, amortizations, filterPeriod]);
 
@@ -363,6 +373,212 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
             { name: 'Atrasados', value: late, color: '#EF4444' }
         ];
     }, [filteredLoans]);
+
+    // Cálculos Operacionais do Dia
+    const todayStart = useMemo(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return d;
+    }, []);
+
+    const todayZero = useMemo(() => {
+        const d = new Date();
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }, []);
+
+    const receivedToday = useMemo(() => {
+        return amortizations
+            .filter(a => a.created_at && new Date(a.created_at).getTime() >= todayStart.getTime())
+            .reduce((sum, a) => sum + (Number(a.amount_paid) || 0), 0);
+    }, [amortizations, todayStart]);
+
+    const todayCharges = useMemo(() => {
+        const list: any[] = [];
+        loans.forEach(loan => {
+            if (loan.status !== 'paid') {
+                const loanFines = fines.filter(f => f.loan_id === loan.id);
+                const insts = generateInstallments(loan, loanFines);
+                const todayInsts = insts.filter(inst => {
+                    const instDate = new Date(inst.date);
+                    const instDateZero = new Date(instDate.getFullYear(), instDate.getMonth(), instDate.getDate());
+                    return instDateZero.getTime() === todayZero.getTime() && inst.status !== 'paid';
+                });
+
+                todayInsts.forEach(inst => {
+                    list.push({
+                        loanId: loan.id,
+                        clientId: loan.client_id,
+                        clientName: loan.client?.name || 'Cliente',
+                        clientPhone: loan.client?.phone,
+                        clientAvatar: loan.client?.avatar_url,
+                        installmentNumber: inst.number,
+                        totalInstallments: loan.installments || 1,
+                        amount: inst.value,
+                        frequency: loan.frequency || 'Diária'
+                    });
+                });
+            }
+        });
+        return list;
+    }, [loans, fines, todayZero]);
+
+    const enrichedLateLoans = useMemo(() => {
+        const list: any[] = [];
+        loans.forEach(loan => {
+            if (loan.status !== 'paid') {
+                const loanFines = fines.filter(f => f.loan_id === loan.id);
+                const insts = generateInstallments(loan, loanFines);
+                const overdueInsts = insts.filter(inst => inst.status === 'late');
+                if (overdueInsts.length > 0 || loan.status === 'late') {
+                    const overdueAmount = overdueInsts.reduce((sum, i) => sum + i.value, 0) || Number(loan.balance);
+                    const oldestDate = overdueInsts[0]?.date;
+                    const daysLate = oldestDate 
+                        ? Math.max(1, Math.floor((todayZero.getTime() - new Date(oldestDate).getTime()) / (1000 * 60 * 60 * 24)))
+                        : 1;
+
+                    list.push({
+                        ...loan,
+                        overdueAmount,
+                        daysLate,
+                        overdueCount: overdueInsts.length
+                    });
+                }
+            }
+        });
+        return list.sort((a, b) => (b.daysLate || 0) - (a.daysLate || 0));
+    }, [loans, fines, todayZero]);
+
+    // Lista detalhada de lucro por cliente e contrato
+    const clientProfitList = useMemo(() => {
+        return loans.map(loan => {
+            const cap = Number(loan.amount) || 0;
+            const instVal = Number(loan.installment_value) || 0;
+            const instCount = Number(loan.installments) || 1;
+            const isMensal = loan.frequency === 'Mensal';
+            const isAluguel = loan.frequency === 'Aluguel';
+
+            let contractTotal = 0;
+            let expectedProfit = 0;
+
+            if (isMensal) {
+                contractTotal = cap + instVal;
+                expectedProfit = instVal;
+            } else if (isAluguel) {
+                contractTotal = cap;
+                expectedProfit = Number(loan.total_interest_paid) || 0;
+            } else {
+                contractTotal = instVal * instCount;
+                expectedProfit = Math.max(0, contractTotal - cap);
+            }
+
+            const profitMargin = cap > 0 ? (expectedProfit / cap) * 100 : 0;
+
+            let realizedProfit = 0;
+            const renewalsInt = Number(loan.total_interest_paid) || 0;
+            if (loan.status === 'paid') {
+                realizedProfit = expectedProfit;
+            } else {
+                const paid = Number(loan.amount_paid) || 0;
+                if (isMensal) {
+                    realizedProfit = renewalsInt;
+                } else if (contractTotal > 0 && expectedProfit > 0) {
+                    const profitRatio = expectedProfit / contractTotal;
+                    realizedProfit = renewalsInt + (paid * profitRatio);
+                }
+            }
+
+            const pendingProfit = Math.max(0, expectedProfit - realizedProfit);
+
+            return {
+                id: loan.id,
+                clientId: loan.client_id,
+                clientName: loan.client?.name || 'Cliente',
+                clientPhone: loan.client?.phone,
+                frequency: loan.frequency || 'Diária',
+                amount: cap,
+                contractTotal,
+                expectedProfit,
+                profitMargin,
+                realizedProfit,
+                pendingProfit,
+                status: loan.status,
+                balance: Number(loan.balance) || 0
+            };
+        });
+    }, [loans]);
+
+    const filteredClientProfitList = useMemo(() => {
+        return clientProfitList.filter(item => {
+            if (profitStatusFilter !== 'all') {
+                if (profitStatusFilter === 'active' && item.status === 'paid') return false;
+                if (profitStatusFilter === 'late' && item.status !== 'late') return false;
+                if (profitStatusFilter === 'paid' && item.status !== 'paid') return false;
+            }
+            if (profitSearch && !item.clientName.toLowerCase().includes(profitSearch.toLowerCase())) {
+                return false;
+            }
+            return true;
+        });
+    }, [clientProfitList, profitStatusFilter, profitSearch]);
+
+    const profitTotals = useMemo(() => {
+        return filteredClientProfitList.reduce((acc, item) => {
+            acc.amount += item.amount;
+            acc.contractTotal += item.contractTotal;
+            acc.expectedProfit += item.expectedProfit;
+            acc.realizedProfit += item.realizedProfit;
+            acc.pendingProfit += item.pendingProfit;
+            acc.balance += item.balance;
+            return acc;
+        }, {
+            amount: 0,
+            contractTotal: 0,
+            expectedProfit: 0,
+            realizedProfit: 0,
+            pendingProfit: 0,
+            balance: 0
+        });
+    }, [filteredClientProfitList]);
+
+    const handleCopyProfitSummary = () => {
+        if (filteredClientProfitList.length === 0) return;
+        let text = `📊 *DEMONSTRATIVO DE LUCRO POR CLIENTE (AGICRED)*\n`;
+        text += `Data: ${new Date().toLocaleDateString('pt-BR')}\n\n`;
+        filteredClientProfitList.forEach(item => {
+            const exp = item.expectedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const real = item.realizedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            text += `• *${item.clientName}* (${item.frequency})\n   Lucro Previsto: R$ ${exp} (${item.profitMargin.toFixed(0)}%) | Realizado: R$ ${real}\n`;
+        });
+        text += `\n-----------------------------\n`;
+        text += `💰 *LUCRO TOTAL PREVISTO:* R$ ${profitTotals.expectedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+        text += `✅ *LUCRO JÁ REALIZADO:* R$ ${profitTotals.realizedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+        text += `⏳ *LUCRO A REALIZAR:* R$ ${profitTotals.pendingProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+
+        navigator.clipboard.writeText(text);
+        setCopiedProfit(true);
+        setTimeout(() => setCopiedProfit(false), 2500);
+    };
+
+    const handleSendWhatsAppReminder = (e: React.MouseEvent, clientName: string, phone?: string, amount?: number, type: 'today' | 'late' = 'today', daysLate?: number) => {
+        e.stopPropagation();
+        if (!phone) {
+            setAlertModal({
+                open: true,
+                title: 'Telefone Ausente',
+                message: 'Este cliente não possui telefone cadastrado.'
+            });
+            return;
+        }
+        const formattedAmount = (amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        let message = '';
+        if (type === 'late') {
+            const lateText = daysLate && daysLate > 1 ? `está em atraso há ${daysLate} dias` : 'venceu e encontra-se pendente';
+            message = `Olá, ${clientName}! Tudo bem?\nPassando para lembrar que sua parcela de R$ ${formattedAmount} ${lateText}. Poderia nos dar um retorno sobre a previsão de pagamento, por gentileza? Obrigado!`;
+        } else {
+            message = `Olá, ${clientName}! Tudo bem?\nPassando para lembrar que sua parcela de R$ ${formattedAmount} vence hoje. Segue a chave Pix para pagamento quando puder realizar. Tenha um ótimo dia!`;
+        }
+        openWhatsApp(phone, message);
+    };
 
     const handleWhatsApp = (phone: string, name: string, amount: number) => {
         if (!phone) {
@@ -719,49 +935,45 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
                     </main>
 
                     {/* --- DESKTOP VIEW --- */}
-                    <main className="hidden md:flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar bg-gray-50 dark:bg-[#0B0B0F]">
-                        <div className="max-w-[1400px] w-full mx-auto space-y-8" style={{ zoom: 0.8 }}>
+                    <main className="hidden md:flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar bg-background-light dark:bg-background-dark">
+                        <div className="max-w-[1400px] w-full mx-auto space-y-6">
                             {/* Header Desktop */}
-                            <div className="flex flex-col gap-5">
+                            <div className="flex flex-col gap-4">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <div className="flex items-center gap-3">
-                                            <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">Dashboard</h1>
+                                            <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Painel de Controle</h1>
                                             {filterFrequency !== 'all' && (
                                                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
                                                     <span>{filterFrequency}</span>
-                                                    <button onClick={() => setFilterFrequency('all')} className="text-gray-400 hover:text-gray-900 dark:hover:text-white ml-0.5" title="Limpar filtro">
+                                                    <button onClick={() => setFilterFrequency('all')} className="text-gray-400 hover:text-gray-900 dark:hover:text-white ml-0.5 cursor-pointer" title="Limpar filtro">
                                                         <X className="w-3 h-3" />
                                                     </button>
                                                 </div>
                                             )}
                                         </div>
-                                        <p className="text-sm font-medium text-gray-500 mt-1">Acompanhe a saúde financeira da sua carteira em tempo real.</p>
+                                        <p className="text-xs font-medium text-gray-500 mt-1">Acompanhe a movimentação de hoje e a saúde financeira da sua carteira em tempo real.</p>
                                     </div>
                                     <div className="flex items-center gap-3">
                                         <button
                                             onClick={() => setShowReportModal(true)}
-                                            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm active:scale-95"
+                                            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 text-sm font-semibold rounded-xl transition-all shadow-xs active:scale-95 cursor-pointer"
                                         >
-                                            <Share2 className="w-4 h-4" /> Fechamento WhatsApp
+                                            <Share2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Fechamento WhatsApp
                                         </button>
                                         <button
                                             onClick={exportToExcel}
-                                            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-bold rounded-xl transition-all border border-gray-200 dark:border-gray-700 shadow-sm"
+                                            className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-semibold rounded-xl transition-all border border-gray-200 dark:border-gray-700 shadow-xs cursor-pointer"
                                             title="Exportar Planilha Excel"
                                         >
-                                            <Download className="w-4 h-4" /> Exportar
-                                        </button>
-                                        <button className="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors relative opacity-60">
-                                            <Bell className="w-5 h-5" />
+                                            <Download className="w-4 h-4" /> Exportar Excel
                                         </button>
                                     </div>
                                 </div>
 
-                                {/* Barra de Filtros Segmentada Neutra (Estilo AGICRED) */}
+                                {/* Barra de Filtros Segmentada Neutra */}
                                 <div className="flex items-center justify-between gap-4 flex-wrap">
-                                    {/* Modalidades */}
-                                    <div className="bg-gray-200/80 dark:bg-gray-800 p-1 rounded-xl flex items-center border border-gray-300/80 dark:border-gray-700">
+                                    <div className="bg-gray-200/60 dark:bg-gray-800/60 p-1 rounded-xl flex items-center border border-gray-200 dark:border-gray-700/60">
                                         {[
                                             { id: 'all', label: 'Todas', count: loans.length },
                                             { id: 'Diária', label: 'Diária', count: loans.filter(l => l.frequency === 'Diária').length },
@@ -771,429 +983,528 @@ export const Reports: React.FC<ReportsProps> = ({ onBack, onLoanSelect }) => {
                                             <button
                                                 key={opt.id}
                                                 onClick={() => setFilterFrequency(opt.id as any)}
-                                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                                                className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
                                                     filterFrequency === opt.id
-                                                        ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-sm'
-                                                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                                                        ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-xs'
+                                                        : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
                                                 }`}
                                             >
                                                 <span>{opt.label}</span>
-                                                <span className="text-[10px] font-semibold opacity-60">({opt.count})</span>
+                                                <span className="text-[10px] opacity-60">({opt.count})</span>
                                             </button>
                                         ))}
                                     </div>
 
-                                    {/* Período */}
-                                    <div className="bg-gray-200/80 dark:bg-gray-800 p-1 rounded-xl flex items-center border border-gray-300/80 dark:border-gray-700">
-                                        {[
-                                            { id: 'all', label: 'Todo Período' },
-                                            { id: 'today', label: 'Hoje' },
-                                            { id: 'week', label: 'Semana' },
-                                            { id: 'month', label: 'Mês' }
-                                        ].map((p) => (
-                                            <button
-                                                key={p.id}
-                                                onClick={() => setFilterPeriod(p.id as any)}
-                                                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${
-                                                    filterPeriod === p.id
-                                                        ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-sm'
-                                                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                                                }`}
-                                            >
-                                                {p.label}
-                                            </button>
-                                        ))}
+                                    <div className="text-xs font-medium text-gray-400">
+                                        {loans.filter(l => l.status !== 'paid').length} contratos ativos na carteira
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Top Insight Cards */}
-                            <div className="grid grid-cols-5 gap-4 lg:gap-5">
-                                <div className="bg-white dark:bg-gray-800 p-5 xl:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col justify-between">
-                                    <div className="flex items-center gap-1.5 mb-4 group/tooltip relative z-10 w-fit">
-                                        <div className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">
-                                            {filterFrequency === 'all' ? 'Carteira Ativa' : `Carteira (${filterFrequency})`}
-                                        </div>
-                                        <Info className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 cursor-help" />
-                                        <div className="absolute left-0 top-6 w-60 p-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl text-xs font-normal text-gray-200 opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all z-50 pointer-events-none">
-                                            Soma de todo o capital emprestado + juros previstos que aguardam pagamento.
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-xl lg:text-2xl xl:text-[26px] 2xl:text-3xl font-black text-gray-900 dark:text-white whitespace-nowrap tracking-tight">R$ {summary.totalToReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
-                                        <p className="text-xs font-medium text-gray-400 mt-2 truncate">Capital + Juros a receber</p>
-                                    </div>
+                            {/* 1. MOVIMENTAÇÃO DE HOJE (A Janela Operacional do Dia) */}
+                            <div>
+                                <div className="flex items-center justify-between mb-3">
+                                    <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                        Movimentação de Hoje • {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+                                    </h2>
                                 </div>
 
-                                <div className="bg-white dark:bg-gray-800 p-5 xl:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col justify-between">
-                                    <div className="flex items-center gap-1.5 mb-4 group/tooltip relative z-10 w-fit">
-                                        <div className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Total Recebido</div>
-                                        <Info className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 cursor-help" />
-                                        <div className="absolute left-0 top-6 w-60 p-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl text-xs font-normal text-gray-200 opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all z-50 pointer-events-none">
-                                            Somatório de todos os pagamentos (principal, juros e multas) já liquidados.
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-xl lg:text-2xl xl:text-[26px] 2xl:text-3xl font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap tracking-tight">R$ {summary.totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
-                                        <p className="text-xs font-medium text-gray-400 mt-2 truncate">Capital que já voltou</p>
-                                    </div>
-                                </div>
-
-                                <div className="bg-white dark:bg-gray-800 p-5 xl:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col justify-between">
-                                    <div className="flex items-center gap-1.5 mb-4 group/tooltip relative z-10 w-fit">
-                                        <div className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Em Atraso</div>
-                                        <Info className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 cursor-help" />
-                                        <div className="absolute left-0 top-6 w-60 p-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl text-xs font-normal text-gray-200 opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all z-50 pointer-events-none">
-                                            Somatório de todas as parcelas que já venceram e ainda não foram pagas.
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-xl lg:text-2xl xl:text-[26px] 2xl:text-3xl font-black text-rose-600 dark:text-rose-400 whitespace-nowrap tracking-tight">R$ {summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
-                                        <p className="text-xs font-medium text-gray-400 mt-2 truncate">Valores vencidos pendentes</p>
-                                    </div>
-                                </div>
-
-                                <div className="bg-white dark:bg-gray-800 p-5 xl:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col justify-between">
-                                    <div className="flex items-center gap-1.5 mb-4 group/tooltip relative z-10 w-fit">
-                                        <div className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Juros Recebidos</div>
-                                        <Info className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 cursor-help" />
-                                        <div className="absolute right-0 sm:-right-8 top-6 w-60 p-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl text-xs font-normal text-gray-200 opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all z-50 pointer-events-none">
-                                            Total acumulado de rendimentos (juros e multas) que foram efetivamente recebidos.
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-xl lg:text-2xl xl:text-[26px] 2xl:text-3xl font-black text-gray-900 dark:text-white whitespace-nowrap tracking-tight">R$ {summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
-                                        <p className="text-xs font-medium text-gray-400 mt-2 truncate">Lucro líquido recebido</p>
-                                    </div>
-                                </div>
-
-                                <div className="bg-white dark:bg-gray-800 p-5 xl:p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col justify-between">
-                                    <div className="flex items-center gap-1.5 mb-4 group/tooltip relative z-10 w-fit">
-                                        <div className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Rentab. Média</div>
-                                        <Info className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600 cursor-help" />
-                                        <div className="absolute right-0 sm:-right-8 top-6 w-60 p-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl text-xs font-normal text-gray-200 opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all z-50 pointer-events-none">
-                                            Taxa de retorno médio ponderado sobre o capital emprestado na carteira ativa.
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-xl lg:text-2xl xl:text-[26px] 2xl:text-3xl font-black text-gray-900 dark:text-white whitespace-nowrap tracking-tight">
-                                            {summary.portfolioYield.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
-                                        </h2>
-                                        <p className="text-xs font-medium text-gray-400 mt-2 truncate">Retorno médio da carteira</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Resumo Comparativo por Modalidade (Visível quando em 'Todas') */}
-                            {filterFrequency === 'all' && (
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <h3 className="text-xs font-black uppercase tracking-wider text-gray-400">
-                                            Resumo por Modalidade
-                                        </h3>
-                                        <span className="text-xs text-gray-400 font-medium">
-                                            {loans.length} contratos cadastrados
-                                        </span>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                                        {frequencyBreakdown.map((item) => (
-                                            <div
-                                                key={item.key}
-                                                onClick={() => setFilterFrequency(item.key)}
-                                                className="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-colors shadow-sm cursor-pointer group flex flex-col justify-between"
-                                            >
-                                                <div>
-                                                    {/* Header do Card */}
-                                                    <div className="flex items-center justify-between mb-4">
-                                                        <div>
-                                                            <h4 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">{item.label}</h4>
-                                                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{item.activeCount} ativos • {item.activeClientsCount} clientes</span>
-                                                        </div>
-                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600">
-                                                            {item.yieldRate.toFixed(1)}% rentab.
-                                                        </span>
-                                                    </div>
-
-                                                    {/* Métricas Financeiras */}
-                                                    <div className="space-y-2 mb-4 text-xs">
-                                                        <div className="flex justify-between items-baseline">
-                                                            <span className="text-gray-500 dark:text-gray-400 font-medium">Capital Emprestado</span>
-                                                            <span className="font-bold text-gray-900 dark:text-white">R$ {item.capitalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                        </div>
-                                                        <div className="flex justify-between items-baseline">
-                                                            <span className="text-gray-500 dark:text-gray-400 font-medium">Carteira Total</span>
-                                                            <span className="font-black text-gray-900 dark:text-white">R$ {item.totalContractual.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                        </div>
-                                                        <div className="flex justify-between items-baseline">
-                                                            <span className="text-gray-500 dark:text-gray-400 font-medium">Já Recebido</span>
-                                                            <span className="font-bold text-emerald-600 dark:text-emerald-400">R$ {item.amountPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                        </div>
-                                                        <div className="flex justify-between items-baseline">
-                                                            <span className="text-gray-500 dark:text-gray-400 font-medium">Saldo em Aberto</span>
-                                                            <span className="font-bold text-gray-700 dark:text-gray-300">R$ {item.balanceOpen.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                        </div>
-                                                        {item.lateSum > 0 && (
-                                                            <div className="flex justify-between items-baseline pt-1.5 border-t border-gray-100 dark:border-gray-700">
-                                                                <span className="text-rose-500 font-bold">Em Atraso</span>
-                                                                <span className="font-black text-rose-600 dark:text-rose-400">R$ {item.lateSum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    {/* Barra de Progresso */}
-                                                    <div>
-                                                        <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-1">
-                                                            <span>Amortização</span>
-                                                            <span>{item.progress}% quitado</span>
-                                                        </div>
-                                                        <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                                            <div className="h-full rounded-full transition-all duration-500 bg-gray-900 dark:bg-white" style={{ width: `${Math.min(100, item.progress)}%` }}></div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                {/* Footer do Card */}
-                                                <div className="pt-3 mt-4 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between text-[11px] font-bold text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
-                                                    <span>Filtrar {item.label}</span>
-                                                    <span className="group-hover:translate-x-1 transition-transform">→</span>
-                                                </div>
+                                <div className="grid grid-cols-4 gap-4">
+                                    {/* 1.1 A Cobrar Hoje */}
+                                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">A Cobrar Hoje</span>
+                                            <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/40 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                                                <Clock className="w-4 h-4" />
                                             </div>
-                                        ))}
+                                        </div>
+                                        <div>
+                                            <span className="text-2xl font-black font-manrope text-gray-900 dark:text-white leading-none block">
+                                                R$ {todayCharges.reduce((acc, c) => acc + c.amount, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                                {todayCharges.length === 0 ? 'Nenhum vencimento para hoje' : `${todayCharges.length} cobranças previstas hoje`}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* 1.2 Já Recebido Hoje */}
+                                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Já Recebido Hoje</span>
+                                            <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                                                <CheckCircle className="w-4 h-4" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-2xl font-black font-manrope text-emerald-600 dark:text-emerald-400 leading-none block">
+                                                R$ {receivedToday.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                                {receivedToday > 0 ? 'Valores confirmados no caixa' : 'Aguardando primeiros pagamentos'}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* 1.3 Total em Atraso */}
+                                    <div className={`rounded-2xl p-5 border shadow-xs transition-all ${
+                                        summary.lateAmount > 0 
+                                            ? 'bg-red-50/40 dark:bg-red-950/20 border-red-200/80 dark:border-red-900/40' 
+                                            : 'bg-white dark:bg-card-dark border-gray-200/70 dark:border-gray-800'
+                                    }`}>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total em Atraso</span>
+                                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                                                summary.lateAmount > 0 
+                                                    ? 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400' 
+                                                    : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                                            }`}>
+                                                <AlertTriangle className="w-4 h-4" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className={`text-2xl font-black font-manrope leading-none block ${
+                                                summary.lateAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'
+                                            }`}>
+                                                R$ {summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            <span className={`text-[11px] block mt-1.5 font-medium ${
+                                                summary.lateAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
+                                            }`}>
+                                                {enrichedLateLoans.length > 0 ? `${enrichedLateLoans.length} clientes com atraso pendente` : 'Nenhum atraso no momento'}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* 1.4 Clientes Ativos */}
+                                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Clientes Ativos</span>
+                                            <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-700 dark:text-gray-300">
+                                                <Users className="w-4 h-4" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-2xl font-black font-manrope text-gray-900 dark:text-white leading-none block">
+                                                {summary.activeClientsCount} Ativos
+                                            </span>
+                                            <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                                {loans.filter(l => l.status !== 'paid').length} contratos em andamento
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
-                            )}
-                            {/* Middle Section: Status & Rendimentos */}
+                            </div>
+
+                            {/* 2. SAÚDE DA CARTEIRA ATIVA (Visão Global — Zero Calculadora!) */}
+                            <div>
+                                <div className="flex items-center justify-between mb-3">
+                                    <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                        Saúde da Carteira Ativa (Visão Financeira)
+                                    </h2>
+                                </div>
+
+                                <div className="grid grid-cols-4 gap-4">
+                                    {/* 2.1 Capital Próprio na Praça */}
+                                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Capital na Praça</span>
+                                            <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-700 dark:text-gray-300">
+                                                <DollarSign className="w-4 h-4" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-2xl font-black font-manrope text-gray-900 dark:text-white leading-none block">
+                                                R$ {summary.activeCapital.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                                Capital puro ativo na praça
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* 2.2 Saldo Devedor a Receber */}
+                                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total a Receber</span>
+                                            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                                                <Wallet className="w-4 h-4" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-2xl font-black font-manrope text-indigo-600 dark:text-indigo-400 leading-none block">
+                                                R$ {summary.totalToReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                                Restam R$ {summary.activeBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} em aberto
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* 2.3 Lucro Projetado da Carteira */}
+                                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Lucro Previsto</span>
+                                            <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/40 flex items-center justify-center text-teal-600 dark:text-teal-400">
+                                                <TrendingUp className="w-4 h-4" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-2xl font-black font-manrope text-teal-600 dark:text-teal-400 leading-none block">
+                                                R$ {Math.max(0, summary.totalToReceive - summary.activeCapital).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                                Retorno projetado sobre contratos ativos
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* 2.4 Lucro Já Realizado */}
+                                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Lucro Já Realizado</span>
+                                            <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                                                <ArrowUpRight className="w-4 h-4" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-2xl font-black font-manrope text-emerald-600 dark:text-emerald-400 leading-none block">
+                                                R$ {summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                                Juros e taxas já quitados
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 3. COCKPIT OPERACIONAL (Fila de Atrasados & Vencimentos de Hoje) */}
                             <div className="grid grid-cols-12 gap-6">
-                                {/* Left Col: Status da Carteira (Donut) */}
-                                <div className="col-span-4 space-y-6">
-                                    <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-6 rounded-2xl shadow-sm flex flex-col items-center h-full">
-                                        <h3 className="font-bold text-gray-900 dark:text-white mb-6 w-full text-left text-base">Status da Carteira</h3>
-                                        <div className="relative h-60 w-full flex items-center justify-center">
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <PieChart>
-                                                    <Pie data={statusData} innerRadius={80} outerRadius={105} paddingAngle={5} cornerRadius={6} dataKey="value" stroke="none">
-                                                        {statusData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                                                    </Pie>
-                                                    <Tooltip contentStyle={{ borderRadius: '12px', backgroundColor: 'var(--tw-colors-gray-900)', border: 'none', color: '#FFF' }} itemStyle={{ color: '#FFF' }} />
-                                                </PieChart>
-                                            </ResponsiveContainer>
-                                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Total</span>
-                                                <span className="text-3xl font-black text-gray-900 dark:text-white">{statusData.reduce((a, b) => a + b.value, 0)}</span>
-                                            </div>
+                                {/* 3.1 Coluna da Esquerda (7 colunas): Fila de Cobrança Urgente */}
+                                <div className="col-span-7 bg-white dark:bg-card-dark rounded-2xl p-6 border border-gray-200/70 dark:border-gray-800 shadow-xs flex flex-col">
+                                    <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-100 dark:border-gray-800">
+                                        <div className="flex items-center gap-2.5">
+                                            <h3 className="font-bold text-gray-900 dark:text-white text-base">Fila de Cobrança (Atrasados)</h3>
+                                            {enrichedLateLoans.length > 0 && (
+                                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400">
+                                                    {enrichedLateLoans.length} pendentes
+                                                </span>
+                                            )}
                                         </div>
-                                        <div className="grid grid-cols-3 gap-3 mt-6 w-full">
-                                            {statusData.map((item, idx) => (
-                                                <div key={idx} className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-xl border border-gray-100 dark:border-gray-700/50 text-center flex flex-col items-center justify-center">
-                                                    <div className="w-2.5 h-2.5 rounded-full mb-2" style={{ backgroundColor: item.color }}></div>
-                                                    <p className="text-lg font-black text-gray-900 dark:text-white leading-none mb-1">{item.value}</p>
-                                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{item.name}</p>
+                                    </div>
+
+                                    <div className="flex-1 overflow-x-auto">
+                                        {enrichedLateLoans.length > 0 ? (
+                                            <table className="w-full text-left">
+                                                <thead>
+                                                    <tr className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                                                        <th className="pb-3 pl-1">Cliente</th>
+                                                        <th className="pb-3">Modalidade</th>
+                                                        <th className="pb-3">Valor Vencido</th>
+                                                        <th className="pb-3">Atraso</th>
+                                                        <th className="pb-3 text-right pr-1">Ação</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
+                                                    {enrichedLateLoans.slice(0, 8).map((loan: any) => (
+                                                        <tr 
+                                                            key={loan.id} 
+                                                            onClick={() => onLoanSelect?.(loan.id)}
+                                                            className="group hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors cursor-pointer"
+                                                        >
+                                                            <td className="py-3.5 pl-1">
+                                                                <div className="flex items-center gap-2.5">
+                                                                    <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center text-xs font-bold border border-zinc-200 dark:border-zinc-700 overflow-hidden shrink-0">
+                                                                        {loan.client?.avatar_url && !loan.client.avatar_url.includes('ui-avatars.com') ? (
+                                                                            <img src={loan.client.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                                                                        ) : (
+                                                                            <span>{loan.client?.name?.substring(0, 2).toUpperCase() || 'CL'}</span>
+                                                                        )}
+                                                                    </div>
+                                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white truncate max-w-[140px]">
+                                                                        {loan.client?.name || 'Cliente'}
+                                                                    </span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="py-3.5 text-xs text-gray-500 font-medium">
+                                                                {loan.frequency || 'Diária'}
+                                                            </td>
+                                                            <td className="py-3.5 text-sm font-bold text-red-600 dark:text-red-400 whitespace-nowrap">
+                                                                R$ {Number(loan.overdueAmount || loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            </td>
+                                                            <td className="py-3.5">
+                                                                <span className="px-2 py-0.5 rounded-md bg-red-100/80 text-red-700 dark:bg-red-950/50 dark:text-red-400 text-[11px] font-bold whitespace-nowrap">
+                                                                    {loan.daysLate && loan.daysLate > 1 ? `Há ${loan.daysLate} dias` : 'Venceu ontem'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="py-3.5 text-right pr-1">
+                                                                <button
+                                                                    onClick={(e) => handleSendWhatsAppReminder(e, loan.client?.name, loan.client?.phone, loan.overdueAmount || loan.amount, 'late', loan.daysLate)}
+                                                                    title="Cobrar via WhatsApp"
+                                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 dark:text-emerald-400 text-xs font-bold transition-colors cursor-pointer border border-emerald-200 dark:border-emerald-800/60"
+                                                                >
+                                                                    <MessageCircle className="w-3.5 h-3.5" />
+                                                                    Cobrar
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        ) : (
+                                            <div className="py-12 flex flex-col items-center justify-center text-center">
+                                                <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-2">
+                                                    <CheckCircle className="w-6 h-6" />
                                                 </div>
-                                            ))}
-                                        </div>
+                                                <h4 className="font-bold text-gray-900 dark:text-white text-sm">Tudo em dia!</h4>
+                                                <p className="text-xs text-gray-400 mt-0.5">Nenhum cliente com parcelas atrasadas no momento.</p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
-                                {/* Right Col: Rendimentos & Capital */}
-                                <div className="col-span-8 flex flex-col gap-6">
-                                    {/* Top Header Block */}
-                                    <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl p-6 shadow-sm flex items-center justify-between">
-                                        <div>
-                                            <h3 className="font-bold text-gray-900 dark:text-white text-base">Distribuição de Rendimentos</h3>
-                                            <p className="text-xs text-gray-400 mt-1">Análise detalhada entre juros captados e fluxos de capital.</p>
-                                        </div>
-                                        <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-gray-500 dark:text-gray-400">
-                                            <TrendingUp className="w-5 h-5" />
+                                {/* 3.2 Coluna da Direita (5 colunas): Vencimentos de Hoje */}
+                                <div className="col-span-5 bg-white dark:bg-card-dark rounded-2xl p-6 border border-gray-200/70 dark:border-gray-800 shadow-xs flex flex-col">
+                                    <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-100 dark:border-gray-800">
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="font-bold text-gray-900 dark:text-white text-base">Vencimentos de Hoje</h3>
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                                                {todayCharges.length} hoje
+                                            </span>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-6 flex-1">
-                                        {/* Column 1: Rendimentos Breakdown */}
-                                        <div className="space-y-6 flex flex-col h-full">
-                                            {/* Juros Recebidos Card */}
-                                            <div className="h-full bg-white dark:bg-gray-800 rounded-2xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col">
-                                                <div className="flex justify-between items-center mb-6">
-                                                    <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                                                        <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Juros Efetivados
-                                                    </h4>
-                                                    <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">R$ {summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                </div>
-                                                <div className="space-y-3 flex-1 flex flex-col justify-end">
-                                                    <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-900/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700/50">
-                                                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">De Quitados</span>
-                                                        <span className="text-sm font-bold text-gray-900 dark:text-white">R$ {summary.interestFromPaidLoans.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-900/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700/50">
-                                                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">De Renovações</span>
-                                                        <span className="text-sm font-bold text-gray-900 dark:text-white">R$ {summary.interestFromRenewals.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-900/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700/50">
-                                                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Lucro Ativos</span>
-                                                        <span className="text-sm font-bold text-gray-900 dark:text-white">R$ {summary.interestFromActiveExceeded.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Column 2: Capital & Juros Pendentes */}
-                                        <div className="space-y-6 flex flex-col h-full">
-                                            {/* Distribuição de Capital Box */}
-                                            <div className="flex-1 bg-white dark:bg-gray-800 rounded-2xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col">
-                                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-6 border-b border-gray-100 dark:border-gray-700 pb-3">Capital Base</h4>
-                                                <div className="space-y-3 flex-1 flex flex-col justify-end">
-                                                    <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-900/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700/50">
-                                                        <div className="flex items-center gap-2.5">
-                                                            <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Distribuído</span>
+                                    <div className="flex-1 overflow-y-auto max-h-[360px] space-y-2.5 no-scrollbar pr-1">
+                                        {todayCharges.length > 0 ? (
+                                            todayCharges.slice(0, 8).map((charge, idx) => (
+                                                <div 
+                                                    key={`${charge.loanId}-${idx}`}
+                                                    onClick={() => onLoanSelect?.(charge.loanId)}
+                                                    className="p-3 bg-gray-50/80 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 transition-all cursor-pointer flex items-center justify-between gap-3 group"
+                                                >
+                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                        <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center text-xs font-bold shrink-0">
+                                                            {charge.clientName.substring(0, 2).toUpperCase()}
                                                         </div>
-                                                        <span className="text-sm font-bold text-gray-900 dark:text-white">R$ {summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-900/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700/50">
-                                                        <div className="flex items-center gap-2.5">
-                                                            <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Recuperado</span>
-                                                        </div>
-                                                        <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">R$ {summary.totalPrincipalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-900/50 px-4 py-3 rounded-xl border border-gray-100 dark:border-gray-700/50">
-                                                        <div className="flex items-center gap-2.5">
-                                                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Em Aberto</span>
-                                                        </div>
-                                                        <span className="text-sm font-bold text-gray-900 dark:text-white">R$ {summary.totalPrincipalOpen.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Juros Pendentes Box */}
-                                            <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm flex items-center justify-between cursor-help" title="Valor calculado em cima de multas e capital futuro dos empréstimos.">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700/60 rounded-xl flex items-center justify-center shrink-0 text-gray-500 dark:text-gray-400">
-                                                        <Clock className="w-5 h-5" />
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Juros a Receber</h4>
-                                                        <p className="text-xs text-gray-400">Futuros e Multas</p>
-                                                    </div>
-                                                </div>
-                                                <span className="text-xl font-black text-gray-900 dark:text-white">R$ {summary.totalInterestPending.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Maiores Inadimplentes Table */}
-                            <div className="bg-white dark:bg-gray-800 p-6 xl:p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-                                <div className="flex items-center justify-between mb-6">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center text-rose-600 dark:text-rose-400">
-                                            <AlertTriangle className="w-5 h-5" />
-                                        </div>
-                                        <div>
-                                            <h3 className="font-bold text-gray-900 dark:text-white text-lg">
-                                                Inadimplentes Críticos {filterFrequency !== 'all' ? `(${filterFrequency === 'Diária' ? 'Diárias' : filterFrequency === 'Quinzenal' ? 'Quinzenais' : 'Mensais'})` : ''}
-                                            </h3>
-                                            <p className="text-xs text-gray-400">
-                                                {filterFrequency === 'all' 
-                                                    ? 'Atenção necessária aos maiores devedores do sistema em todas as modalidades.' 
-                                                    : `Clientes com parcelas em atraso específicas da modalidade selecionada.`}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    {filterFrequency !== 'all' && (
-                                        <button
-                                            onClick={() => setFilterFrequency('all')}
-                                            className="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 transition"
-                                        >
-                                            Ver de Todas as Modalidades
-                                        </button>
-                                    )}
-                                </div>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left border-collapse">
-                                        <thead>
-                                            <tr className="border-b border-gray-100 dark:border-gray-700 text-gray-400 text-[10px] font-bold uppercase tracking-wider">
-                                                <th className="pb-3 pl-3">Cliente / Contato</th>
-                                                <th className="pb-3 px-3 text-center">Status Atraso</th>
-                                                <th className="pb-3 px-3 text-center">Risco</th>
-                                                <th className="pb-3 px-3 text-right">Montante Devido</th>
-                                                <th className="pb-3 pr-3 text-right">Ação</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
-                                            {lateClients.length === 0 ? (
-                                                <tr>
-                                                    <td colSpan={5} className="py-12 text-center">
-                                                        <div className="flex flex-col items-center justify-center gap-2">
-                                                            <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 rounded-full flex items-center justify-center mb-1">
-                                                                <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
-                                                            </div>
-                                                            <p className="text-gray-900 dark:text-white font-bold text-base">Carteira Saudável</p>
-                                                            <p className="text-gray-400 text-xs max-w-sm">
-                                                                {filterFrequency === 'all'
-                                                                    ? 'Nenhum cliente possui parcelas pendentes com atraso em sua carteira.'
-                                                                    : `Nenhum cliente possui parcelas em atraso na modalidade ${filterFrequency}.`}
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                                                                {charge.clientName}
+                                                            </p>
+                                                            <p className="text-[11px] text-gray-400">
+                                                                {charge.frequency === 'Mensal' ? 'Juros do mês' : `Parcela ${charge.installmentNumber}/${charge.totalInstallments}`} • {charge.frequency}
                                                             </p>
                                                         </div>
-                                                    </td>
-                                                </tr>
-                                            ) : (
-                                                lateClients.slice(0, 10).map((item, idx) => (
-                                                    <tr key={idx} onClick={() => onLoanSelect && onLoanSelect(item.loanId)} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group cursor-pointer">
-                                                        <td className="py-4 pl-3">
-                                                            <div className="flex items-center gap-3">
-                                                                <div className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center justify-center font-bold text-xs border border-gray-200 dark:border-gray-600 overflow-hidden">
-                                                                    {item.client?.avatar_url && !item.client.avatar_url.includes('ui-avatars.com') ? (
-                                                                        <img src={item.client.avatar_url} alt="Profile" className="w-full h-full object-cover" />
-                                                                    ) : (
-                                                                        <span>{item.client?.name?.substring(0, 2).toUpperCase() || 'CL'}</span>
-                                                                    )}
-                                                                </div>
-                                                                <div className="flex flex-col">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="font-semibold text-sm text-gray-900 dark:text-white">
-                                                                            {item.client?.name || 'Cliente Sem Nome'}
-                                                                        </span>
-                                                                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600">
-                                                                            {item.frequency || 'Mensal'}
-                                                                        </span>
-                                                                    </div>
-                                                                    <span className="text-xs text-gray-400">{item.client?.phone || 'Sem contato'}</span>
-                                                                </div>
-                                                            </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        <span className="text-sm font-black text-gray-900 dark:text-white">
+                                                            R$ {charge.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </span>
+                                                        <button
+                                                            onClick={(e) => handleSendWhatsAppReminder(e, charge.clientName, charge.clientPhone, charge.amount, 'today')}
+                                                            title="Enviar lembrete via WhatsApp"
+                                                            className="w-7 h-7 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 flex items-center justify-center transition-colors cursor-pointer border border-emerald-200 dark:border-emerald-800/50"
+                                                        >
+                                                            <MessageCircle className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="py-12 flex flex-col items-center justify-center text-center">
+                                                <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 flex items-center justify-center mb-2">
+                                                    <Calendar className="w-6 h-6" />
+                                                </div>
+                                                <h4 className="font-bold text-gray-900 dark:text-white text-sm">Nenhuma cobrança para hoje</h4>
+                                                <p className="text-xs text-gray-400 mt-0.5">As próximas cobranças estão nos dias seguintes.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 4. DEMONSTRATIVO DE LUCRO POR CLIENTE */}
+                            <section className="bg-white dark:bg-card-dark rounded-2xl p-6 border border-gray-200/70 dark:border-gray-800 shadow-xs space-y-5">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-100 dark:border-gray-800">
+                                    <div>
+                                        <div className="flex items-center gap-2.5">
+                                            <h3 className="font-bold text-gray-900 dark:text-white text-lg">Lucro por Cliente</h3>
+                                            <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300">
+                                                Total: R$ {profitTotals.expectedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                            Detalhamento do retorno bruto (juros) individual de cada cliente e o somatório geral da carteira.
+                                        </p>
+                                    </div>
+
+                                    {/* Controles: Busca, Filtro e Copiar */}
+                                    <div className="flex items-center gap-2.5 flex-wrap">
+                                        <div className="relative">
+                                            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                            <input
+                                                type="text"
+                                                value={profitSearch}
+                                                onChange={(e) => setProfitSearch(e.target.value)}
+                                                placeholder="Buscar cliente..."
+                                                className="pl-8 pr-3 py-1.5 text-xs rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-primary/20 w-44"
+                                            />
+                                        </div>
+
+                                        <div className="bg-gray-200/60 dark:bg-gray-800/60 p-1 rounded-xl flex items-center border border-gray-200 dark:border-gray-700/60 text-xs">
+                                            {[
+                                                { id: 'active', label: 'Ativos' },
+                                                { id: 'all', label: 'Todos' },
+                                                { id: 'late', label: 'Atrasados' },
+                                                { id: 'paid', label: 'Quitados' },
+                                            ].map(tab => (
+                                                <button
+                                                    key={tab.id}
+                                                    onClick={() => setProfitStatusFilter(tab.id as any)}
+                                                    className={`py-1 px-2.5 rounded-lg font-bold transition-all cursor-pointer ${
+                                                        profitStatusFilter === tab.id
+                                                            ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-xs'
+                                                            : 'text-gray-500 hover:text-gray-900 dark:text-gray-400'
+                                                    }`}
+                                                >
+                                                    {tab.label}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        <button
+                                            onClick={handleCopyProfitSummary}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-semibold rounded-xl transition-all cursor-pointer border border-gray-200 dark:border-gray-700"
+                                            title="Copiar lista de lucros formatada"
+                                        >
+                                            {copiedProfit ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-gray-500" />}
+                                            {copiedProfit ? 'Copiado!' : 'Copiar Lista'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* 3 Mini Cards de Resumo */}
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div className="bg-gray-50/80 dark:bg-gray-800/40 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
+                                        <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">Lucro Total Previsto</span>
+                                        <span className="text-xl font-black font-manrope text-teal-600 dark:text-teal-400 block mt-1">
+                                            R$ {profitTotals.expectedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                        <span className="text-[11px] text-gray-400 block mt-0.5">Juros totais da seleção</span>
+                                    </div>
+                                    <div className="bg-gray-50/80 dark:bg-gray-800/40 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
+                                        <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">Lucro Já Realizado</span>
+                                        <span className="text-xl font-black font-manrope text-emerald-600 dark:text-emerald-400 block mt-1">
+                                            R$ {profitTotals.realizedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                        <span className="text-[11px] text-gray-400 block mt-0.5">Juros já recolhidos no caixa</span>
+                                    </div>
+                                    <div className="bg-gray-50/80 dark:bg-gray-800/40 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
+                                        <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">Lucro a Realizar</span>
+                                        <span className="text-xl font-black font-manrope text-indigo-600 dark:text-indigo-400 block mt-1">
+                                            R$ {profitTotals.pendingProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                        <span className="text-[11px] text-gray-400 block mt-0.5">Juros pendentes a entrar</span>
+                                    </div>
+                                </div>
+
+                                {/* Tabela Elegante de Lucro */}
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left">
+                                        <thead>
+                                            <tr className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                                                <th className="pb-3 pl-2">Cliente</th>
+                                                <th className="pb-3">Modalidade</th>
+                                                <th className="pb-3 text-right">Capital</th>
+                                                <th className="pb-3 text-right">Total a Receber</th>
+                                                <th className="pb-3 text-right text-teal-600 dark:text-teal-400">Lucro Previsto</th>
+                                                <th className="pb-3 text-right text-emerald-600 dark:text-emerald-400">Lucro Realizado</th>
+                                                <th className="pb-3 text-right text-indigo-600 dark:text-indigo-400">Lucro Pendente</th>
+                                                <th className="pb-3 text-center">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60 text-sm">
+                                            {filteredClientProfitList.length > 0 ? (
+                                                filteredClientProfitList.map((item) => (
+                                                    <tr
+                                                        key={item.id}
+                                                        onClick={() => onLoanSelect?.(item.id)}
+                                                        className="group hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors cursor-pointer"
+                                                    >
+                                                        <td className="py-3 pl-2 font-semibold text-gray-900 dark:text-white">
+                                                            {item.clientName}
                                                         </td>
-                                                        <td className="py-4 px-3 text-center">
-                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-200/50 dark:border-rose-800/40 rounded-lg text-xs font-bold">
-                                                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                                                                {item.lateInstallments} parcela(s)
+                                                        <td className="py-3 text-xs text-gray-500 font-medium">
+                                                            {item.frequency}
+                                                        </td>
+                                                        <td className="py-3 text-right font-medium text-gray-600 dark:text-gray-300">
+                                                            R$ {item.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </td>
+                                                        <td className="py-3 text-right font-medium text-gray-900 dark:text-white">
+                                                            R$ {item.contractTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </td>
+                                                        <td className="py-3 text-right font-bold text-teal-600 dark:text-teal-400 whitespace-nowrap">
+                                                            R$ {item.expectedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            <span className="text-[10px] ml-1 opacity-70 font-normal">
+                                                                (+{item.profitMargin.toFixed(0)}%)
                                                             </span>
                                                         </td>
-                                                        <td className="py-4 px-3 text-center">
-                                                            <div className="flex flex-col items-center">
-                                                                <span className="text-sm text-gray-700 dark:text-gray-300 font-bold">{item.maxDaysLate}</span>
-                                                                <span className="text-[10px] text-gray-400 font-medium uppercase">Dias Máx</span>
-                                                            </div>
+                                                        <td className="py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                                                            R$ {item.realizedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </td>
-                                                        <td className="py-4 px-3 text-right">
-                                                            <span className="text-sm font-bold text-rose-600 dark:text-rose-400">R$ {item.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                        <td className="py-3 text-right font-bold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
+                                                            R$ {item.pendingProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </td>
-                                                        <td className="py-4 pr-3 text-right">
-                                                            <button 
-                                                                onClick={(e) => { e.stopPropagation(); handleWhatsApp(item.client?.phone, item.client?.name, item.lateAmount); }} 
-                                                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-gray-100 hover:bg-emerald-50 dark:bg-gray-700 dark:hover:bg-emerald-900/30 text-gray-700 hover:text-emerald-600 dark:text-gray-300 dark:hover:text-emerald-400 border border-gray-200 dark:border-gray-600 font-bold text-xs rounded-lg transition-colors"
-                                                            >
-                                                                <Phone className="w-3.5 h-3.5" /> Cobrar
-                                                            </button>
+                                                        <td className="py-3 text-center">
+                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                                item.status === 'paid'
+                                                                    ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                                                                    : item.status === 'late'
+                                                                        ? 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400'
+                                                                        : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400'
+                                                            }`}>
+                                                                {item.status === 'paid' ? 'Quitado' : item.status === 'late' ? 'Atrasado' : 'Em dia'}
+                                                            </span>
                                                         </td>
                                                     </tr>
                                                 ))
+                                            ) : (
+                                                <tr>
+                                                    <td colSpan={8} className="py-8 text-center text-xs text-gray-400">
+                                                        Nenhum contrato encontrado para este filtro.
+                                                    </td>
+                                                </tr>
                                             )}
                                         </tbody>
+                                        {filteredClientProfitList.length > 0 && (
+                                            <tfoot>
+                                                <tr className="border-t-2 border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30 font-black text-sm">
+                                                    <td className="py-3.5 pl-2 text-gray-900 dark:text-white" colSpan={2}>
+                                                        TOTAL ({filteredClientProfitList.length} contratos)
+                                                    </td>
+                                                    <td className="py-3.5 text-right text-gray-900 dark:text-white font-mono">
+                                                        R$ {profitTotals.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td className="py-3.5 text-right text-gray-900 dark:text-white font-mono">
+                                                        R$ {profitTotals.contractTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td className="py-3.5 text-right text-teal-600 dark:text-teal-400 font-mono">
+                                                        R$ {profitTotals.expectedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td className="py-3.5 text-right text-emerald-600 dark:text-emerald-400 font-mono">
+                                                        R$ {profitTotals.realizedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td className="py-3.5 text-right text-indigo-600 dark:text-indigo-400 font-mono">
+                                                        R$ {profitTotals.pendingProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td></td>
+                                                </tr>
+                                            </tfoot>
+                                        )}
                                     </table>
                                 </div>
-                            </div>
+                            </section>
                         </div>
                     </main>
                 </>

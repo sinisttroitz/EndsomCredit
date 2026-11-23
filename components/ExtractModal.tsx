@@ -25,6 +25,7 @@ interface ExtractModalProps {
         balance: number;
         creditAvailable?: number;
         remainingSummary?: RemainingSummary;
+        isAluguel?: boolean;
         installments: Array<{
             number: number;
             date: string;
@@ -136,7 +137,7 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                         {/* 1. Header */}
                         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
                             <div style={{ fontSize: '10px', fontWeight: 800, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: '16px' }}>
-                                Extrato de Pagamentos
+                                {data.isAluguel ? 'Resumo de Aluguel' : (data.totalPaid === 0 ? 'Resumo do Contrato' : 'Extrato de Pagamentos')}
                             </div>
                             <div style={{ fontSize: '24px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
                                 {data.clientName}
@@ -177,9 +178,11 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                         {/* 3. Situação das Parcelas (hierarquia limpa e direta) */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '18px 0' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Parcelas Quitadas</span>
+                                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>{data.isAluguel ? 'Diárias Quitadas' : 'Parcelas Quitadas'}</span>
                                 <span style={{ fontSize: '13px', fontWeight: 700, color: '#111827' }}>
-                                    {rs ? `${rs.paidCount} de ${rs.totalCount} (${percentage}%)` : `${installmentsCount} parcelas`}
+                                    {data.isAluguel 
+                                        ? `${rs ? rs.paidCount : 0} quitadas`
+                                        : (rs ? `${rs.paidCount} de ${rs.totalCount} (${percentage}%)` : `${installmentsCount} parcelas`)}
                                 </span>
                             </div>
                             {firstNum && lastNum && installmentsCount > 1 && (
@@ -192,21 +195,21 @@ export function ExtractModal({ isOpen, onClose, data }: ExtractModalProps) {
                             )}
                             {unitValue > 0 && (
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Valor da Parcela</span>
+                                    <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>{data.isAluguel ? 'Diária do Aluguel' : 'Valor da Parcela'}</span>
                                     <span style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>
-                                        R$ {unitValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        R$ {unitValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{data.isAluguel ? ' / dia' : ''}
                                     </span>
                                 </div>
                             )}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>Parcelas Restantes</span>
+                                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>{data.isAluguel ? 'Diárias em Aberto' : 'Parcelas Restantes'}</span>
                                 <span style={{ fontSize: '12px', fontWeight: 700, color: rs && rs.remainingCount === 0 ? '#059669' : '#111827' }}>
-                                    {rs && rs.remainingCount === 0 ? 'Nenhuma (Quitado)' : rs ? `${rs.remainingCount} parcela(s)` : '-'}
+                                    {rs && rs.remainingCount === 0 ? (data.isAluguel ? 'Em dia' : 'Nenhuma (Quitado)') : rs ? `${rs.remainingCount} ${data.isAluguel ? 'diária(s)' : 'parcela(s)'}` : '-'}
                                 </span>
                             </div>
                             {rs && rs.lateCount && rs.lateCount > 0 ? (
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontSize: '12px', color: '#EF4444', fontWeight: 600 }}>Parcelas em Atraso</span>
+                                    <span style={{ fontSize: '12px', color: '#EF4444', fontWeight: 600 }}>{data.isAluguel ? 'Diárias em Atraso' : 'Parcelas em Atraso'}</span>
                                     <span style={{ fontSize: '12px', fontWeight: 700, color: '#EF4444' }}>
                                         {rs.lateCount}x{rs.lateAmount ? ` · R$ ${rs.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
                                     </span>

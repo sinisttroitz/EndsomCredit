@@ -64,6 +64,44 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
 
         const totalFines = includeFines ? originalFines : 0;
 
+        if (loan.frequency === 'Aluguel') {
+            const currentPrincipal = Number(loan.balance);
+            const dailyFee = loan.installment_value || 0;
+            const unpaidDays = installmentsList.filter(i => i.status !== 'paid');
+            const pendingRent = unpaidDays.length * dailyFee;
+
+            const totalDebt = currentPrincipal + pendingRent + totalFines;
+
+            setPreview(prev => ({
+                ...prev!,
+                totalDebt,
+                daysElapsed: unpaidDays.length,
+                breakdown: {
+                    principal: currentPrincipal,
+                    contractInterest: 0,
+                    monthlyInterestRef: 0,
+                    pastInterest: pendingRent,
+                    fines: totalFines,
+                    originalFines,
+                    proRata: 0,
+                    originalProRata: 0
+                },
+                distribution: prev?.distribution || {
+                    finesPaid: 0,
+                    pastInterestPaid: 0,
+                    proRataPaid: 0,
+                    principalPaid: 0,
+                    contractInterestPaid: 0
+                },
+                result: prev?.result || {
+                    capitalAbated: 0,
+                    newBalance: currentPrincipal,
+                    newDueDate: loan.due_date || ''
+                }
+            }));
+            return;
+        }
+
         // 2. Calculate Past Accumulated Interest
         const totalPastInterest = installmentsList
             .filter(i => i.status !== 'paid' && i.accumulatedInterest)
@@ -172,6 +210,40 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
         const payAmount = Number(amountStr) || 0;
         let remaining = payAmount;
 
+        if (loan.frequency === 'Aluguel') {
+            // 1. Pay Fines
+            const finesPaid = Math.min(remaining, preview.breakdown.fines);
+            remaining -= finesPaid;
+
+            // 2. Pay Pending Daily Rent
+            const pastInterestPaid = Math.min(remaining, preview.breakdown.pastInterest);
+            remaining -= pastInterestPaid;
+
+            // 3. Pay Principal Capital
+            const principalPaid = Math.min(remaining, preview.breakdown.principal);
+            remaining -= principalPaid;
+
+            const newBalance = Math.max(0, preview.breakdown.principal - principalPaid);
+            const isPaidOff = newBalance <= 0.01;
+
+            setPreview(prev => ({
+                ...prev!,
+                distribution: {
+                    finesPaid,
+                    pastInterestPaid,
+                    proRataPaid: 0,
+                    contractInterestPaid: 0,
+                    principalPaid
+                },
+                result: {
+                    capitalAbated: principalPaid,
+                    newBalance,
+                    newDueDate: isPaidOff ? 'Quitado' : 'Livre (Aluguel)'
+                }
+            }));
+            return;
+        }
+
         // 1. Pay Fines
         const finesPaid = Math.min(remaining, preview.breakdown.fines);
         remaining -= finesPaid;
@@ -277,15 +349,21 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
 
                     <div className="space-y-3">
                         <div className="flex justify-between text-sm">
-                            <span className="text-gray-600 dark:text-gray-400">Valor Original (Principal)</span>
+                            <span className="text-gray-600 dark:text-gray-400">
+                                {loan.frequency === 'Aluguel' ? 'Capital Alugado' : 'Valor Original (Principal)'}
+                            </span>
                             <span className="font-medium text-gray-900 dark:text-white">R$ {formatCurrency(preview.breakdown.principal)}</span>
                         </div>
+                        {loan.frequency !== 'Aluguel' && (
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-600 dark:text-gray-400">Juros de Contrato</span>
+                                <span className="font-medium text-gray-900 dark:text-white">R$ {formatCurrency(preview.breakdown.contractInterest)}</span>
+                            </div>
+                        )}
                         <div className="flex justify-between text-sm">
-                            <span className="text-gray-600 dark:text-gray-400">Juros de Contrato</span>
-                            <span className="font-medium text-gray-900 dark:text-white">R$ {formatCurrency(preview.breakdown.contractInterest)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                            <span className="text-gray-600 dark:text-gray-400">Acúmulo de Juros por Atraso</span>
+                            <span className="text-gray-600 dark:text-gray-400">
+                                {loan.frequency === 'Aluguel' ? `Diárias Pendentes (${preview.daysElapsed}d)` : 'Acúmulo de Juros por Atraso'}
+                            </span>
                             <span className={`font-medium ${preview.breakdown.pastInterest > 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}>
                                 R$ {formatCurrency(preview.breakdown.pastInterest)}
                             </span>
@@ -312,28 +390,30 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                                 )}
                             </div>
                         </div>
-                        <div className="flex justify-between items-center text-sm">
-                            <div className="flex items-center gap-2">
-                                <span className="text-gray-600 dark:text-gray-400">Pro-Rata ({preview.daysElapsed} dias)</span>
-                                <button
-                                    onClick={() => setIncludeProRata(!includeProRata)}
-                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${includeProRata ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`}
-                                >
-                                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${includeProRata ? 'translate-x-5' : 'translate-x-1'}`} />
-                                </button>
-                                {!includeProRata && <span className="text-xs text-green-600 dark:text-green-400 font-bold">Isento</span>}
-                            </div>
-                            <div className="flex flex-col items-end">
-                                <span className={`font-medium ${!includeProRata ? 'text-gray-400 line-through text-xs' : 'text-gray-900 dark:text-white'}`}>
-                                    R$ {formatCurrency(preview.breakdown.originalProRata)}
-                                </span>
-                                {!includeProRata && (
-                                    <span className="font-bold text-green-600 dark:text-green-400">
-                                        R$ 0,00
+                        {loan.frequency !== 'Aluguel' && (
+                            <div className="flex justify-between items-center text-sm">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-gray-600 dark:text-gray-400">Pro-Rata ({preview.daysElapsed} dias)</span>
+                                    <button
+                                        onClick={() => setIncludeProRata(!includeProRata)}
+                                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${includeProRata ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`}
+                                    >
+                                        <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${includeProRata ? 'translate-x-5' : 'translate-x-1'}`} />
+                                    </button>
+                                    {!includeProRata && <span className="text-xs text-green-600 dark:text-green-400 font-bold">Isento</span>}
+                                </div>
+                                <div className="flex flex-col items-end">
+                                    <span className={`font-medium ${!includeProRata ? 'text-gray-400 line-through text-xs' : 'text-gray-900 dark:text-white'}`}>
+                                        R$ {formatCurrency(preview.breakdown.originalProRata)}
                                     </span>
-                                )}
+                                    {!includeProRata && (
+                                        <span className="font-bold text-green-600 dark:text-green-400">
+                                            R$ 0,00
+                                        </span>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
 
@@ -406,23 +486,25 @@ export const Amortization: React.FC<AmortizationProps> = ({ loan, installmentsLi
                             </div>
 
                             {/* Pro-Rata */}
-                            <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-                                    <Calendar className="w-5 h-5" />
-                                </div>
-                                <div className="flex-1">
-                                    <div className="flex justify-between mb-2">
-                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Abatimento Pro-Rata</span>
-                                        <span className="text-sm font-bold text-gray-900 dark:text-white">- R$ {formatCurrency(preview.distribution.proRataPaid)}</span>
+                            {loan.frequency !== 'Aluguel' && (
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                                        <Calendar className="w-5 h-5" />
                                     </div>
-                                    <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                        <div
-                                            className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                                            style={{ width: preview.breakdown.proRata > 0 ? `${(preview.distribution.proRataPaid / preview.breakdown.proRata) * 100}%` : '0%' }}
-                                        />
+                                    <div className="flex-1">
+                                        <div className="flex justify-between mb-2">
+                                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Abatimento Pro-Rata</span>
+                                            <span className="text-sm font-bold text-gray-900 dark:text-white">- R$ {formatCurrency(preview.distribution.proRataPaid)}</span>
+                                        </div>
+                                        <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-blue-600 rounded-full transition-all duration-500"
+                                                style={{ width: preview.breakdown.proRata > 0 ? `${(preview.distribution.proRataPaid / preview.breakdown.proRata) * 100}%` : '0%' }}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
                     </div>
                 )}

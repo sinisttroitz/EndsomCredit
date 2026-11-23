@@ -162,24 +162,25 @@ export const generateInstallments = (loanData: Loan, fines: InstallmentFine[] = 
             } else {
                 date = new Date(dailyDateTracker);
                 date.setDate(date.getDate() + 1);
-                
-                while (true) {
-                    const day = date.getDay();
-                    if (loanData.skip_saturday && day === 6) {
-                        date.setDate(date.getDate() + 1);
-                        continue;
-                    }
-                    if (loanData.skip_sunday && day === 0) {
-                        date.setDate(date.getDate() + 1);
-                        continue;
-                    }
-                    if (loanData.skip_holidays && isNationalHoliday(date)) {
-                        date.setDate(date.getDate() + 1);
-                        continue;
-                    }
-                    break;
-                }
             }
+
+            while (true) {
+                const day = date.getDay();
+                if (loanData.skip_saturday && day === 6) {
+                    date.setDate(date.getDate() + 1);
+                    continue;
+                }
+                if (loanData.skip_sunday && day === 0) {
+                    date.setDate(date.getDate() + 1);
+                    continue;
+                }
+                if (loanData.skip_holidays && isNationalHoliday(date)) {
+                    date.setDate(date.getDate() + 1);
+                    continue;
+                }
+                break;
+            }
+
             dailyDateTracker = new Date(date);
         } else {
             date = new Date(startDate);

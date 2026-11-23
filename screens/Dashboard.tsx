@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Search, DollarSign, TrendingUp, TrendingDown, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText, Calendar, HelpCircle, Plus, Award, ExternalLink, BarChart3, CalendarCheck, EyeOff, Eye } from 'lucide-react';
+import { Search, DollarSign, TrendingUp, TrendingDown, Users, AlertTriangle, Bell, CheckCircle, X, ChevronRight, User, FileText, Calendar, HelpCircle, Plus, Award, ExternalLink, BarChart3, CalendarCheck, EyeOff, Eye, Clock, MessageCircle, Wallet, ArrowUpRight } from 'lucide-react';
+import { openWhatsApp } from '../utils/whatsappUtils';
 import { supabase } from '../supabaseClient';
 import { Loan, Client, Profile as UserProfileData } from '../types';
 import { generateInstallments } from '../utils/loanUtils';
 import { processRecurringInterest } from '../utils/interestUtils';
+import { matchesClientSearch } from '../utils/searchUtils';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 
 interface DashboardProps {
@@ -23,6 +25,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     const [summary, setSummary] = useState({
         totalLent: 0,
         totalReceived: 0,
+        receivedToday: 0,
         receivedFromPaidLoans: 0,
         receivedFromActiveLoans: 0,
         totalActiveClients: 0,
@@ -52,7 +55,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     });
     const [performanceToggle, setPerformanceToggle] = useState<'Empréstado' | 'Recebidos'>('Empréstado');
     const [loading, setLoading] = useState(true);
-    const [lateLoansList, setLateLoansList] = useState<Loan[]>([]);
+    const [lateLoansList, setLateLoansList] = useState<any[]>([]);
+    const [todayChargesList, setTodayChargesList] = useState<any[]>([]);
     const [activeCardIndex, setActiveCardIndex] = useState(0);
 
     // Search State
@@ -67,6 +71,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
     const [userNotifications, setUserNotifications] = useState<any[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [showNotifPanel, setShowNotifPanel] = useState(false);
+
+    const handleSendWhatsAppReminder = (e: React.MouseEvent, clientName: string, phone?: string, amount?: number, type: 'today' | 'late' = 'today', daysLate?: number) => {
+        e.stopPropagation();
+        if (!phone) {
+            alert('Este cliente não possui telefone cadastrado.');
+            return;
+        }
+        const formattedAmount = (amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        let message = '';
+        if (type === 'late') {
+            const lateText = daysLate && daysLate > 1 ? `está em atraso há ${daysLate} dias` : 'venceu e encontra-se pendente';
+            message = `Olá, ${clientName}! Tudo bem?\nPassando para lembrar que sua parcela de R$ ${formattedAmount} ${lateText}. Poderia nos dar um retorno sobre a previsão de pagamento, por gentileza? Obrigado!`;
+        } else {
+            message = `Olá, ${clientName}! Tudo bem?\nPassando para lembrar que sua parcela de R$ ${formattedAmount} vence hoje. Segue a chave Pix para pagamento quando puder realizar. Tenha um ótimo dia!`;
+        }
+        openWhatsApp(phone, message);
+    };
 
     const fetchNotifications = async () => {
         try {
@@ -147,30 +168,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
 
     useEffect(() => {
         const delayDebounceFn = setTimeout(async () => {
-            if (searchQuery.length > 2) {
+            if (searchQuery.trim().length >= 1) {
                 setIsSearching(true);
                 try {
-                    // Search Clients
-                    const { data: clients } = await supabase
+                    // Search Clients (with accents & phone handling)
+                    const { data: clientsData } = await supabase
                         .from('clients')
-                        .select('*')
-                        .or(`name.ilike.%${searchQuery}%,cpf.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%`)
-                        .limit(5);
+                        .select('*, additional_contacts(*)')
+                        .order('name');
 
-                    // Search Loans by ID
+                    const matchedClients = (clientsData || [])
+                        .filter(c => matchesClientSearch(c, searchQuery))
+                        .slice(0, 5);
+
+                    // Search Loans by ID or Client name
                     let loansData: any[] = [];
-                    // Only search loans if query looks like part of an ID (alphanumeric)
-                    if (searchQuery.length > 0) {
+                    const cleanQuery = searchQuery.trim().replace(/^#/, '');
+                    if (cleanQuery.length > 0) {
                         const { data } = await supabase
                             .from('loans')
-                            .select('*, client:clients(name)')
-                            .ilike('id', `%${searchQuery}%`)
+                            .select('*, client:clients(name, phone, avatar_url)')
+                            .ilike('id', `%${cleanQuery}%`)
                             .limit(5);
                         loansData = data || [];
                     }
 
                     setSearchResults({
-                        clients: clients || [],
+                        clients: matchedClients,
                         loans: loansData
                     });
 
@@ -183,7 +207,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 setSearchResults({ clients: [], loans: [] });
                 setIsSearching(false);
             }
-        }, 500);
+        }, 300);
 
         return () => clearTimeout(delayDebounceFn);
     }, [searchQuery]);
@@ -214,7 +238,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             // Fetch Loans first to process interest
             const { data: loans, error: loansError } = await supabase
                 .from('loans')
-                .select('*, client:clients(name)')
+                .select('*, client:clients(name, phone, avatar_url)')
                 .order('created_at', { ascending: false });
 
             if (loansError) throw loansError;
@@ -225,7 +249,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
             // If any loan was updated, re-fetch to get fresh data for summary
             let finalLoans = loans;
             if (updated) {
-                const { data: freshLoans } = await supabase.from('loans').select('*, client:clients(name)');
+                const { data: freshLoans } = await supabase.from('loans').select('*, client:clients(name, phone, avatar_url)');
                 finalLoans = freshLoans;
             }
 
@@ -401,9 +425,70 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 ? (activeContractualInterest / activeContractualCapital) * 100
                 : (totalCapital > 0 ? ((totalInterestReceived + totalInterestPending) / totalCapital) * 100 : 0);
 
+            // Query loan_amortizations for received today
+            let receivedToday = 0;
+            try {
+                const todayStart = new Date();
+                todayStart.setHours(0, 0, 0, 0);
+                const { data: todayAmort } = await supabase
+                    .from('loan_amortizations')
+                    .select('amount_paid, created_at')
+                    .gte('created_at', todayStart.toISOString());
+                if (todayAmort) {
+                    receivedToday = todayAmort.reduce((acc, curr) => acc + (Number(curr.amount_paid) || 0), 0);
+                }
+            } catch (err) {
+                console.error("Error fetching today amortizations", err);
+            }
+
+            // Collect todayChargesList and enrich lateLoansList
+            const todayChargesArr: any[] = [];
+            finalLoans?.forEach((loan: Loan) => {
+                if (loan.status !== 'paid') {
+                    const loanFines = allFines.filter(f => f.loan_id === loan.id);
+                    const loanInstallments = generateInstallments(loan, loanFines);
+                    const todayInsts = loanInstallments.filter(inst => {
+                        const instDate = new Date(inst.date);
+                        const instDateZero = new Date(instDate.getFullYear(), instDate.getMonth(), instDate.getDate());
+                        return instDateZero.getTime() === todayZero.getTime() && inst.status !== 'paid';
+                    });
+                    todayInsts.forEach(inst => {
+                        todayChargesArr.push({
+                            loanId: loan.id,
+                            clientId: loan.client_id,
+                            clientName: (loan.client as any)?.name || 'Cliente',
+                            clientPhone: (loan.client as any)?.phone,
+                            clientAvatar: (loan.client as any)?.avatar_url,
+                            installmentNumber: inst.number,
+                            totalInstallments: loan.installments || 1,
+                            amount: inst.value,
+                            frequency: loan.frequency || 'Diária'
+                        });
+                    });
+                }
+            });
+
+            // Enrich lateLoans with overdue details
+            const enrichedLateLoans = lateLoans.map((loan: any) => {
+                const loanFines = allFines.filter(f => f.loan_id === loan.id);
+                const insts = generateInstallments(loan, loanFines);
+                const overdueInsts = insts.filter(i => i.status === 'late');
+                const oldestDate = overdueInsts[0]?.date;
+                const daysLate = oldestDate
+                    ? Math.max(1, Math.floor((todayZero.getTime() - new Date(oldestDate).getTime()) / (1000 * 60 * 60 * 24)))
+                    : 1;
+                return {
+                    ...loan,
+                    overdueAmount: calculateOverdueAmount(loan, allFines),
+                    daysLate,
+                    overdueCount: overdueInsts.length
+                };
+            }).sort((a, b) => (b.daysLate || 0) - (a.daysLate || 0));
+
             setSummary({
                 totalLent,
                 totalReceived,
+                receivedToday,
                 receivedFromPaidLoans,
                 receivedFromActiveLoans,
                 totalActiveClients: activeCount,
@@ -432,7 +517,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                 portfolioYield
             });
 
-            setLateLoansList(lateLoans.slice(0, 5));
+            setLateLoansList(enrichedLateLoans);
+            setTodayChargesList(todayChargesArr);
 
         } catch (error) {
             console.error("Error fetching dashboard data", error);
@@ -528,7 +614,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
 
                 {/* Mobile Cards Carousel (Dinheiro na Rua & Carteira Ativa) */}
                 <div className="w-full mt-1">
-                    <div 
+                    <div
                         className="flex overflow-x-auto snap-x snap-mandatory gap-3 no-scrollbar pb-1"
                         onScroll={(e) => {
                             const el = e.currentTarget;
@@ -1062,201 +1148,360 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                     </div>
                 </div>
 
-                {/* Desktop KPI Cards Row */}
-                <div className="hidden md:grid grid-cols-4 gap-4 mb-6">
-                    {/* Dinheiro na Rua */}
-                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col justify-between">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Dinheiro na Rua</span>
-                            <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-700 dark:text-gray-300">
-                                <DollarSign className="w-5 h-5" />
-                            </div>
+                {/* ========================================================= */}
+                {/* NOVO DESKTOP DASHBOARD: COCKPIT OPERACIONAL & FINANCEIRO  */}
+                {/* ========================================================= */}
+
+                {/* 1. VISÃO DO DIA (A Janela Operacional de Hoje) */}
+                <div className="hidden md:block mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                Movimentação de Hoje
+                            </h2>
+                            <span className="text-xs text-gray-400">• {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}</span>
                         </div>
-                        <div>
-                            <span className="text-2xl font-black font-manrope text-gray-900 dark:text-white leading-none">
-                                {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
-                            </span>
-                            <div className="flex items-center gap-1.5 mt-2">
-                                <span className="text-[11px] text-gray-400">Capital total emprestado</span>
-                            </div>
-                        </div>
+                        {onViewCollectionCalendar && (
+                            <button
+                                onClick={onViewCollectionCalendar}
+                                className="text-xs font-semibold text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                                <Calendar className="w-3.5 h-3.5" />
+                                Abrir Calendário
+                            </button>
+                        )}
                     </div>
 
-                    {/* Carteira Ativa */}
-                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col justify-between">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Carteira Ativa</span>
-                            <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-900/20 flex items-center justify-center text-teal-600 dark:text-teal-400">
-                                <CalendarCheck className="w-5 h-5" />
+                    <div className="grid grid-cols-4 gap-4">
+                        {/* 1.1 A Receber Hoje */}
+                        <div
+                            onClick={onViewCollectionCalendar}
+                            className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs hover:border-gray-300 dark:hover:border-gray-700 transition-all cursor-pointer group"
+                        >
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">A Cobrar Hoje</span>
+                                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/40 flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:scale-105 transition-transform">
+                                    <Clock className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <div>
+                                <span className="text-2xl font-black font-manrope text-gray-900 dark:text-white leading-none block">
+                                    {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.todayChargesValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                </span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                    {summary.todayChargesCount === 0 ? 'Nenhuma cobrança para hoje' : `${summary.todayChargesCount} ${summary.todayChargesCount === 1 ? 'cliente com vencimento' : 'clientes com vencimento hoje'}`}
+                                </span>
                             </div>
                         </div>
-                        <div>
-                            <span className="text-2xl font-black font-manrope text-teal-600 dark:text-teal-400 leading-none">
-                                {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalToReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
-                            </span>
-                            <div className="flex items-center gap-1.5 mt-2">
-                                <span className="text-[11px] text-gray-400">Total a receber (capital + juros)</span>
-                            </div>
-                        </div>
-                    </div>
 
-                    {/* Juros Recebidos */}
-                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col justify-between">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Juros Recebidos</span>
-                            <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                                <TrendingUp className="w-5 h-5" />
+                        {/* 1.2 Já Recebido Hoje */}
+                        <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Já Recebido Hoje</span>
+                                <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                                    <CheckCircle className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <div>
+                                <span className="text-2xl font-black font-manrope text-emerald-600 dark:text-emerald-400 leading-none block">
+                                    {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.receivedToday.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                </span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                    {summary.receivedToday > 0 ? 'Valores confirmados no caixa' : 'Aguardando primeiros pagamentos'}
+                                </span>
                             </div>
                         </div>
-                        <div>
-                            <span className="text-2xl font-black font-manrope text-blue-600 dark:text-blue-400 leading-none">
-                                {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
-                            </span>
-                            <div className="flex items-center gap-1.5 mt-2">
-                                <span className="text-[11px] text-gray-400">Lucro acumulado realizado</span>
-                            </div>
-                        </div>
-                    </div>
 
-                    {/* Rentabilidade Média da Carteira */}
-                    <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-emerald-100 dark:border-emerald-900/30 shadow-sm flex flex-col justify-between relative overflow-hidden">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Rentab. Média</span>
-                            <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                                <Award className="w-5 h-5" />
+                        {/* 1.3 Em Atraso (Urgente) */}
+                        <div
+                            onClick={onViewLateLoans}
+                            className={`rounded-2xl p-5 border shadow-xs transition-all cursor-pointer group ${summary.lateAmount > 0
+                                    ? 'bg-red-50/40 dark:bg-red-950/20 border-red-200/80 dark:border-red-900/40 hover:border-red-300'
+                                    : 'bg-white dark:bg-card-dark border-gray-200/70 dark:border-gray-800'
+                                }`}
+                        >
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total em Atraso</span>
+                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105 ${summary.lateAmount > 0
+                                        ? 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400'
+                                        : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                                    }`}>
+                                    <AlertTriangle className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <div>
+                                <span className={`text-2xl font-black font-manrope leading-none block ${summary.lateAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'
+                                    }`}>
+                                    {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                </span>
+                                <span className={`text-[11px] block mt-1.5 font-medium ${summary.lateAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
+                                    }`}>
+                                    {summary.lateCount > 0 ? `${summary.lateCount} ${summary.lateCount === 1 ? 'cliente com atraso pendente' : 'clientes com atrasos pendentes'}` : 'Nenhum atraso no momento'}
+                                </span>
                             </div>
                         </div>
-                        <div>
-                            <span className="text-2xl font-black font-manrope text-emerald-600 dark:text-emerald-400 leading-none">
-                                {loading ? '...' : `${summary.portfolioYield.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}
-                            </span>
-                            <div className="flex items-center gap-1.5 mt-2">
-                                <span className="text-[11px] text-gray-400">Retorno médio da carteira ativa</span>
+
+                        {/* 1.4 Clientes Ativos na Carteira */}
+                        <div
+                            onClick={onViewClients}
+                            className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs hover:border-gray-300 dark:hover:border-gray-700 transition-all cursor-pointer group"
+                        >
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Carteira de Clientes</span>
+                                <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-700 dark:text-gray-300 group-hover:scale-105 transition-transform">
+                                    <Users className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <div>
+                                <span className="text-2xl font-black font-manrope text-gray-900 dark:text-white leading-none block">
+                                    {loading ? '...' : `${summary.totalActiveClients} Ativos`}
+                                </span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                    {summary.activeLoansCount} contratos em andamento
+                                </span>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Desktop Only Grid */}
-                <div className="hidden md:grid grid-cols-3 gap-6">
-                    {/* Alerts Table */}
-                    <div className="col-span-2 bg-white dark:bg-card-dark rounded-2xl p-6 border border-gray-100 dark:border-gray-800">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="font-bold text-gray-900 dark:text-white">Alertas de Atrasos e Atividades</h3>
-                            <button onClick={onViewLateLoans} className="text-sm text-primary font-medium hover:underline">Ver tudo</button>
+                {/* 2. A FOTO REAL DA CARTEIRA ATIVA (Zero Calculadora!) */}
+                <div className="hidden md:block mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                            Saúde da Carteira Ativa (Visão Global)
+                        </h2>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-4">
+                        {/* 2.1 Capital Próprio na Praça */}
+                        <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Capital na Praça</span>
+                                <div className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-700 dark:text-gray-300">
+                                    <DollarSign className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <div>
+                                <span className="text-2xl font-black font-manrope text-gray-900 dark:text-white leading-none block">
+                                    {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalLent.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                </span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                    Dinheiro puro emprestado ativo
+                                </span>
+                            </div>
                         </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead>
-                                    <tr className="text-left text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
-                                        <th className="pb-3 pl-2">Cliente</th>
-                                        <th className="pb-3">Valor</th>
-                                        <th className="pb-3">Status</th>
-                                        <th className="pb-3">Vencimento</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                                    {lateLoansList.length > 0 ? lateLoansList.map((loan) => (
-                                        <tr key={loan.id} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer" onClick={() => onLoanSelect?.(loan.id)}>
-                                            <td className="py-4 pl-2">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 flex items-center justify-center text-xs font-bold border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-                                                        {(loan.client as any)?.avatar_url && !(loan.client as any).avatar_url.includes('ui-avatars.com') ? (
-                                                            <img src={(loan.client as any).avatar_url} alt="Profile" className="w-full h-full object-cover" />
-                                                        ) : (
-                                                            <span>{(loan.client as any)?.name?.substring(0, 2).toUpperCase() || 'CL'}</span>
-                                                        )}
+
+                        {/* 2.2 Saldo Devedor a Receber */}
+                        <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total a Receber</span>
+                                <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                                    <Wallet className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <div>
+                                <span className="text-2xl font-black font-manrope text-indigo-600 dark:text-indigo-400 leading-none block">
+                                    {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalToReceive.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                </span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                    Saldo total (Capital + Juros a vencer)
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* 2.3 Lucro Projetado da Carteira */}
+                        <div className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs">
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Lucro Previsto</span>
+                                <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/40 flex items-center justify-center text-teal-600 dark:text-teal-400">
+                                    <TrendingUp className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <div>
+                                <span className="text-2xl font-black font-manrope text-teal-600 dark:text-teal-400 leading-none block">
+                                    {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${Math.max(0, summary.totalToReceive - summary.totalLent).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                </span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                    Retorno bruto sobre contratos ativos
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* 2.4 Lucro Já Realizado (Histórico) */}
+                        <div
+                            onClick={onViewInterestDetails}
+                            className="bg-white dark:bg-card-dark rounded-2xl p-5 border border-gray-200/70 dark:border-gray-800 shadow-xs hover:border-gray-300 dark:hover:border-gray-700 transition-all cursor-pointer group"
+                        >
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Lucro Já Realizado</span>
+                                <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
+                                    <ArrowUpRight className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <div>
+                                <span className="text-2xl font-black font-manrope text-emerald-600 dark:text-emerald-400 leading-none block">
+                                    {hideValues ? 'R$ •••••••' : (loading ? '...' : `R$ ${summary.totalInterestReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                                </span>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-1.5">
+                                    Juros já embolsados no caixa
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* 3. COCKPIT OPERACIONAL (Fila de Atrasados & Vencimentos de Hoje) */}
+                <div className="hidden md:grid grid-cols-12 gap-6 mb-6">
+                    {/* 3.1 Coluna da Esquerda (7 colunas): Fila de Cobrança Urgente */}
+                    <div className="col-span-7 bg-white dark:bg-card-dark rounded-2xl p-6 border border-gray-200/70 dark:border-gray-800 shadow-xs flex flex-col">
+                        <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-100 dark:border-gray-800">
+                            <div className="flex items-center gap-2.5">
+                                <h3 className="font-bold text-gray-900 dark:text-white text-base">Fila de Cobrança (Atrasados)</h3>
+                                {lateLoansList.length > 0 && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-600 dark:bg-red-950/50 dark:text-red-400">
+                                        {lateLoansList.length} pendentes
+                                    </span>
+                                )}
+                            </div>
+                            <button onClick={onViewLateLoans} className="text-xs font-bold text-primary dark:text-white hover:underline cursor-pointer">
+                                Ver todos
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-x-auto">
+                            {lateLoansList.length > 0 ? (
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-800">
+                                            <th className="pb-3 pl-1">Cliente</th>
+                                            <th className="pb-3">Modalidade</th>
+                                            <th className="pb-3">Valor Vencido</th>
+                                            <th className="pb-3">Atraso</th>
+                                            <th className="pb-3 text-right pr-1">Ação</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
+                                        {lateLoansList.slice(0, 6).map((loan: any) => (
+                                            <tr
+                                                key={loan.id}
+                                                onClick={() => onLoanSelect?.(loan.id)}
+                                                className="group hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors cursor-pointer"
+                                            >
+                                                <td className="py-3.5 pl-1">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center text-xs font-bold border border-zinc-200 dark:border-zinc-700 overflow-hidden shrink-0">
+                                                            {(loan.client as any)?.avatar_url && !(loan.client as any).avatar_url.includes('ui-avatars.com') ? (
+                                                                <img src={(loan.client as any).avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <span>{(loan.client as any)?.name?.substring(0, 2).toUpperCase() || 'CL'}</span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-sm font-semibold text-gray-900 dark:text-white truncate max-w-[140px]">
+                                                            {(loan.client as any)?.name || 'Cliente'}
+                                                        </span>
                                                     </div>
-                                                    <span className="text-sm font-medium text-gray-900 dark:text-white">{(loan.client as any)?.name || 'Cliente'}</span>
-                                                </div>
-                                            </td>
-                                            <td className="py-4 text-sm text-gray-600 dark:text-gray-300">
-                                                R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </td>
-                                            <td className="py-4">
-                                                <span className="px-2 py-1 rounded-md bg-red-100 text-red-600 text-xs font-bold">
-                                                    Atrasado
-                                                </span>
-                                            </td>
-                                            <td className="py-4 text-sm text-gray-500">
-                                                {loan.due_date ? new Date(loan.due_date).toLocaleDateString() : 'N/A'}
-                                            </td>
-                                        </tr>
-                                    )) : (
-                                        <tr>
-                                            <td colSpan={4} className="py-8 text-center text-gray-400 text-sm">
-                                                Nenhum atraso recente encontrado.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
+                                                </td>
+                                                <td className="py-3.5 text-xs text-gray-500 font-medium">
+                                                    {loan.frequency || 'Diária'}
+                                                </td>
+                                                <td className="py-3.5 text-sm font-bold text-red-600 dark:text-red-400 whitespace-nowrap">
+                                                    R$ {Number(loan.overdueAmount || loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </td>
+                                                <td className="py-3.5">
+                                                    <span className="px-2 py-0.5 rounded-md bg-red-100/80 text-red-700 dark:bg-red-950/50 dark:text-red-400 text-[11px] font-bold whitespace-nowrap">
+                                                        {loan.daysLate && loan.daysLate > 1 ? `Há ${loan.daysLate} dias` : 'Venceu ontem'}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3.5 text-right pr-1">
+                                                    <button
+                                                        onClick={(e) => handleSendWhatsAppReminder(e, (loan.client as any)?.name, (loan.client as any)?.phone, loan.overdueAmount || loan.amount, 'late', loan.daysLate)}
+                                                        title="Cobrar via WhatsApp"
+                                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 dark:text-emerald-400 text-xs font-bold transition-colors cursor-pointer border border-emerald-200 dark:border-emerald-800/60"
+                                                    >
+                                                        <MessageCircle className="w-3.5 h-3.5" />
+                                                        Cobrar
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <div className="py-12 flex flex-col items-center justify-center text-center">
+                                    <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-2">
+                                        <CheckCircle className="w-6 h-6" />
+                                    </div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white text-sm">Tudo em dia!</h4>
+                                    <p className="text-xs text-gray-400 mt-0.5">Nenhum cliente com parcelas atrasadas no momento.</p>
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    {/* Right Column */}
-                    <div className="space-y-6">
-                        {/* Monthly Performance Chart */}
-                        <div className="bg-white dark:bg-card-dark rounded-2xl p-6 border border-gray-100 dark:border-gray-800 h-80 flex flex-col">
-                            <h3 className="font-bold text-gray-900 dark:text-white mb-6">Desempenho Mensal</h3>
-                            <div className="flex-1 w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={chartData}>
-                                        <Tooltip
-                                            cursor={{ fill: 'transparent' }}
-                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
-                                        />
-                                        <XAxis
-                                            dataKey="name"
-                                            axisLine={false}
-                                            tickLine={false}
-                                            tick={{ fontSize: 10, fill: '#9CA3AF' }}
-                                            dy={10}
-                                        />
-                                        <Bar dataKey="value" radius={[4, 4, 4, 4]} barSize={30}>
-                                            {chartData.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={entry.active ? '#3B82F6' : '#F3F4F6'} />
-                                            ))}
-                                        </Bar>
-                                    </BarChart>
-                                </ResponsiveContainer>
+                    {/* 3.2 Coluna da Direita (5 colunas): Vencimentos de Hoje */}
+                    <div className="col-span-5 bg-white dark:bg-card-dark rounded-2xl p-6 border border-gray-200/70 dark:border-gray-800 shadow-xs flex flex-col">
+                        <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-100 dark:border-gray-800">
+                            <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-gray-900 dark:text-white text-base">Vencimentos de Hoje</h3>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                                    {todayChargesList.length} hoje
+                                </span>
                             </div>
-                            <div className="mt-4 space-y-2">
-                                <div className="flex items-center justify-between text-sm">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                                        <span className="text-gray-500">Volume de hoje</span>
-                                    </div>
-                                    <span className="font-bold text-gray-900 dark:text-white">R$ {summary.todayChargesValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                                <div className="flex items-center justify-between text-sm">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                                        <span className="text-gray-500">Meta mensal</span>
-                                    </div>
-                                    <span className="font-bold text-gray-900 dark:text-white">75% atingida</span>
-                                </div>
-                            </div>
+                            {onViewCollectionCalendar && (
+                                <button onClick={onViewCollectionCalendar} className="text-xs font-bold text-primary dark:text-white hover:underline cursor-pointer">
+                                    Ver calendário
+                                </button>
+                            )}
                         </div>
 
-                        {/* New Loan CTA */}
-                        <div className="bg-[#1E1E24] rounded-2xl p-6 text-white relative overflow-hidden group cursor-pointer" onClick={onViewClients}>
-                            <div className="relative z-10">
-                                <h3 className="text-lg font-bold mb-2">Novo Empréstimo</h3>
-                                <p className="text-gray-400 text-sm mb-6 max-w-[80%]">
-                                    Simule e gere novos contratos em poucos segundos para seus clientes.
-                                </p>
-                                <button className="w-full bg-white text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors">
-                                    <Plus className="w-5 h-5" />
-                                    Iniciar Simulação
-                                </button>
-                            </div>
-                            <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-colors"></div>
+                        <div className="flex-1 overflow-y-auto max-h-[340px] space-y-2.5 no-scrollbar pr-1">
+                            {todayChargesList.length > 0 ? (
+                                todayChargesList.slice(0, 6).map((charge, idx) => (
+                                    <div
+                                        key={`${charge.loanId}-${idx}`}
+                                        onClick={() => onLoanSelect?.(charge.loanId)}
+                                        className="p-3 bg-gray-50/80 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 transition-all cursor-pointer flex items-center justify-between gap-3 group"
+                                    >
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                            <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex items-center justify-center text-xs font-bold shrink-0">
+                                                {charge.clientName.substring(0, 2).toUpperCase()}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                                                    {charge.clientName}
+                                                </p>
+                                                <p className="text-[11px] text-gray-400">
+                                                    {charge.frequency === 'Mensal' ? 'Juros do mês' : `Parcela ${charge.installmentNumber}/${charge.totalInstallments}`} • {charge.frequency}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <span className="text-sm font-black text-gray-900 dark:text-white">
+                                                R$ {charge.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </span>
+                                            <button
+                                                onClick={(e) => handleSendWhatsAppReminder(e, charge.clientName, charge.clientPhone, charge.amount, 'today')}
+                                                title="Enviar lembrete via WhatsApp"
+                                                className="w-7 h-7 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 flex items-center justify-center transition-colors cursor-pointer border border-emerald-200 dark:border-emerald-800/50"
+                                            >
+                                                <MessageCircle className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="py-12 flex flex-col items-center justify-center text-center">
+                                    <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 flex items-center justify-center mb-2">
+                                        <CalendarCheck className="w-6 h-6" />
+                                    </div>
+                                    <h4 className="font-bold text-gray-900 dark:text-white text-sm">Nenhuma cobrança para hoje</h4>
+                                    <p className="text-xs text-gray-400 mt-0.5">As próximas cobranças estão nos dias seguintes.</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
-
-                {/* Removed Calendário here as it was moved up */}
 
                 {/* Página de Relatórios */}
                 <div

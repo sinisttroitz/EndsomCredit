@@ -13,16 +13,16 @@ export const processRecurringInterest = async (loans: Loan[]) => {
 
         const [year, month, day] = loan.due_date.split('-').map(Number);
         const originalDueDate = new Date(year, month - 1, day);
-        
+
         let periodsToAdd = 0;
         let nextDueDate = new Date(originalDueDate);
 
         // Calculate the term length of the loan
         const installments = loan.installments || 1;
-        
+
         while (true) {
             let periodEndDate = new Date(nextDueDate);
-            
+
             if (loan.frequency === 'Semanal') {
                 periodEndDate.setDate(nextDueDate.getDate() + (installments * 7));
             } else if (loan.frequency === 'Quinzenal') {
@@ -47,7 +47,7 @@ export const processRecurringInterest = async (loans: Loan[]) => {
             const rate = Number(loan.interest_rate) || 0;
             const interestPerPeriod = principal * (rate / 100);
             const totalInterestToAdd = periodsToAdd * interestPerPeriod;
-            
+
             const newBalance = Number(loan.balance) + totalInterestToAdd;
             const newDueDateStr = `${nextDueDate.getFullYear()}-${(nextDueDate.getMonth() + 1).toString().padStart(2, '0')}-${nextDueDate.getDate().toString().padStart(2, '0')}`;
 
