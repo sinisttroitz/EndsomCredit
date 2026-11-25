@@ -2,19 +2,19 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Search, ChevronRight, AlertTriangle, Calendar, RefreshCw, X, Plus, Bell, Share2, Wallet, TrendingUp, DollarSign } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Loan } from '../types';
-import { generateInstallments } from '../utils/loanUtils';
+import { generateInstallments, isLoanEligibleForRenegotiation } from '../utils/loanUtils';
 import { ShareReportModal } from '../components/ShareReportModal';
 import { matchesClientSearch, normalizeSearchText } from '../utils/searchUtils';
 
 interface LoansProps {
     onLoanSelect?: (loanId: string) => void;
     onNewLoan?: () => void;
-    initialFilter?: 'active' | 'late' | 'paid';
-    onFilterChange?: (filter: 'active' | 'late' | 'paid') => void;
+    initialFilter?: 'active' | 'late' | 'renegotiation' | 'paid';
+    onFilterChange?: (filter: 'active' | 'late' | 'renegotiation' | 'paid') => void;
 }
 
 export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFilter = 'active', onFilterChange }) => {
-    const [filter, setFilter] = useState<'active' | 'late' | 'paid'>(initialFilter);
+    const [filter, setFilter] = useState<'active' | 'late' | 'renegotiation' | 'paid'>(initialFilter);
     const [loans, setLoans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -63,6 +63,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
 
     // Dynamic Counts
     const activeCount = useMemo(() => loans.filter(l => l.status !== 'paid' && l.status !== 'pending').length, [loans]);
+    const renegotiationCount = useMemo(() => loans.filter(l => isLoanEligibleForRenegotiation(l, l.installment_fines || [])).length, [loans]);
     const lateCount = useMemo(() => loans.filter(l => isLoanLate(l)).length, [loans]);
     const paidCount = useMemo(() => loans.filter(l => l.status === 'paid').length, [loans]);
 
@@ -118,6 +119,8 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
             if (loan.status !== 'paid') return false;
         } else if (filter === 'late') {
             if (!isLoanLate(loan)) return false;
+        } else if (filter === 'renegotiation') {
+            if (!isLoanEligibleForRenegotiation(loan, loan.installment_fines || [])) return false;
         }
 
         // Search Filter (Client Name, Phone, CPF, or Contract #ID)
@@ -254,8 +257,8 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
             </header>
 
             <main className="flex-1 px-4 py-4 md:px-8 md:py-6 overflow-y-auto no-scrollbar">
-                {/* Financial Summary Cards (Desktop and Mobile) */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-5">
+                {/* Financial Summary Cards (Desktop Only) */}
+                <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-5">
                     <div className="bg-white dark:bg-gray-900 p-4 rounded-2xl border border-gray-200/70 dark:border-gray-800 shadow-xs">
                         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Capital Emprestado</span>
                         <span className="text-base md:text-xl font-black text-gray-900 dark:text-white block truncate">
@@ -319,10 +322,10 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                     </div>
 
                     {/* Status Filter with live counts */}
-                    <div className="bg-gray-200/60 dark:bg-gray-800/60 p-1 rounded-xl flex items-center border border-gray-200 dark:border-gray-700/60">
+                    <div className="bg-gray-200/60 dark:bg-gray-800/60 p-1 rounded-xl flex items-center border border-gray-200 dark:border-gray-700/60 overflow-x-auto no-scrollbar">
                         <button
                             onClick={() => setFilter('active')}
-                            className={`flex-1 sm:flex-initial py-1.5 px-3.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${filter === 'active'
+                            className={`flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${filter === 'active'
                                     ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-xs'
                                     : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
                                 }`}
@@ -336,7 +339,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
 
                         <button
                             onClick={() => setFilter('late')}
-                            className={`flex-1 sm:flex-initial py-1.5 px-3.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${filter === 'late'
+                            className={`flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${filter === 'late'
                                     ? 'bg-white dark:bg-gray-900 text-red-600 dark:text-red-400 shadow-xs'
                                     : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
                                 }`}
@@ -350,8 +353,23 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                         </button>
 
                         <button
+                            onClick={() => setFilter('renegotiation')}
+                            className={`flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${filter === 'renegotiation'
+                                    ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-xs'
+                                    : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                                }`}
+                        >
+                            <span>Renegociação</span>
+                            {renegotiationCount > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-purple-600 text-white">
+                                    {renegotiationCount}
+                                </span>
+                            )}
+                        </button>
+
+                        <button
                             onClick={() => setFilter('paid')}
-                            className={`flex-1 sm:flex-initial py-1.5 px-3.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${filter === 'paid'
+                            className={`flex-1 sm:flex-initial py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${filter === 'paid'
                                     ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow-xs'
                                     : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
                                 }`}
@@ -402,8 +420,9 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                                             : installments.filter(i => i.status === 'paid').reduce((acc, inst) => acc + inst.value, 0) || Math.max(0, totalDebt - outstandingBalance));
                                     const overdueInstallments = installments.filter(i => i.status === 'late');
                                     const nextInstallment = installments.find(i => i.status !== 'paid');
+                                    const isRenegotiation = isLoanEligibleForRenegotiation(loan, loan.installment_fines || []);
                                     const isLate = overdueInstallments.length > 0 || loan.status === 'late';
-                                    const displayStatus = isLate ? 'late' : loan.status;
+                                    const displayStatus = isRenegotiation ? 'renegotiation' : (isLate ? 'late' : loan.status);
 
                                     let displayDate: Date | string | undefined;
                                     if (isLate && overdueInstallments.length > 0) {
@@ -473,17 +492,18 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                                                 )}
                                             </td>
                                             <td className="p-4 text-sm whitespace-nowrap">
-                                                <span className={`${isLate ? 'text-red-600 font-bold' : 'text-gray-600 dark:text-gray-300'}`}>
+                                                <span className={`${displayStatus === 'renegotiation' ? 'text-purple-600 dark:text-purple-400 font-bold' : isLate ? 'text-red-600 font-bold' : 'text-gray-600 dark:text-gray-300'}`}>
                                                     {formatDate(displayDate)}
                                                 </span>
                                             </td>
                                             <td className="p-4">
                                                 <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${displayStatus === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900/40' :
+                                                    displayStatus === 'renegotiation' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/30 dark:text-purple-400 dark:border-purple-900/40' :
                                                     displayStatus === 'late' ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-900/40' :
                                                         displayStatus === 'paid' ? 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700' :
                                                             'bg-amber-50 text-amber-700 border-amber-200'
                                                     }`}>
-                                                    {displayStatus === 'active' ? 'Em dia' : displayStatus === 'late' ? 'Atrasado' : displayStatus === 'paid' ? 'Pago' : 'Pendente'}
+                                                    {displayStatus === 'active' ? 'Em dia' : displayStatus === 'renegotiation' ? 'Renegociação' : displayStatus === 'late' ? 'Atrasado' : displayStatus === 'paid' ? 'Pago' : 'Pendente'}
                                                 </span>
                                             </td>
                                             <td className="p-4 text-right">
@@ -515,8 +535,9 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                             const overdueInstallments = installments.filter(i => i.status === 'late');
                             const nextInstallment = installments.find(i => i.status !== 'paid');
 
+                            const isRenegotiation = isLoanEligibleForRenegotiation(loan, loan.installment_fines || []);
                             const isLate = overdueInstallments.length > 0 || loan.status === 'late';
-                            const displayStatus = isLate ? 'late' : loan.status;
+                            const displayStatus = isRenegotiation ? 'renegotiation' : (isLate ? 'late' : loan.status);
 
                             let displayDate: Date | string | undefined;
                             if (isLate && overdueInstallments.length > 0) {
@@ -552,18 +573,21 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                                         <div className="flex flex-col items-end gap-1.5">
                                             <div className="flex items-center gap-1.5">
                                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide border ${displayStatus === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400' :
+                                                        displayStatus === 'renegotiation' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/30 dark:text-purple-400' :
                                                         displayStatus === 'late' ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-400' :
                                                             displayStatus === 'paid' ? 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300' :
                                                                 'bg-amber-50 text-amber-700 border-amber-200'
                                                     }`}>
-                                                    {displayStatus === 'active' ? 'Em dia' : displayStatus === 'late' ? 'Atrasado' : displayStatus === 'paid' ? 'Pago' : 'Pendente'}
+                                                    {displayStatus === 'active' ? 'Em dia' : displayStatus === 'renegotiation' ? 'Renegociação' : displayStatus === 'late' ? 'Atrasado' : displayStatus === 'paid' ? 'Pago' : 'Pendente'}
                                                 </span>
                                                 <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-600 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700">
                                                     {loan.frequency || 'N/A'}
                                                 </span>
                                             </div>
                                             <div className="flex items-center gap-1 text-[10px] text-zinc-400 font-bold uppercase tracking-tight">
-                                                {displayStatus === 'late' ? (
+                                                {displayStatus === 'renegotiation' ? (
+                                                    <span className="text-purple-600 dark:text-purple-400 font-bold">Prazo Esgotado</span>
+                                                ) : displayStatus === 'late' ? (
                                                     <span className="text-red-500">Venceu: {dateDisplayStr}</span>
                                                 ) : (
                                                     <span>Venc: {dateDisplayStr}</span>

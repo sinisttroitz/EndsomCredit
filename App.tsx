@@ -44,7 +44,7 @@ const App: React.FC = () => {
   const [selectedPixKey, setSelectedPixKey] = useState<PixKeyItem | null>(() => loadState('selectedPixKey', null));
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [initialLoansFilter, setInitialLoansFilter] = useState<'all' | 'pending' | 'late'>(() => loadState('initialLoansFilter', 'all'));
+  const [initialLoansFilter, setInitialLoansFilter] = useState<'all' | 'pending' | 'late' | 'renegotiation' | 'active' | 'paid'>(() => loadState('initialLoansFilter', 'active' as any));
   const [newLoanInitialData, setNewLoanInitialData] = useState<any>(null);
   const [systemLogo, setSystemLogo] = useState<string>('');
   const [sidebarLogo, setSidebarLogo] = useState<string>('');

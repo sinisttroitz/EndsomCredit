@@ -174,7 +174,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientSelect, onLoanSele
                     // Search Clients (with accents & phone handling)
                     const { data: clientsData } = await supabase
                         .from('clients')
-                        .select('*, additional_contacts(*)')
+                        .select('*')
                         .order('name');
 
                     const matchedClients = (clientsData || [])

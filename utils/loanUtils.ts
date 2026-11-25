@@ -253,3 +253,27 @@ export const generateInstallments = (loanData: Loan, fines: InstallmentFine[] = 
 
     return list;
 };
+
+export const isLoanEligibleForRenegotiation = (loan: Loan, fines: InstallmentFine[] = []): boolean => {
+    if (!loan || loan.status === 'paid' || Number(loan.balance) <= 0) return false;
+    if (loan.frequency === 'Aluguel' || loan.frequency === 'Mensal') return false;
+
+    const installments = generateInstallments(loan, fines);
+    if (!installments || installments.length === 0) return false;
+
+    const hasUnpaid = installments.some(inst => inst.status === 'late' || inst.status === 'pending');
+    if (!hasUnpaid) return false;
+
+    const lastInstallment = installments[installments.length - 1];
+    if (!lastInstallment || !lastInstallment.date) return false;
+
+    const today = new Date();
+    const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const lastDateZero = new Date(lastInstallment.date.getFullYear(), lastInstallment.date.getMonth(), lastInstallment.date.getDate());
+
+    if ((loan.installments || 1) > 1) {
+        return lastDateZero <= todayZero;
+    }
+
+    return lastDateZero < todayZero;
+};

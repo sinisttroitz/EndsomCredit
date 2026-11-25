@@ -114,7 +114,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   useEffect(() => {
     supabase
       .from('clients')
-      .select('*, additional_contacts(*)')
+      .select('*')
       .order('name')
       .then(({ data }) => {
         if (data) setAllClients(data);
@@ -226,7 +226,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
   // Shared search results dropdown component
   const SearchResultsDropdown = () => (
     searchResults.length > 0 && !clientId ? (
-      <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-800 rounded-xl shadow-xl mt-2 z-50 border border-gray-100 dark:border-gray-700 overflow-hidden">
+      <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-800 rounded-xl shadow-xl mt-2 z-50 border border-gray-100 dark:border-gray-700 overflow-hidden max-h-60 overflow-y-auto">
         {searchResults.map(client => (
           <div
             key={client.id}
