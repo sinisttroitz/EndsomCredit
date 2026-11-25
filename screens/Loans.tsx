@@ -298,7 +298,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                             {metrics.lateCount > 0 ? `${metrics.lateCount} em atraso` : 'Em dia'}
                         </span>
                         <span className={`text-[11px] block mt-0.5 truncate ${metrics.lateCount > 0 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-500 dark:text-gray-400'}`}>
-                            {metrics.lateCount > 0 ? `R$ ${metrics.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} vencidos` : 'Nenhum atraso'}
+                            {metrics.lateCount > 0 ? `R$ ${metrics.lateAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} vencidos` : 'Nenhum atraso'}
                         </span>
                     </div>
                 </div>
@@ -457,7 +457,7 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                                             <td className="p-4 text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap">
                                                 R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </td>
-                                            <td className="p-4 text-sm font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                                            <td className={`p-4 text-sm font-bold whitespace-nowrap ${paidAmount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'}`}>
                                                 R$ {paidAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </td>
                                             <td className="p-4 text-sm font-bold text-gray-900 dark:text-white whitespace-nowrap">
@@ -602,8 +602,8 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
                                             <p className="text-xs font-bold text-gray-900 dark:text-white truncate">R$ {Number(loan.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                         </div>
                                         <div className="text-center">
-                                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mb-0.5">Amortizado</p>
-                                            <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 truncate">R$ {paidAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                            <p className={`text-[10px] font-semibold mb-0.5 ${paidAmount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>Amortizado</p>
+                                            <p className={`text-xs font-bold truncate ${paidAmount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'}`}>R$ {paidAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                         </div>
                                         <div className="text-right">
                                             <p className="text-[10px] text-gray-400 font-medium mb-0.5">Saldo Devedor</p>
