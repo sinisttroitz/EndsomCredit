@@ -9,7 +9,13 @@ interface LoginProps {
 
 export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    try {
+      return localStorage.getItem('agicred_saved_email') || '';
+    } catch {
+      return '';
+    }
+  });
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +39,12 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
 
       if (error) {
         throw error;
+      }
+
+      try {
+        localStorage.setItem('agicred_saved_email', email);
+      } catch {
+        // ignore
       }
 
       onLogin();
@@ -96,13 +108,16 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
           <div className="w-full space-y-3">
             {/* Expanded Login Form */}
             {showMobileForm && (
-              <form onSubmit={handleSubmit} className="w-full space-y-1 animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <form onSubmit={handleSubmit} method="post" autoComplete="on" className="w-full space-y-1 animate-in fade-in slide-in-from-bottom-4 duration-300">
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
                     <Mail className="w-4 h-4" />
                   </div>
                   <input
+                    id="mobile-email"
+                    name="email"
                     type="email"
+                    autoComplete="username email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="block w-full pl-10 pr-4 py-3.5 bg-white rounded-2xl text-gray-900 placeholder-gray-400 focus:border-gray-300 focus:ring-2 focus:ring-gray-900/10 outline-none transition-all text-sm shadow-sm"
@@ -114,7 +129,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
 
                 <div className="relative">
                   <input
+                    id="mobile-password"
+                    name="password"
                     type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="block w-full px-4 py-3.5 bg-white rounded-2xl text-gray-900 placeholder-gray-400 focus:border-gray-300 focus:ring-2 focus:ring-gray-900/10 outline-none transition-all text-sm shadow-sm"
@@ -211,7 +229,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
 
           {/* Login Form */}
           <div className="w-full">
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} method="post" autoComplete="on" className="space-y-5">
               <div className="space-y-1.5">
                 <label htmlFor="email" className="text-xs font-medium text-white/60 ml-1">E-mail</label>
                 <div className="relative">
@@ -222,6 +240,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
                     id="email"
                     name="email"
                     type="email"
+                    autoComplete="username email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="block w-full pl-10 pr-4 py-3 bg-white/[0.03] border border-white/5 rounded-xl text-white placeholder-white/20 focus:border-white/20 focus:bg-white/[0.05] focus:ring-1 focus:ring-white/20 outline-none transition-all duration-200 text-sm"
@@ -251,6 +270,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
                     id="password"
                     name="password"
                     type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="block w-full px-4 py-3 bg-white/[0.03] border border-white/5 rounded-xl text-white placeholder-white/20 focus:border-white/20 focus:bg-white/[0.05] focus:ring-1 focus:ring-white/20 outline-none transition-all duration-200 text-sm"
@@ -328,7 +348,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin, logo }) => {
 
               <form onSubmit={handleForgotPassword} className="w-full space-y-4">
                 <input
+                  id="forgot-email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
                   className="block w-full px-4 py-3 bg-white/[0.03] border border-white/10 rounded-xl text-white placeholder-white/30 focus:border-white/20 focus:bg-white/[0.05] focus:ring-1 focus:ring-white/20 outline-none transition-all duration-200 text-sm"

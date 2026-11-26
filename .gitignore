@@ -12,6 +12,19 @@ dist
 dist-ssr
 *.local
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Supabase CLI temp files
+supabase/.temp/
+
+# Database scripts and local SQL
+*.sql
+database_scripts/
+scripts/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

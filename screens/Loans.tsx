@@ -27,6 +27,22 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
     }, []);
 
     useEffect(() => {
+        if (!loading && loans.length > 0) {
+            const lastId = sessionStorage.getItem('last_viewed_loan_id');
+            if (lastId) {
+                const timer = setTimeout(() => {
+                    const el = document.getElementById(`loan-${lastId}`);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                    sessionStorage.removeItem('last_viewed_loan_id');
+                }, 120);
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [loading, loans]);
+
+    useEffect(() => {
         if (onFilterChange) {
             onFilterChange(filter);
         }
@@ -112,32 +128,34 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
         };
     }, [loans]);
 
-    const filteredLoans = loans.filter(loan => {
-        if (filter === 'active') {
-            if (loan.status === 'paid' || loan.status === 'pending') return false;
-        } else if (filter === 'paid') {
-            if (loan.status !== 'paid') return false;
-        } else if (filter === 'late') {
-            if (!isLoanLate(loan)) return false;
-        } else if (filter === 'renegotiation') {
-            if (!isLoanEligibleForRenegotiation(loan, loan.installment_fines || [])) return false;
-        }
+    const filteredLoans = useMemo(() => {
+        return loans.filter(loan => {
+            if (filter === 'active') {
+                if (loan.status === 'paid' || loan.status === 'pending') return false;
+            } else if (filter === 'paid') {
+                if (loan.status !== 'paid') return false;
+            } else if (filter === 'late') {
+                if (!isLoanLate(loan)) return false;
+            } else if (filter === 'renegotiation') {
+                if (!isLoanEligibleForRenegotiation(loan, loan.installment_fines || [])) return false;
+            }
 
-        // Search Filter (Client Name, Phone, CPF, or Contract #ID)
-        if (searchTerm) {
-            const matchesClient = matchesClientSearch(loan.client, searchTerm);
-            const cleanQuery = searchTerm.trim().replace(/^#/, '');
-            const matchesLoanId = loan.id && normalizeSearchText(loan.id).includes(normalizeSearchText(cleanQuery));
-            if (!matchesClient && !matchesLoanId) return false;
-        }
+            // Search Filter (Client Name, Phone, CPF, or Contract #ID)
+            if (searchTerm) {
+                const matchesClient = matchesClientSearch(loan.client, searchTerm);
+                const cleanQuery = searchTerm.trim().replace(/^#/, '');
+                const matchesLoanId = loan.id && normalizeSearchText(loan.id).includes(normalizeSearchText(cleanQuery));
+                if (!matchesClient && !matchesLoanId) return false;
+            }
 
-        // Frequency Filter
-        if (frequencyFilter !== 'all' && loan.frequency !== frequencyFilter) {
-            return false;
-        }
+            // Frequency Filter
+            if (frequencyFilter !== 'all' && loan.frequency !== frequencyFilter) {
+                return false;
+            }
 
-        return true;
-    });
+            return true;
+        }).sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || '', 'pt-BR', { sensitivity: 'base' }));
+    }, [loans, filter, searchTerm, frequencyFilter]);
 
     const formatDate = (dateInput: string | Date | undefined) => {
         if (!dateInput) return '-';
@@ -435,8 +453,12 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
 
                                     return (
                                         <tr
+                                            id={`loan-${loan.id}`}
                                             key={loan.id}
-                                            onClick={() => onLoanSelect?.(loan.id)}
+                                            onClick={() => {
+                                                sessionStorage.setItem('last_viewed_loan_id', loan.id);
+                                                onLoanSelect?.(loan.id);
+                                            }}
                                             className="hover:bg-gray-50/80 dark:hover:bg-gray-800/50 transition-colors cursor-pointer group"
                                         >
                                             <td className="p-4">
@@ -552,8 +574,12 @@ export const Loans: React.FC<LoansProps> = ({ onLoanSelect, onNewLoan, initialFi
 
                             return (
                                 <div
+                                    id={`loan-${loan.id}`}
                                     key={loan.id}
-                                    onClick={() => onLoanSelect?.(loan.id)}
+                                    onClick={() => {
+                                        sessionStorage.setItem('last_viewed_loan_id', loan.id);
+                                        onLoanSelect?.(loan.id);
+                                    }}
                                     className="bg-white dark:bg-card-dark p-4 rounded-2xl shadow-xs border border-gray-100 dark:border-gray-800 hover:shadow-sm transition-all cursor-pointer active:scale-[0.99]"
                                 >
                                     <div className="flex justify-between items-start mb-3">

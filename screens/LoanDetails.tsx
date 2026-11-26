@@ -92,6 +92,12 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const [portalLinkLoading, setPortalLinkLoading] = useState(false);
     const [portalLinkCopied, setPortalLinkCopied] = useState(false);
 
+    // Renegotiation Proposal State
+    const [showRenegotiateModal, setShowRenegotiateModal] = useState(false);
+    const [renegotiateCopiedAll, setRenegotiateCopiedAll] = useState(false);
+    const [renegotiateCopiedOpt1, setRenegotiateCopiedOpt1] = useState(false);
+    const [renegotiateCopiedOpt2, setRenegotiateCopiedOpt2] = useState(false);
+
     // Payment Request Alerts
     const [pendingPaymentRequests, setPendingPaymentRequests] = useState<any[]>([]);
     const [showPaymentRequestModal, setShowPaymentRequestModal] = useState(false);
@@ -1806,6 +1812,97 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             : Math.max(0, totalDebt - Number(loan.balance)));
     const percentage = loan.status === 'paid' ? 100 : (isAluguel ? (loan.balance <= 0 ? 100 : 0) : Math.max(0, loan.progress || 0));
 
+    // Determina se o empréstimo estourou o prazo final (elegível para renegociação)
+    const isRenegotiation = isLoanEligibleForRenegotiation(loan, fines);
+
+    // Cálculos de Proposta de Renegociação
+    const currentDebtForRenegotiation = isAluguel
+        ? Number(loan.balance) || 0
+        : installmentsList.reduce((acc, inst) => inst.status !== 'paid' ? acc + inst.value : acc, 0);
+
+    const originalInstCount = Number(loan.installments) || 1;
+    const originalTotal = (Number(loan.installment_value) || 0) * originalInstCount;
+    const originalPrincipal = Number(loan.amount) || 0;
+
+    let effectiveInterestRate = Number(loan.interest_rate) || 0;
+    if (effectiveInterestRate <= 0 && originalPrincipal > 0 && originalTotal > originalPrincipal) {
+        effectiveInterestRate = Math.round(((originalTotal - originalPrincipal) / originalPrincipal) * 100);
+    }
+    if (effectiveInterestRate <= 0) effectiveInterestRate = 20;
+
+    // Opção 1: Mesmo número de parcelas + taxa original integral
+    const opt1Count = originalInstCount;
+    const opt1Rate = effectiveInterestRate;
+    const opt1Interest = currentDebtForRenegotiation * (opt1Rate / 100);
+    const opt1Total = currentDebtForRenegotiation + opt1Interest;
+    const opt1InstValue = opt1Count > 0 ? opt1Total / opt1Count : opt1Total;
+
+    // Opção 2: Metade do número de parcelas + metade da taxa original
+    const opt2Count = Math.max(1, Math.round(originalInstCount / 2));
+    const opt2Rate = Math.round((effectiveInterestRate / 2) * 10) / 10;
+    const opt2Interest = currentDebtForRenegotiation * (opt2Rate / 100);
+    const opt2Total = currentDebtForRenegotiation + opt2Interest;
+    const opt2InstValue = opt2Count > 0 ? opt2Total / opt2Count : opt2Total;
+
+    const clientFirstName = loan.client?.name?.trim().split(' ')[0] || 'Cliente';
+    const contractShortId = loan.id ? loan.id.substring(0, 6) : '';
+    const freqLabel = loan.frequency ? ` (${loan.frequency.toLowerCase()})` : '';
+
+    const fullProposalWhatsAppText = `Olá, ${clientFirstName}.
+
+Referente ao contrato #${contractShortId}, o saldo devedor atual é de R$ ${currentDebtForRenegotiation.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.
+
+Condições para renegociação:
+
+Opção 1 (Prazo integral):
+${opt1Count} parcelas de R$ ${opt1InstValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Total: R$ ${opt1Total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+
+Opção 2 (Metade do prazo com desconto):
+${opt2Count} parcelas de R$ ${opt2InstValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Total: R$ ${opt2Total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+
+Por favor, nos confirme qual condição prefere para darmos andamento.`;
+
+    const opt1OnlyText = `Proposta de renegociação (Contrato #${contractShortId}):
+Saldo devedor: R$ ${currentDebtForRenegotiation.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+Opção 1: ${opt1Count} parcelas de R$ ${opt1InstValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Total: R$ ${opt1Total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+
+    const opt2OnlyText = `Proposta de renegociação com desconto (Contrato #${contractShortId}):
+Saldo devedor: R$ ${currentDebtForRenegotiation.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+Opção 2: ${opt2Count} parcelas de R$ ${opt2InstValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Total: R$ ${opt2Total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+
+    const copyProposalText = async (text: string, onSuccess: () => void) => {
+        try {
+            if (navigator?.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+                onSuccess();
+                return;
+            }
+        } catch { }
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            onSuccess();
+        } catch { }
+    };
+
+    const handleOpenRenegotiation = () => {
+        if (!isRenegotiation) {
+            setAlertModal({
+                open: true,
+                title: 'Renegociação Bloqueada',
+                message: 'A proposta de renegociação só fica disponível quando o empréstimo ultrapassar o prazo final de vencimento (após a data da última parcela).'
+            });
+            return;
+        }
+        setShowRenegotiateModal(true);
+    };
+
     // Linha do tempo e extrato histórico do contrato (Cálculo regular seguro sem violação de Hooks)
     const timelineEvents: any[] = [];
     let importedPaidCount = 0;
@@ -1837,28 +1934,33 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             title = instCount > 0 ? `Carga Inicial (${instCount} parcelas pagas)` : 'Parcelas Anteriores (Carga Inicial)';
             badge = 'Carga Inicial';
             details = instCount > 0
-                ? `${instCount} parcelas quitadas no carnê antes da migração para o sistema.`
-                : 'Parcelas quitadas no carnê antes da migração para o sistema.';
+                ? `${instCount} parcelas quitadas no carnê físico antes da migração para o sistema.`
+                : 'Parcelas quitadas no carnê físico antes da migração para o sistema.';
         } else if (isCreditOnlyAV) {
             type = 'credit';
-            title = 'Adiantamento de Valores (Crédito)';
-            badge = 'Crédito em Haver';
+            title = `AV de R$ ${amt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Crédito em Haver)`;
+            badge = 'Crédito Guardado';
             details = 'Adiantamento guardado como saldo de crédito do cliente para futuras parcelas.';
         } else if (newBal <= 0.01 && (prinPaid > 0 || amt >= prevBal)) {
             type = 'full';
-            title = 'Quitação do Empréstimo';
-            badge = 'Quitação';
+            title = 'Quitação Total do Empréstimo';
+            badge = 'Quitado';
             details = 'Contrato 100% quitado e finalizado.';
         } else if (prinPaid <= 0.01 && intPaid > 0) {
             type = 'renew';
-            title = 'Renovação de Juros';
-            badge = 'Renovação';
-            details = 'Pagamento de juros do ciclo. Vencimento estendido.';
+            title = 'Pagou Juros do Mês (Renovação)';
+            badge = 'Juros Pagos';
+            details = 'Juros do ciclo quitados. Vencimento estendido para o próximo mês.';
         } else if (prinPaid > 0) {
+            // Em empréstimos parcelados, cada parcela paga já é listada com precisão em paidInstallments logo abaixo
+            // Ignoramos aqui para evitar duplicidade (AV de R$ 35 + Parcela Paga)
+            if (!isMensal && !isAluguel) {
+                return;
+            }
             type = 'amortization';
-            title = 'Amortização de Capital (AV)';
-            badge = 'Amortização';
-            details = `Capital próprio abatido em R$ ${prinPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`;
+            title = `AV de R$ ${prinPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            badge = 'AV / Abatimento';
+            details = `Abatimento de R$ ${prinPaid.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} direto no saldo devedor.`;
         }
 
         timelineEvents.push({
@@ -1878,41 +1980,45 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
         });
     });
 
-    // Se for empréstimo parcelado (Diária, Semanal, Quinzenal), calcular parcelas pagas no sistema
+    // Se for empréstimo parcelado (Diária, Semanal, Quinzenal), listar cada parcela paga individualmente
     if (!isMensal && !isAluguel) {
         const paidInstallments = installmentsList.filter(i => i.status === 'paid');
-        const systemPaidCount = paidInstallments.length - importedPaidCount;
-        if (systemPaidCount > 0) {
-            const instVal = Number(loan.installment_value) || 0;
-            const systemPaidTotal = systemPaidCount * instVal;
-            const baseBefore = totalDebt - importedPaidAmount;
-            const baseAfter = Number(loan.balance);
+        const storedDates = getStoredPaidDates(loan.id);
+        const instVal = Number(loan.installment_value) || 0;
 
-            const storedDates = getStoredPaidDates(loan.id);
-            const lastPaidInstNumber = paidInstallments[paidInstallments.length - 1]?.number;
-            const lastDateISO = lastPaidInstNumber ? storedDates[lastPaidInstNumber] : null;
-            const eventDate = lastDateISO ? new Date(lastDateISO) : (paidInstallments[paidInstallments.length - 1]?.date || new Date());
+        paidInstallments.forEach((inst, index) => {
+            const isImported = index < importedPaidCount;
+            if (!isImported) {
+                const specificISO = storedDates[inst.number];
+                let paymentDate: Date;
+                if (specificISO) {
+                    paymentDate = new Date(specificISO);
+                } else if (inst.paidAt) {
+                    paymentDate = inst.paidAt;
+                } else {
+                    paymentDate = inst.originalDate || inst.date;
+                }
 
-            const startRange = importedPaidCount + 1;
-            const endRange = paidInstallments.length;
-            const rangeText = startRange === endRange ? `${startRange}ª parcela` : `${startRange}ª a ${endRange}ª`;
+                const balAfter = Math.max(0, totalDebt - (inst.number * instVal));
+                const balBefore = balAfter + inst.value;
 
-            timelineEvents.push({
-                id: 'system-paid-installments',
-                date: eventDate,
-                dateFormatted: eventDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-                type: 'amortization',
-                title: `${systemPaidCount}x Parcela(s) Liquidada(s) (${rangeText})`,
-                badge: 'Parcelas',
-                amount: systemPaidTotal,
-                interestPaid: 0,
-                principalPaid: systemPaidTotal,
-                finePaid: 0,
-                previousBalance: baseBefore,
-                newBalance: baseAfter,
-                details: `Recebimento de ${systemPaidCount} parcela(s) no sistema via carnê.`
-            });
-        }
+                timelineEvents.push({
+                    id: `paid-inst-${inst.number}`,
+                    date: paymentDate,
+                    dateFormatted: paymentDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                    type: 'installment',
+                    title: `Parcela #${String(inst.number).padStart(2, '0')} Paga`,
+                    badge: 'Parcela',
+                    amount: inst.value,
+                    interestPaid: 0,
+                    principalPaid: inst.value,
+                    finePaid: 0,
+                    previousBalance: balBefore,
+                    newBalance: balAfter,
+                    details: `Pagamento da parcela #${String(inst.number).padStart(2, '0')} confirmado no caixa.`
+                });
+            }
+        });
     }
 
     if (loan.created_at) {
@@ -1923,7 +2029,7 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
             date: startDate,
             dateFormatted: startDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }),
             type: 'start',
-            title: 'Contrato Criado',
+            title: 'Empréstimo Concedido',
             badge: 'Início',
             amount: originalCapital,
             interestPaid: 0,
@@ -1935,7 +2041,11 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                 : isMensal
                     ? (Number(loan.installment_value) || (originalCapital * (1 + (Number(loan.interest_rate) || 0) / 100)))
                     : totalDebt,
-            details: `Empréstimo concedido • Taxa de ${loan.interest_rate}% • ${loan.frequency}`
+            details: isAluguel
+                ? `Aluguel de Dinheiro concedido • Capital de R$ ${originalCapital.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : isMensal
+                    ? `Empréstimo mensal concedido • Capital de R$ ${originalCapital.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} a ${loan.interest_rate}% a.m.`
+                    : `Empréstimo concedido • Capital de R$ ${originalCapital.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} em ${loan.installments}x de R$ ${(loan.installment_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${loan.frequency})`
         });
     }
 
@@ -1990,34 +2100,28 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
 
                         {timelineEvents.map((event, idx) => (
                             <div key={event.id || idx} className="relative flex items-start gap-3.5 group">
-                                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10 border ${event.type === 'renew'
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10 border ${event.type === 'renew' || event.type === 'full' || event.type === 'installment'
                                     ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-400'
                                     : event.type === 'amortization'
                                         ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-400'
-                                        : event.type === 'full'
-                                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-400'
-                                            : event.type === 'credit'
-                                                ? 'bg-purple-50 border-purple-200 text-purple-700 dark:bg-purple-950/40 dark:border-purple-800 dark:text-purple-400'
-                                                : 'bg-gray-100 border-gray-200 text-gray-700 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300'
+                                        : event.type === 'credit'
+                                            ? 'bg-purple-50 border-purple-200 text-purple-700 dark:bg-purple-950/40 dark:border-purple-800 dark:text-purple-400'
+                                            : 'bg-gray-100 border-gray-200 text-gray-700 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300'
                                     }`}>
                                     {event.type === 'renew' ? <RefreshCw className="w-3 h-3" /> :
-                                        event.type === 'amortization' ? <TrendingDown className="w-3 h-3" /> :
-                                            event.type === 'full' ? <CheckCircle2 className="w-3 h-3" /> :
-                                                event.type === 'credit' ? <Wallet className="w-3 h-3" /> :
-                                                    <Calendar className="w-3 h-3" />}
+                                        event.type === 'installment' ? <CheckCircle2 className="w-3 h-3" /> :
+                                            event.type === 'amortization' ? <TrendingDown className="w-3 h-3" /> :
+                                                event.type === 'full' ? <CheckCircle2 className="w-3 h-3" /> :
+                                                    event.type === 'credit' ? <Wallet className="w-3 h-3" /> :
+                                                        <Calendar className="w-3 h-3" />}
                                 </div>
 
                                 <div className="flex-1 bg-gray-50/70 dark:bg-gray-800/40 rounded-2xl p-4 border border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700 transition-colors">
-                                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs font-bold text-gray-900 dark:text-white">
-                                                {event.title}
-                                            </span>
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600">
-                                                {event.badge}
-                                            </span>
-                                        </div>
-                                        <span className="text-[11px] font-medium text-gray-400">
+                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                        <h4 className="text-xs font-bold text-gray-900 dark:text-white">
+                                            {event.title}
+                                        </h4>
+                                        <span className="text-[11px] font-medium text-gray-400 shrink-0">
                                             {event.dateFormatted}
                                         </span>
                                     </div>
@@ -2073,7 +2177,6 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
     const totalCount = installmentsList.length;
 
     // Determine display status based on installments
-    const isRenegotiation = isLoanEligibleForRenegotiation(loan, fines);
     const isLate = installmentsList.some(i => i.status === 'late');
     const displayStatus = isRenegotiation ? 'renegotiation' : (isLate && loan.status !== 'paid' ? 'late' : loan.status);
 
@@ -2598,17 +2701,38 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                         </span>
                                     </button>
                                 ) : (
-                                    <button
-                                        onClick={() => setShowDeleteModal(true)}
-                                        className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-red-50/50 dark:bg-red-900/10 border border-red-100 dark:border-red-900 transition-all active:scale-[0.96]"
-                                    >
-                                        <div className="w-8 h-8 rounded-xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
-                                            <Trash2 className="w-4 h-4 text-red-500" />
-                                        </div>
-                                        <span className="text-[10px] font-black uppercase tracking-widest text-red-600 text-center leading-tight">
-                                            Excluir<br />Empréstimo
-                                        </span>
-                                    </button>
+                                    <>
+                                        {loan.frequency === 'Diária' && (
+                                            <button
+                                                onClick={handleOpenRenegotiation}
+                                                className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] border transition-all active:scale-[0.96] ${isRenegotiation
+                                                        ? 'bg-purple-50/60 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-400 shadow-sm'
+                                                        : 'bg-gray-50/80 dark:bg-zinc-850 border-gray-200 dark:border-zinc-800 text-gray-400 dark:text-zinc-500 opacity-60'
+                                                    }`}
+                                            >
+                                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isRenegotiation
+                                                        ? 'bg-purple-100 dark:bg-purple-900/30'
+                                                        : 'bg-gray-100 dark:bg-zinc-800'
+                                                    }`}>
+                                                    <RefreshCw className="w-4 h-4" />
+                                                </div>
+                                                <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                                                    Proposta de<br />Renegociação
+                                                </span>
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => setShowDeleteModal(true)}
+                                            className="flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] bg-red-50/50 dark:bg-red-900/10 border border-red-100 dark:border-red-900 transition-all active:scale-[0.96]"
+                                        >
+                                            <div className="w-8 h-8 rounded-xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
+                                                <Trash2 className="w-4 h-4 text-red-500" />
+                                            </div>
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-red-600 text-center leading-tight">
+                                                Excluir<br />Empréstimo
+                                            </span>
+                                        </button>
+                                    </>
                                 )}
                             </div>
                         )}
@@ -3001,18 +3125,40 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                                             <ChevronRight className="w-4 h-4 opacity-60" />
                                         </button>
                                     ) : (
-                                        <button
-                                            onClick={() => setShowDeleteModal(true)}
-                                            className="w-full py-3 px-4 rounded-2xl bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100/60 text-red-600 dark:text-red-400 font-bold text-xs border border-red-100 dark:border-red-900/30 transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer"
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-7 h-7 rounded-xl bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
-                                                    <Trash2 className="w-4 h-4 text-red-500" />
+                                        <>
+                                            {loan.frequency === 'Diária' && (
+                                                <button
+                                                    onClick={handleOpenRenegotiation}
+                                                    className={`w-full py-3 px-4 rounded-2xl font-bold text-xs border transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer ${isRenegotiation
+                                                            ? 'bg-purple-50/50 dark:bg-purple-950/20 hover:bg-purple-100/60 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800/40 shadow-2xs'
+                                                            : 'bg-gray-50/80 dark:bg-zinc-850 text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-800 opacity-60'
+                                                        }`}
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center ${isRenegotiation
+                                                                ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400'
+                                                                : 'bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500'
+                                                            }`}>
+                                                            <RefreshCw className="w-4 h-4" />
+                                                        </div>
+                                                        <span>Proposta de Renegociação</span>
+                                                    </div>
+                                                    <ChevronRight className="w-4 h-4 opacity-60" />
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => setShowDeleteModal(true)}
+                                                className="w-full py-3 px-4 rounded-2xl bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100/60 text-red-600 dark:text-red-400 font-bold text-xs border border-red-100 dark:border-red-900/30 transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer"
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-7 h-7 rounded-xl bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
+                                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                                    </div>
+                                                    <span>Excluir este Empréstimo</span>
                                                 </div>
-                                                <span>Excluir este Empréstimo</span>
-                                            </div>
-                                            <ChevronRight className="w-4 h-4 opacity-60" />
-                                        </button>
+                                                <ChevronRight className="w-4 h-4 opacity-60" />
+                                            </button>
+                                        </>
                                     )}
                                 </div>
                             </div>
@@ -4873,6 +5019,119 @@ export const LoanDetails: React.FC<LoanDetailsProps> = ({ loanId, onBack, onNewL
                         ) : (
                             <p className="text-sm text-red-500 text-center py-6">Erro ao gerar link. Tente novamente.</p>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* Renegotiation Proposal Modal */}
+            {showRenegotiateModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowRenegotiateModal(false)}></div>
+                    <div className="relative bg-white dark:bg-zinc-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-gray-100 dark:border-zinc-800 animate-in fade-in zoom-in duration-150">
+                        {/* Header */}
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 className="text-base font-bold text-gray-900 dark:text-white">Renegociação</h3>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                    {loan.client?.name || 'Cliente'} • #{loan.id.substring(0, 6)}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setShowRenegotiateModal(false)}
+                                className="p-1 -mr-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        {/* Saldo devedor limpo */}
+                        <div className="flex items-baseline justify-between py-3 border-y border-gray-100 dark:border-zinc-800 mb-3">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">Saldo a negociar</span>
+                            <div className="text-right">
+                                <span className="text-lg font-bold text-gray-900 dark:text-white">
+                                    R$ {currentDebtForRenegotiation.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                                <span className="text-[11px] text-gray-400 block mt-0.5">
+                                    Original: {originalInstCount}x • {effectiveInterestRate}%
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Duas opções em linhas limpas (sem caixas fechadas) */}
+                        <div className="space-y-4 my-4">
+                            {/* Opção 1 */}
+                            <div>
+                                <div className="flex justify-between items-baseline mb-0.5">
+                                    <span className="text-base font-bold text-gray-900 dark:text-white">
+                                        {opt1Count}x de R$ {opt1InstValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                                        Total: R$ {opt1Total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                                <span className="text-xs text-gray-400">
+                                    Prazo integral mantido ({opt1Rate}% juros)
+                                </span>
+                            </div>
+
+                            <div className="h-px bg-gray-100 dark:bg-zinc-800"></div>
+
+                            {/* Opção 2 */}
+                            <div>
+                                <div className="flex justify-between items-baseline mb-0.5">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-base font-bold text-gray-900 dark:text-white">
+                                            {opt2Count}x de R$ {opt2InstValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded">
+                                            -50% juros
+                                        </span>
+                                    </div>
+                                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                                        Total: R$ {opt2Total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                                <span className="text-xs text-gray-400">
+                                    Metade do prazo ({opt2Rate}% juros com desconto)
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Botões de Ação */}
+                        <div className="space-y-2 pt-2">
+                            <button
+                                onClick={() => openWhatsApp(loan.client?.phone || '', fullProposalWhatsAppText)}
+                                className="w-full py-3 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-2 transition-all active:scale-[0.99] shadow-sm cursor-pointer"
+                            >
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                                </svg>
+                                <span>Enviar no WhatsApp</span>
+                            </button>
+
+                            <button
+                                onClick={() => copyProposalText(fullProposalWhatsAppText, () => {
+                                    setRenegotiateCopiedAll(true);
+                                    setTimeout(() => setRenegotiateCopiedAll(false), 2000);
+                                })}
+                                className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border ${renegotiateCopiedAll
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800'
+                                        : 'bg-gray-50 dark:bg-zinc-800 text-gray-700 dark:text-zinc-200 border-gray-200 dark:border-zinc-700 hover:bg-gray-100 dark:hover:bg-zinc-700'
+                                    }`}
+                            >
+                                {renegotiateCopiedAll ? (
+                                    <>
+                                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                        <span>Proposta copiada</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Copy className="w-3.5 h-3.5 text-gray-400" />
+                                        <span>Copiar proposta</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

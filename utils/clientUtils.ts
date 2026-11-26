@@ -99,11 +99,11 @@ export const isMissingColumnError = (error: any): boolean => {
  */
 export const executeWithClientColumnsFallback = async <T extends Record<string, any>>(
   payload: T,
-  runner: (cleanPayload: Record<string, any>) => Promise<{ error: any }>
-): Promise<{ error: any; usedFallback: boolean }> => {
+  runner: (cleanPayload: Record<string, any>) => Promise<{ data?: any; error: any }>
+): Promise<{ data?: any; error: any; usedFallback: boolean }> => {
   const firstResult = await runner(payload);
   if (!firstResult.error || !isMissingColumnError(firstResult.error)) {
-    return { error: firstResult.error, usedFallback: false };
+    return { data: firstResult.data, error: firstResult.error, usedFallback: false };
   }
 
   console.warn(
@@ -111,6 +111,6 @@ export const executeWithClientColumnsFallback = async <T extends Record<string, 
   );
   const { neighborhood: _neighborhood, additional_contacts: _additionalContacts, ...legacyPayload } = payload;
   const fallbackResult = await runner(legacyPayload);
-  return { error: fallbackResult.error, usedFallback: !fallbackResult.error };
+  return { data: fallbackResult.data, error: fallbackResult.error, usedFallback: !fallbackResult.error };
 };
 

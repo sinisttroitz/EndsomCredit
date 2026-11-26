@@ -318,10 +318,22 @@ const App: React.FC = () => {
         />;
       case 'new-loan':
         return <NewLoan
-          onBack={() => setCurrentView('dashboard')}
-          onSuccess={() => {
+          onBack={() => {
+            if (previousView === 'client-details') {
+              setCurrentView('client-details');
+              setPreviousView(null);
+            } else {
+              setCurrentView('loans');
+            }
+          }}
+          onSuccess={(newLoanId) => {
             setNewLoanInitialData(null);
-            setCurrentView('loans');
+            if (newLoanId) {
+              setSelectedLoanId(newLoanId);
+              setCurrentView('loan-details');
+            } else {
+              setCurrentView('loans');
+            }
           }}
           preSelectedClientId={selectedClientId}
           initialData={newLoanInitialData}
@@ -329,7 +341,14 @@ const App: React.FC = () => {
       case 'new-client':
         return <NewClient
           onBack={() => setCurrentView('clients')}
-          onSuccess={() => setCurrentView('clients')}
+          onSuccess={(newClientId) => {
+            if (newClientId) {
+              setSelectedClientId(newClientId);
+              setCurrentView('client-details');
+            } else {
+              setCurrentView('clients');
+            }
+          }}
         />;
       case 'client-details':
         return <ClientDetails

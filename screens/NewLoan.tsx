@@ -7,7 +7,7 @@ import { matchesClientSearch } from '../utils/searchUtils';
 
 interface NewLoanProps {
   onBack: () => void;
-  onSuccess: () => void;
+  onSuccess: (newLoanId?: string) => void;
   preSelectedClientId: string | null;
   initialData?: {
     amount?: number;
@@ -188,7 +188,7 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
         ? (principal > 0 ? Number(((dailyFee / principal) * 100).toFixed(2)) : 0)
         : rate;
 
-      const { error } = await supabase.from('loans').insert([{
+      const { data: insertedLoan, error } = await supabase.from('loans').insert([{
         client_id: clientId,
         user_id: user.id,
         amount: principal,
@@ -207,10 +207,10 @@ export const NewLoan: React.FC<NewLoanProps> = ({ onBack, onSuccess, preSelected
         progress: 0,
         amount_paid: 0,
         total_interest_paid: 0
-      }]);
+      }]).select().single();
 
       if (error) throw error;
-      onSuccess();
+      onSuccess(insertedLoan?.id);
     } catch (e) {
       console.error(e);
       setAlertModal({

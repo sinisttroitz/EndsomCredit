@@ -5,7 +5,7 @@ import { compressImage } from '@/utils/imageUtils';
 
 interface NewClientProps {
     onBack: () => void;
-    onSuccess: () => void;
+    onSuccess: (newClientId?: string) => void;
 }
 
 import { ClientContact } from '../types';
@@ -346,7 +346,7 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
             }
 
             const cleanAdditionalContacts = sanitizeAdditionalContacts(additionalContacts);
-            const { error: insertError } = await executeWithClientColumnsFallback(
+            const { data: insertedClient, error: insertError } = await executeWithClientColumnsFallback(
                 {
                     name,
                     cpf,
@@ -366,11 +366,11 @@ export const NewClient: React.FC<NewClientProps> = ({ onBack, onSuccess }) => {
                     avatar_url: avatarUrl,
                     documents: documentUrls,
                 },
-                async (payload) => await supabase.from('clients').insert([payload])
+                async (payload) => await supabase.from('clients').insert([payload]).select().single()
             );
 
             if (insertError) throw insertError;
-            onSuccess();
+            onSuccess(insertedClient?.id);
         } catch (err: any) {
             setError(err.message || "Erro ao salvar.");
         } finally {

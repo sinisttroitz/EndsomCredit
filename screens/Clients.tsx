@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, SlidersHorizontal, ChevronRight, RefreshCw, Plus, Filter, MoreVertical, Mail, Phone, MessageSquare, MapPin, X, ChevronLeft, Calendar as CalendarIcon, DollarSign, User, MessageCircle, CreditCard, FileText, ExternalLink, Bell, Link2, UserPlus, Check, XCircle, Copy, Share2, Eye, Clock } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Client, Loan, ClientRegistration } from '../types';
@@ -27,7 +27,13 @@ interface ExtendedClient extends Client {
 }
 
 export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, onNewLoan, onLoanSelect }) => {
-    const [filter, setFilter] = useState<'all' | 'active' | 'late'>('all');
+    const [filter, setFilter] = useState<'all' | 'active' | 'late'>(() => {
+        return (sessionStorage.getItem('last_clients_filter') as any) || 'all';
+    });
+    const handleFilterChange = (newFilter: 'all' | 'active' | 'late') => {
+        setFilter(newFilter);
+        sessionStorage.setItem('last_clients_filter', newFilter);
+    };
     const [clients, setClients] = useState<ExtendedClient[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isSearching, setIsSearching] = useState(false);
@@ -51,6 +57,22 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
         fetchClients();
         loadPendingRegistrations();
     }, []);
+
+    useEffect(() => {
+        if (!loading && clients.length > 0) {
+            const lastId = sessionStorage.getItem('last_viewed_client_id');
+            if (lastId) {
+                const timer = setTimeout(() => {
+                    const el = document.getElementById(`client-${lastId}`);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                    sessionStorage.removeItem('last_viewed_client_id');
+                }, 120);
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [loading, clients]);
 
     const loadPendingRegistrations = async () => {
         const { data: { user } } = await supabase.auth.getUser();
@@ -351,19 +373,21 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
         }
     };
 
-    const filteredClients = clients.filter(client => {
-        let matchesFilter = true;
-        if (filter === 'late') {
-            matchesFilter = (client as any).isLate;
-        } else if (filter === 'active') {
-            matchesFilter = client.status === 'active' && !(client as any).isLate;
-        } else if (filter !== 'all') {
-            matchesFilter = client.status === filter;
-        }
+    const filteredClients = useMemo(() => {
+        return clients.filter(client => {
+            let matchesFilter = true;
+            if (filter === 'late') {
+                matchesFilter = (client as any).isLate;
+            } else if (filter === 'active') {
+                matchesFilter = client.status === 'active' && !(client as any).isLate;
+            } else if (filter !== 'all') {
+                matchesFilter = client.status === filter;
+            }
 
-        const matchesSearch = matchesClientSearch(client, searchTerm);
-        return matchesFilter && matchesSearch;
-    });
+            const matchesSearch = matchesClientSearch(client, searchTerm);
+            return matchesFilter && matchesSearch;
+        }).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' }));
+    }, [clients, filter, searchTerm]);
 
     const formatDate = (dateString?: string) => {
         if (!dateString) return 'N/A';
@@ -417,19 +441,19 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                 <div className="px-6 mt-6 mb-2">
                     <div className="bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl flex items-center shadow-inner">
                         <button
-                            onClick={() => setFilter('all')}
+                            onClick={() => handleFilterChange('all')}
                             className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-wider ${filter === 'all' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
                         >
                             Todos
                         </button>
                         <button
-                            onClick={() => setFilter('active')}
+                            onClick={() => handleFilterChange('active')}
                             className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-wider ${filter === 'active' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
                         >
                             Ativos
                         </button>
                         <button
-                            onClick={() => setFilter('late')}
+                            onClick={() => handleFilterChange('late')}
                             className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all duration-200 uppercase tracking-wider ${filter === 'late' ? 'bg-gray-900 text-white shadow-lg dark:bg-white dark:text-gray-900' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 tracking-tight'}`}
                         >
                             Em Atraso
@@ -481,8 +505,12 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                             const isLate = (client as any).isLate;
                             return (
                                 <div
+                                    id={`client-${client.id}`}
                                     key={client.id}
-                                    onClick={() => onClientSelect(client.id)}
+                                    onClick={() => {
+                                        sessionStorage.setItem('last_viewed_client_id', client.id);
+                                        onClientSelect(client.id);
+                                    }}
                                     className="bg-white dark:bg-zinc-900 rounded-[15px] p-3 flex items-center shadow-lg hover:shadow-xl transition-all cursor-pointer active:scale-[0.98]"
                                 >
                                     {/* Avatar */}
@@ -581,21 +609,21 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                         <div className="max-w-[1400px] mx-auto flex items-center justify-between">
                             <div className="flex items-center gap-8">
                                 <button
-                                    onClick={() => setFilter('all')}
+                                    onClick={() => handleFilterChange('all')}
                                     className={`py-6 text-[11px] font-black uppercase tracking-[0.2em] transition-all relative ${filter === 'all' ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
                                 >
                                     Todos
                                     {filter === 'all' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-900 dark:bg-white rounded-full"></div>}
                                 </button>
                                 <button
-                                    onClick={() => setFilter('active')}
+                                    onClick={() => handleFilterChange('active')}
                                     className={`py-6 text-[11px] font-black uppercase tracking-[0.2em] transition-all relative ${filter === 'active' ? 'text-gray-900 dark:text-white' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
                                 >
                                     Ativos
                                     {filter === 'active' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-900 dark:bg-white rounded-full"></div>}
                                 </button>
                                 <button
-                                    onClick={() => setFilter('late')}
+                                    onClick={() => handleFilterChange('late')}
                                     className={`py-6 text-[11px] font-black uppercase tracking-[0.2em] transition-all relative ${filter === 'late' ? 'text-rose-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}
                                 >
                                     Em Atraso
@@ -617,8 +645,12 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                 <div className="space-y-3">
                                     {filteredClients.map((client) => (
                                         <div
+                                            id={`client-${client.id}`}
                                             key={client.id}
-                                            onClick={() => setSelectedClientDesktop(client)}
+                                            onClick={() => {
+                                                setSelectedClientDesktop(client);
+                                                sessionStorage.setItem('last_viewed_client_id', client.id);
+                                            }}
                                             className={`group bg-white dark:bg-card-dark rounded-2xl border overflow-hidden cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 flex items-center gap-5 p-5 ${selectedClientDesktop?.id === client.id
                                                     ? 'border-primary shadow-md shadow-primary/10 ring-1 ring-primary/20'
                                                     : 'border-gray-100 dark:border-gray-800 shadow-sm hover:border-gray-200 dark:hover:border-gray-700'
@@ -881,7 +913,10 @@ export const Clients: React.FC<ClientsProps> = ({ onClientSelect, onEditClient, 
                                 Novo Empréstimo
                             </button>
                             <button
-                                onClick={() => onClientSelect(selectedClientDesktop.id)}
+                                onClick={() => {
+                                    sessionStorage.setItem('last_viewed_client_id', selectedClientDesktop.id);
+                                    onClientSelect(selectedClientDesktop.id);
+                                }}
                                 className="w-full py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-700 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
                             >
                                 <User className="w-3.5 h-3.5" />
