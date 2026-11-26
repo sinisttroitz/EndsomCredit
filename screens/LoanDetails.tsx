@@ -2706,13 +2706,13 @@ Opção 2: ${opt2Count} parcelas de R$ ${opt2InstValue.toLocaleString('pt-BR', {
                                             <button
                                                 onClick={handleOpenRenegotiation}
                                                 className={`flex flex-col items-center justify-center gap-2 p-3.5 rounded-[24px] border transition-all active:scale-[0.96] ${isRenegotiation
-                                                        ? 'bg-purple-50/60 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-400 shadow-sm'
-                                                        : 'bg-gray-50/80 dark:bg-zinc-850 border-gray-200 dark:border-zinc-800 text-gray-400 dark:text-zinc-500 opacity-60'
+                                                    ? 'bg-purple-50/60 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-400 shadow-sm'
+                                                    : 'bg-gray-50/80 dark:bg-zinc-850 border-gray-200 dark:border-zinc-800 text-gray-400 dark:text-zinc-500 opacity-60'
                                                     }`}
                                             >
                                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isRenegotiation
-                                                        ? 'bg-purple-100 dark:bg-purple-900/30'
-                                                        : 'bg-gray-100 dark:bg-zinc-800'
+                                                    ? 'bg-purple-100 dark:bg-purple-900/30'
+                                                    : 'bg-gray-100 dark:bg-zinc-800'
                                                     }`}>
                                                     <RefreshCw className="w-4 h-4" />
                                                 </div>
@@ -3130,14 +3130,14 @@ Opção 2: ${opt2Count} parcelas de R$ ${opt2InstValue.toLocaleString('pt-BR', {
                                                 <button
                                                     onClick={handleOpenRenegotiation}
                                                     className={`w-full py-3 px-4 rounded-2xl font-bold text-xs border transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer ${isRenegotiation
-                                                            ? 'bg-purple-50/50 dark:bg-purple-950/20 hover:bg-purple-100/60 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800/40 shadow-2xs'
-                                                            : 'bg-gray-50/80 dark:bg-zinc-850 text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-800 opacity-60'
+                                                        ? 'bg-purple-50/50 dark:bg-purple-950/20 hover:bg-purple-100/60 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800/40 shadow-2xs'
+                                                        : 'bg-gray-50/80 dark:bg-zinc-850 text-gray-400 dark:text-zinc-500 border-gray-200 dark:border-zinc-800 opacity-60'
                                                         }`}
                                                 >
                                                     <div className="flex items-center gap-3">
                                                         <div className={`w-7 h-7 rounded-xl flex items-center justify-center ${isRenegotiation
-                                                                ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400'
-                                                                : 'bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500'
+                                                            ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400'
+                                                            : 'bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500'
                                                             }`}>
                                                             <RefreshCw className="w-4 h-4" />
                                                         </div>
@@ -5115,8 +5115,8 @@ Opção 2: ${opt2Count} parcelas de R$ ${opt2InstValue.toLocaleString('pt-BR', {
                                     setTimeout(() => setRenegotiateCopiedAll(false), 2000);
                                 })}
                                 className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border ${renegotiateCopiedAll
-                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800'
-                                        : 'bg-gray-50 dark:bg-zinc-800 text-gray-700 dark:text-zinc-200 border-gray-200 dark:border-zinc-700 hover:bg-gray-100 dark:hover:bg-zinc-700'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800'
+                                    : 'bg-gray-50 dark:bg-zinc-800 text-gray-700 dark:text-zinc-200 border-gray-200 dark:border-zinc-700 hover:bg-gray-100 dark:hover:bg-zinc-700'
                                     }`}
                             >
                                 {renegotiateCopiedAll ? (
